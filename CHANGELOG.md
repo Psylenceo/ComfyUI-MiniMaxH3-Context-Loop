@@ -5,6 +5,18 @@ this file records the detailed changes.
 
 ## Unreleased
 
+- Added a durable top-level handoff store (`handoff_state.py`, format
+  `h3_top_level_handoff_v1`) under
+  `output/h3_chains/<run_name>/orchestration/` for separate run-local
+  orchestration state. Records hold only lightweight identity values
+  (scene/clip, candidate ordinal/count, seed, revision/checkpoint SHA-256,
+  prompt ID, workflow fingerprint, status, attempt counters, timestamps);
+  tensors, models, and live object references are rejected, and nothing is
+  copied into the Plan. Writes are atomic (temp + fsync + replace) behind a
+  per-run lock, the claim primitive is exactly-once with bounded
+  release/retry, and corrupt or unknown records are preserved for manual
+  recovery instead of auto-queueing. Recursive execution behavior is
+  unchanged.
 - Fixed Loop Start's model-free preflight to receive the connected Tagged or
   legacy Scheduled reference registry. Valid prompt `@tags` now resolve during
   Loop Start validation without changing Plan JSON or rewriting prompts; the

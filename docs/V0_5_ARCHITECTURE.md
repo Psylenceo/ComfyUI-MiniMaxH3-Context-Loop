@@ -218,6 +218,34 @@ The server seeks and transcodes only the selected scene window to a cached
 low-resolution MP4; the comparison player offsets Guide windows past the
 incoming context that is removed from the delivered scene.
 
+## Durable handoff state
+
+Top-level job boundaries between heavyweight H3 prompts are tracked in a
+separate durable handoff store (`handoff_state.py`), never in the JSON Plan.
+Records are stored under
+`output/h3_chains/<run_name>/orchestration/<handoff_id>.json` with format
+`h3_top_level_handoff_v1` and hold only lightweight identity values:
+run name, scene number, start clip, candidate batch/ordinal/count, seed,
+source prompt ID, source revision and checkpoint SHA-256, workflow
+fingerprint, status, attempt counters, and timestamps. Tensors, models,
+conditioning, VAEs, CLIP, samplers, and live object references are rejected
+on write and on read, and prompt text, shots, references, or model settings
+are never copied in; the Plan stays authoritative for generation semantics.
+
+Allowed actions are `next_scene`, `next_candidate`, `await_review`,
+`complete`, and `manual_resume`. Statuses follow the machine
+`pending -> claimed -> queued -> consumed`, with `cancelled` and `failed`
+as terminal stops and `claimed -> pending` reserved for the bounded
+`release` retry path (`attempt` increments per claim and an exhausted
+`max_attempts` budget fails the record instead of retrying forever).
+
+Every update is written temp-file + flush + fsync + atomic replace behind a
+per-run lock, so the claim primitive is exactly-once: the first pending to
+claimed wins and duplicate terminal events or concurrent listeners never
+re-claim. Corrupt or unknown-version records raise, are listed with a
+corruption reason, and are never auto-queued, auto-repaired, or reverted;
+they are left exactly as found for manual recovery.
+
 ## Socket presentation rules
 
 The primary graph displays only generation-bearing connections. Status,
