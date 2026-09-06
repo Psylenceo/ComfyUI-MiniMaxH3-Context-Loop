@@ -17929,6 +17929,16 @@ class MiniMaxH3ChainLoopStart:
                                "or Run Manager. It replaces the repeated full "
                                "source_audio connection and stays lazy across "
                                "recursive scenes."}),
+                "tagged_references": (TAGGED_REFERENCE_TYPE, {
+                    "tooltip": "Optional active prompt-driven reference "
+                               "registry. Connect the same Tagged registry used "
+                               "by Ref2VA so Loop Start can validate prompt "
+                               "@tags before generation."}),
+                "reference_schedule": (REFERENCE_SCHEDULE_TYPE, {
+                    "tooltip": "Optional legacy scheduled reference registry. "
+                               "Connect the same schedule used by Scheduled "
+                               "Ref2VA; do not connect it together with "
+                               "tagged_references."}),
             },
             "hidden": {
                 "initial_state": (STATE_TYPE,),
@@ -17956,8 +17966,8 @@ class MiniMaxH3ChainLoopStart:
 
     def start(self, plan, start_clip, source_audio=None, scene_range="",
               verify_resume_history=True, external_context=None,
-              source_timeline=None,
-              initial_state=None):
+              source_timeline=None, tagged_references=None,
+              reference_schedule=None, initial_state=None):
         if initial_state is None:
             alternate = _alternate_take_descriptor(plan)
             if alternate is not None:
@@ -17976,7 +17986,9 @@ class MiniMaxH3ChainLoopStart:
                 prepared_plan, source_timeline=source_timeline,
                 source_audio=source_audio, start_clip=start_clip,
                 scene_range=scene_range,
-                verify_resume_history=verify_resume_history)
+                verify_resume_history=verify_resume_history,
+                tagged_references=tagged_references,
+                reference_schedule=reference_schedule)
             if not preflight["ok"]:
                 raise ValueError(_preflight_failure_text(preflight))
             for issue in preflight["warnings"]:

@@ -193,7 +193,11 @@ value, and whether regeneration is required.
 
 ## Preflight contract
 
-The same pure preflight implementation serves Loop Start and Plan Studio. It
+The same pure preflight implementation serves Loop Start, Chain Preflight, and
+Plan Studio. Connect the active Tagged reference registry (or the legacy
+Scheduled registry, but never both) to every preflight entry point used by the
+graph. Loop Start receives the registry as run-local graph input; references
+are not copied into the Plan and prompt `@tags` are not rewritten. Preflight
 runs before model-dependent sampling and reports:
 
 - resolved scene frame counts, durations, source windows, and overlap trims;

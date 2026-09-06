@@ -3,6 +3,14 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
+## Unreleased
+
+- Fixed Loop Start's model-free preflight to receive the connected Tagged or
+  legacy Scheduled reference registry. Valid prompt `@tags` now resolve during
+  Loop Start validation without changing Plan JSON or rewriting prompts; the
+  original optional socket order remains intact and the new sockets are
+  appended.
+
 ## v0.6.1 — Chapter output and authoring polish
 
 - Ported the standalone Prompt IDE's marker editing, context-aware completions,
