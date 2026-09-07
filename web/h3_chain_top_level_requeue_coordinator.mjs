@@ -13,6 +13,27 @@ export async function submitWithPromptIdentity({app, api}) {
     return promptId ? {kind: "accepted", promptId} : {kind: "uncertain", promptId: ""};
 }
 
+// Shared async cancellation boundary.  Browser wiring supplies the concrete
+// queue/checkpoint/workflow adapters; Node tests use deterministic fakes.
+export async function runRequeueLifecycle({current, waitSafe, cleanup, claim, submit, release}) {
+    current();
+    await waitSafe();
+    current();
+    await cleanup();
+    current();
+    const handoff = await claim();
+    let delivered = false;
+    try {
+        current();
+        const result = await submit();
+        delivered = true;
+        return result;
+    } catch (error) {
+        if (!delivered && error?.preDelivery !== false) await release(error);
+        throw error;
+    }
+}
+
 export function submissionFailure(error) {
     return Number(error?.status) >= 400 && Number(error?.status) < 500
         ? "rejected" : "uncertain";
