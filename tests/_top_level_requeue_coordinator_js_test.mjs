@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import {runRequeueLifecycle, selectAndClaim, resolveProjectRun} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
+import {runRequeueLifecycle, selectAndClaim, resolveProjectRun, createContinuationTracker} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
 import {matchingNextSceneHandoff} from "../web/h3_chain_top_level_requeue_core.mjs";
 
 function gate() { let resolve; return {promise: new Promise(r => { resolve = r; }), resolve}; }
@@ -44,4 +44,18 @@ const manager={comfyClass:"MiniMaxH3ProjectAssetManager",widgets:[{name:"run_nam
 const plan={widgets:[{name:"run_name",value:"stale-plan-name"}],inputs:[{name:"project_assets",link:1}],graph:{links:{1:{origin_id:2}},getNodeById:()=>manager}};
 assert.equal(resolveProjectRun(plan),"actual-run");
 assert.equal(resolveProjectRun({widgets:[{name:"run_name",value:"plain-run"}]}),"plain-run");
+const events=[];
+const failureTracker = createContinuationTracker({transition: async (...args) => events.push(args)});
+failureTracker.track("run-a", "handoff-a", "prompt-123");
+assert.equal(failureTracker.failed("prompt-999"), null);
+assert.equal(failureTracker.current().promptId, "prompt-123");
+assert.deepEqual(failureTracker.failed("prompt-123"), {runName:"run-a", handoffId:"handoff-a", promptId:"prompt-123"});
+assert.equal(failureTracker.current(), null);
+failureTracker.track("run-a", "handoff-a", "prompt-123");
+assert.equal(await failureTracker.started("prompt-999"), false);
+assert.equal(failureTracker.current().promptId, "prompt-123");
+assert.equal(await failureTracker.started("prompt-123"), true);
+assert.equal(failureTracker.current(), null);
+assert.equal(failureTracker.failed("prompt-123"), null);
+assert.equal(events.length, 1);
 console.log("top-level requeue coordinator lifecycle: ok");
