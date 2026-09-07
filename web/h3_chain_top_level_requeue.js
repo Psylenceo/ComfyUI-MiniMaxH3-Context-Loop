@@ -11,6 +11,7 @@ import {
     predecessorScene,
     resumeHint,
 } from "./h3_chain_top_level_requeue_core.mjs?v=0.6.5";
+import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.2";
 
 // Top-level scene requeue coordinator (M3, candidate_count = 1).
 //
@@ -45,7 +46,7 @@ const QUEUE_POLL_INTERVAL_MS = 500;
 const QUEUE_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_OBSERVED_PROMPTS = 100;
 
-let statusBox = null;
+let notifications = null;
 let pumpActive = false;
 let continuationWait = null; // {runName, handoffId} after queuePrompt
 const sceneRecords = new Map();   // prompt_id -> observed H3 scene record
@@ -117,44 +118,29 @@ function requeueIcon() {
     return svg;
 }
 
-function ensureStatus() {
-    if (statusBox) return statusBox;
-    if (!document.getElementById("h3-trq-style")) {
-        const style = document.createElement("style");
-        style.id = "h3-trq-style";
-        style.textContent = `
-            .h3trq-root { position:fixed; left:18px; bottom:76px; z-index:10020;
-                display:flex; align-items:flex-start; gap:7px; max-width:min(390px,calc(100vw - 36px));
-                padding:8px 12px; border:1px solid #4a4f5d; border-radius:9px;
-                background:#181a20ee; color:#d9dce5; box-shadow:0 3px 12px #0008;
-                font:12px/1.35 system-ui,sans-serif; box-sizing:border-box; }
-            .h3trq-root[hidden] { display:none; }
-            .h3trq-root .h3trq-icon { flex:none; width:15px; height:15px; margin-top:2px;
-                fill:none; stroke:currentColor; stroke-width:1.8;
-                stroke-linecap:round; stroke-linejoin:round; }
-            .h3trq-error { color:#ffd0bc; border-color:#a86148; }
-        `;
-        document.head.appendChild(style);
-    }
-    statusBox = document.createElement("div");
-    statusBox.className = "h3trq-root";
-    statusBox.setAttribute("role", "status");
-    statusBox.setAttribute("aria-live", "polite");
-    statusBox.hidden = true;
-    statusBox.append(requeueIcon(), document.createElement("span"));
-    document.body.append(statusBox);
-    return statusBox;
+function ensureNotifications() {
+    notifications ??= createNotificationStack({
+        anchorSelector: ".h3cr-root",
+    });
+    return notifications;
 }
 
-function showStatus(message, isError = false) {
-    const box = ensureStatus();
-    box.hidden = false;
-    box.className = isError ? "h3trq-root h3trq-error" : "h3trq-root";
-    box.lastElementChild.textContent = String(message);
+function showTransient(message) {
+    ensureNotifications().show("requeue-transient", message, "info");
 }
 
-function hideStatus() {
-    if (statusBox) statusBox.hidden = true;
+function showWarning(message) {
+    ensureNotifications().clear("requeue-transient");
+    ensureNotifications().show("requeue-warning", message, "warning");
+}
+
+function showError(message) {
+    ensureNotifications().clear("requeue-transient");
+    ensureNotifications().show("requeue-error", message, "error");
+}
+
+function clearNotifications() {
+    notifications?.clearAll();
 }
 
 function settingEnabled() {
@@ -188,7 +174,10 @@ function onExecuted(detail) {
     if (type === START_TYPE && continuationWait
         && !sceneRecords.has(promptId)) {
         // The first node of the continuation prompt executed: the claimed
-        // handoff is now genuinely consumed.
+        // handoff is now genuinely consumed. Clear the transient queueing
+        // notice here so the browser can actually render it long enough to
+        // verify the dedicated stack during the requeue window.
+        clearNotifications();
         const wait = continuationWait;
         continuationWait = null;
         void (async () => {
@@ -197,8 +186,8 @@ function onExecuted(detail) {
                     wait.runName, wait.handoffId, "consumed");
             } catch (error) {
                 // The scene is running; bookkeeping stays durable.
-                showStatus(`Marking the handoff consumed failed: `
-                    + `${error?.message || error}`, true);
+                showError(`Marking the handoff consumed failed: `
+                    + `${error?.message || error}`);
             }
         })();
     }
@@ -275,13 +264,11 @@ function onTerminalFailure(kind, detail) {
         // execution. The handoff deliberately stays queued: no auto-retry.
         const wait = continuationWait;
         continuationWait = null;
-        showStatus(
+        showError(
             `The requeued prompt for run "${wait.runName}" ended `
             + `${kind === "interrupted" ? "interrupted" : "with an error"} `
             + "before its scene started. The handoff stays queued; set Loop "
-            + `Start to the handoff scene and queue manually to resume.`,
-            true,
-        );
+            + `Start to the handoff scene and queue manually to resume.`);
     }
 }
 
@@ -365,17 +352,17 @@ async function processRequeue(record) {
         if (!record.runName) {
             throw new Error("The active H3 run_name is empty.");
         }
-        showStatus("Waiting for a safe queue state…");
+        showTransient("Waiting for a safe queue state…");
         await waitForSafeQueue();
         const delay = cleanupDelayMs(
             app.ui?.settings?.getSettingValue?.(DELAY_SETTING_ID));
         const remaining = delay - (Date.now() - startedAt);
         if (remaining > 0) {
-            showStatus(`Waiting for the cleanup interval… `
+            showTransient(`Waiting for the cleanup interval… `
                 + `${Math.ceil(remaining / 1000)}s`);
             await sleep(remaining);
         }
-        showStatus("Checking the workflow and predecessor checkpoint…");
+        showTransient("Checking the workflow and predecessor checkpoint…");
         const {startNode, runName} = requireVisibleWorkflow(record);
         const listResponse = await api.fetchApi(
             `${HANDOFF_API_BASE}/handoffs?run_name=${encodeURIComponent(runName)}`);
@@ -387,7 +374,7 @@ async function processRequeue(record) {
         if (!pending.length) {
             // Legacy recursion already handled this scene (or another client
             // already did). The backend is the source of truth: nothing to do.
-            hideStatus();
+            clearNotifications();
             return;
         }
         const handoff = pending[0];
@@ -409,7 +396,7 @@ async function processRequeue(record) {
                 }),
             });
         if (claimResponse.status === 409) {
-            showStatus("The handoff was already claimed; nothing was queued.");
+            showWarning("The handoff was already claimed; nothing was queued.");
             return;
         }
         if (!claimResponse.ok) {
@@ -432,7 +419,7 @@ async function processRequeue(record) {
                 rangeWidget.callback?.(resume.sceneRange);
             }
             startNode.graph?.setDirtyCanvas?.(true, true);
-            showStatus(
+            showTransient(
                 `Queueing scene ${resume.startClip} as a new top-level prompt…`);
             await app.queuePrompt(0, 1);
             queued = true;
@@ -442,8 +429,6 @@ async function processRequeue(record) {
             };
             await postHandoffTransition(
                 runName, handoff.handoff_id, "queued");
-            showStatus(
-                `Scene ${resume.startClip} queued as a new top-level prompt.`);
         } catch (error) {
             if (!queued) {
                 try {
@@ -464,12 +449,10 @@ async function processRequeue(record) {
             throw error;
         }
     } catch (error) {
-        showStatus(
+        showError(
             `Top-level requeue did not queue: ${error?.message || error} `
             + "The run's checkpoints are intact; set Loop Start to the "
-            + "handoff scene and queue the workflow manually.",
-            true,
-        );
+            + "handoff scene and queue the workflow manually.");
     }
 }
 
@@ -495,14 +478,12 @@ async function checkPendingHandoffs() {
         if (pending.length) {
             const resume = resumeHint(pending[0]);
             hintedRuns.add(runName);
-            showStatus(
+            showWarning(
                 `Pending H3 handoff for run "${runName}": scene `
                 + `${resume?.startClip ?? "?"} is resumable. Set Loop Start to `
                 + `scene ${resume?.startClip ?? "?"} and queue manually, or `
                 + "enable top-level auto requeue to let it claim after "
-                + "a terminal success. Nothing auto-runs on startup.",
-                true,
-            );
+                + "a terminal success. Nothing auto-runs on startup.");
         }
     } catch (_error) {
         // Server not ready yet; the next graph change retries.
@@ -522,7 +503,7 @@ app.registerExtension({
             type: "boolean",
             defaultValue: false,
             onChange() {
-                if (!settingEnabled()) hideStatus();
+                if (!settingEnabled()) clearNotifications();
             },
         });
         app.ui?.settings?.addSetting?.({

@@ -149,6 +149,14 @@ const source = fs.readFileSync(
 // Terminal-success-only trigger; never sampler completion.
 assert.match(source, /api\.addEventListener\("execution_success"/);
 assert.doesNotMatch(source, /MiniMaxH3H3Sample/);
+assert.match(source, /createNotificationStack\(/);
+assert.match(source, /anchorSelector:\s*"\.h3cr-root"/);
+assert.match(source, /showTransient\(/);
+assert.match(source, /showWarning\(/);
+assert.match(source, /showError\(/);
+assert.match(source, /clearNotifications\(/);
+assert.doesNotMatch(source, /left:18px/);
+assert.doesNotMatch(source, /Scene \$\{resume\.startClip\} queued as a new top-level prompt/);
 // Failure paths keep the handoff durable and never auto-retry.
 assert.match(source, /api\.addEventListener\("execution_interrupted"/);
 assert.match(source, /api\.addEventListener\("execution_error"/);
