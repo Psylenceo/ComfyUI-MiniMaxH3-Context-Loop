@@ -10,6 +10,30 @@ export function checkpointRevisionKey(scene, revision) {
     return `${Number(scene)}:${String(revision ?? "").toLowerCase()}`;
 }
 
+export const CHECKPOINT_STAGES = [
+    {id:"original", label:"Original"},
+    {id:"derope", label:"DeRoPE"},
+    {id:"latent_upscale", label:"Latent Upscale"},
+    {id:"pixel_upscale", label:"Pixel Upscale"},
+    {id:"other", label:"Other processing"},
+];
+
+export function checkpointStageVariants(payload, stage, original = null, range = null) {
+    const key = original ? checkpointRevisionKey(original.scene, original.revision) : null;
+    return (payload?.processing_variants ?? []).filter((item) => item.stage === stage
+        && (!range || (Number(item.scene) >= range.start && Number(item.scene) <= range.end))
+        && (!key || (item.originals ?? []).some((source) =>
+            checkpointRevisionKey(source.scene, source.revision) === key)));
+}
+
+export function checkpointVariantLatentStatus(record) {
+    if (!record?.latent_saved) return record?.context_steps > 0
+        ? "Continuation tail only — full latent not saved"
+        : "Not saved — preview/assembly only";
+    if (!record.ready) return "Saved latent unavailable — missing artifacts";
+    return `Full latent saved (${record.latent_layout || "unknown layout"}); not yet execution-validated`;
+}
+
 export function checkpointRevisionMap(payload) {
     return new Map((payload?.revisions ?? []).map((item) => [
         checkpointRevisionKey(item.scene, item.revision), item,
@@ -119,6 +143,21 @@ export function checkpointChapterBranchRows(payload, range) {
             - Number(left.revisions.at(-1)?.scene ?? 0));
 }
 
+// Resolve a whole branch, never use a previewed ancestor as an output range.
+// Shared ancestors are ambiguous unless the caller supplies the clicked row.
+export function checkpointOutputBranchTip(payload, selected, range = null, preferred = null) {
+    if (!selected || selected.take_kind === "editorial_alternate") return null;
+    const key = checkpointRevisionKey(selected.scene, selected.revision);
+    const rows = checkpointChapterBranchRows(payload, range).filter(branch =>
+        branch.revisions.some(item => checkpointRevisionKey(item.scene, item.revision) === key));
+    const tips = new Map(rows.map(branch => {
+        const tip = branch.revisions.at(-1);
+        return [checkpointRevisionKey(tip.scene, tip.revision), tip];
+    }));
+    const preferredKey = preferred ? checkpointRevisionKey(preferred.scene, preferred.revision) : null;
+    return tips.get(preferredKey) ?? tips.get(key) ?? (tips.size === 1 ? [...tips.values()][0] : null);
+}
+
 export function checkpointRevisionLineage(payload, selected, range = null) {
     const records = checkpointRevisionMap(payload);
     const start = Math.max(1, Number(range?.start) || 1);
@@ -218,6 +257,30 @@ export function checkpointOutputSelectionJson(current, payload, runName, selecte
     // Browsing or a new project-wide active tip must never move a local pin.
     return checkpointLocalSelection(current) ? current
         : checkpointSelectionJson(payload, runName, selected, range, outputScope);
+}
+
+export function checkpointDeropeSelectionJson(payload, runName, tip, variant, range = null, outputScope = "project") {
+    const base = JSON.parse(checkpointLocalSelectionJson(payload, runName, tip, range, outputScope));
+    if (variant?.stage !== "derope" || !variant.processing_branch) {
+        throw new Error("Select a DeRoPE take with an unambiguous saved branch. For a shared take, choose the desired branch's later take.");
+    }
+    const selected = new Set(base.lineage.filter(item => outputScope !== "chapter" || item.scene >= base.scope_start_scene)
+        .map(item => checkpointRevisionKey(item.scene, item.revision)));
+    const first = outputScope === "chapter" ? base.scope_start_scene : 1;
+    let used = 0;
+    for (const ref of variant.processing_branch.lineage) {
+        if (ref.scene < first || ref.scene > tip.scene) continue;
+        const saved = (payload.processing_variants ?? []).find(item => item.key === ref.metadata_path && item.checkpoint_sha256 === ref.checkpoint_sha256);
+        if (!saved || saved.stage !== "derope" || !saved.ready || !saved.latent_saved) {
+            throw new Error(`DeRoPE scene ${ref.scene} needs an available full latent. Save with save_latent enabled and Recovered AV connected, or explicitly use Original.`);
+        }
+        if (saved.profile_path !== variant.profile_path || !(saved.originals ?? []).some(item => selected.has(checkpointRevisionKey(item.scene, item.revision)))) {
+            throw new Error(`DeRoPE scene ${ref.scene} belongs to a different original branch.`);
+        }
+        used += 1;
+    }
+    if (!used) throw new Error("This DeRoPE branch has no scenes in the selected output scope.");
+    return JSON.stringify({...base, processing_source:{stage:"derope", profile_path:variant.profile_path, branch:variant.processing_branch}});
 }
 
 export function checkpointActivationMode(payload, selected, range = null) {

@@ -125,8 +125,15 @@ def _verified_source_manifest(value: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(
             "Checkpoint Upscale Adapter requires a selected lineage manifest "
             "from Checkpoint Manager.")
+    from .deferred_checkpoint_source import editorial_source_manifest
+    manifest = editorial_source_manifest(manifest, chain)
     segments = chain._validate_manifest(manifest)
-    chain.common_saved_resolution(segments, "Deferred upscale source")
+    if not manifest.get("processing_source"):
+        chain.common_saved_resolution(segments, "Deferred upscale source")
+    else:
+        for segment in segments:
+            if segment.get("processing_source"):
+                _validate_processed_latent_header(segment)
     if isinstance(manifest.get("prelude"), dict):
         raise ValueError(
             "Deferred upscale does not yet support an existing-video prelude. "
@@ -136,6 +143,12 @@ def _verified_source_manifest(value: dict[str, Any]) -> dict[str, Any]:
 
 def _source_hash(manifest: dict[str, Any]) -> str:
     return chain._fingerprint(manifest)
+
+
+def _source_geometry(source, compatibility):
+    if source.get("processing_source"):
+        return {key: int(source[key]) for key in ("width", "height")}
+    return chain.saved_resolution(source) or compatibility
 
 
 def _source_bounds(manifest: dict[str, Any]) -> tuple[int, int]:
@@ -459,8 +472,73 @@ def _derope_drift_continuation_video(video: Any, state: Any
     return output, prefix_steps, route
 
 
+def _validate_recovered_audio_shape(shape, batch, raw):
+    if (len(shape) != 4 or list(shape[:3]) != [batch, 32, 2] or shape[3] < 1 or
+            abs(shape[3] - raw / float(chain.FPS) * 40) > 2):
+        # Audio VAE padding can leave a sub-frame tail at its 40 Hz clock.
+        raise ValueError("Recovered DeRoPE audio latent must be [B,32,2,T] on the original RAW clock.")
+
+
+def _validate_processed_latent_header(source):
+    """Validate full recovered RAW latents without allocating their tensors."""
+    from safetensors import safe_open
+    raw = chain._validate_h3_length(source["raw_frames"], "DeRoPE RAW length")
+    expected = [24, (raw - 5) // 17 * 5 + 2,
+                int(source["height"]) // 16, int(source["width"]) // 16]
+    if any(int(source[key]) < 16 or int(source[key]) % 16 for key in ("width", "height")):
+        raise ValueError("DeRoPE source canvas must be aligned to the H3 VAE.")
+    with safe_open(chain._absolute_output_path(source["checkpoint"]),
+                   framework="pt", device="cpu") as saved:
+        keys = set(saved.keys())
+        layout = source.get("latent_layout")
+        video_key = "upscaled_video" if layout == "joint_av" else "upscaled_samples"
+        if (source.get("latent_saved") is not True or layout not in ("joint_av", "single") or
+                video_key not in keys):
+            raise ValueError("DeRoPE scene %s has no supported full recovered latent." % source["index"])
+        shape = saved.get_slice(video_key).get_shape()
+        if layout == "single" and shape == expected:
+            # Older single-stream saves accidentally unbound the batch axis.
+            # A four-dimensional single stream unambiguously represents B=1.
+            shape = [1, *shape]
+        if len(shape) != 5 or shape[0] < 1 or shape[1:] != expected:
+            raise ValueError(
+                "DeRoPE scene %s latent is %s, expected [B,%s] on its original RAW clock. "
+                "Save VAE Encode after Exact Recover, not the stretched pass-2 latent." %
+                (source["index"], shape, ",".join(map(str, expected))))
+        if layout == "joint_av":
+            audio = saved.get_slice("upscaled_audio").get_shape() if "upscaled_audio" in keys else []
+            _validate_recovered_audio_shape(audio, shape[0], raw)
+        elif source.get("audio_route") == "recovered de-rope audio":
+            raise ValueError(
+                "DeRoPE scene %s changed audio but saved video only. Connect recovered "
+                "audio_latent to Recovered AV and save again; original audio is not a substitute."
+                % source["index"])
+
+
 def _load_source_tensors(source: dict[str, Any],
                          keys: tuple[str, ...] | None = None) -> dict[str, Any]:
+    presentation = source.get("presentation_source")
+    if presentation and not source.get("processing_source"):
+        # Only the ALT's visual stream is used. Read base audio selectively so
+        # a second complete AV checkpoint never coexists just to preserve sound.
+        visual_keys = ("video", "denoised_video")
+        audio_keys = ("audio", "denoised_audio", "delivered_audio")
+        wanted = keys if keys is not None else visual_keys + audio_keys
+        picture = {key: value for key, value in source.items() if key != "presentation_source"}
+        result = _load_source_tensors(picture, tuple(key for key in wanted if key in visual_keys)) \
+            if any(key in visual_keys for key in wanted) else {}
+        if any(key in audio_keys for key in wanted):
+            requested_audio = [key for key in audio_keys if key in wanted]
+            if "audio" in wanted or "denoised_audio" in wanted:
+                requested_audio = list(dict.fromkeys([*requested_audio, "audio", "denoised_audio"]))
+            base = _load_source_tensors(presentation["original"], tuple(requested_audio))
+            clean_audio = base.get("denoised_audio", base.get("audio"))
+            for key in wanted:
+                if key in ("audio", "denoised_audio") and clean_audio is not None:
+                    result[key] = clean_audio
+                elif key == "delivered_audio" and key in base:
+                    result[key] = base[key]
+        return result
     if chain._st_load is None:
         raise RuntimeError("safetensors is required for deferred H3 upscaling.")
     checkpoint = chain._absolute_output_path(source["checkpoint"])
@@ -469,12 +547,31 @@ def _load_source_tensors(source: dict[str, Any],
         raise FileNotFoundError("Source H3 checkpoint is missing: %s" % checkpoint)
     if not expected or chain._file_sha256(checkpoint) != expected:
         raise ValueError("Source H3 checkpoint failed its SHA-256 integrity check.")
-    if keys is None:
+    processed = source.get("processing_source")
+    if keys is None and not processed:
         return chain._st_load(checkpoint)
     from safetensors import safe_open
     with safe_open(checkpoint, framework="pt", device="cpu") as saved:
         available = set(saved.keys())
-        return {key: saved.get_tensor(key) for key in keys if key in available}
+        if not processed:
+            return {key: saved.get_tensor(key) for key in keys if key in available}
+        mapping = {"video": "upscaled_video" if source["latent_layout"] == "joint_av"
+                   else "upscaled_samples", "audio": "upscaled_audio",
+                   "delivered_audio": "delivered_audio"}
+        wanted = keys if keys is not None else tuple(mapping)
+        result = {key: saved.get_tensor(mapping[key]) for key in wanted
+                  if key in mapping and mapping[key] in available}
+    if source["latent_layout"] == "single" and "video" in result and result["video"].ndim == 4:
+        result["video"] = result["video"].unsqueeze(0)
+    if "audio" in wanted and "audio" not in result:
+        # Video-only recovery preserves the exact original take's audio. Read
+        # only audio tensors, never load a second full video just to join AV.
+        original_audio = _load_source_tensors(processed["original"], ("denoised_audio", "audio"))
+        audio = original_audio.get("denoised_audio", original_audio.get("audio"))
+        if audio is None:
+            raise ValueError("Original DeRoPE source has no reusable audio latent.")
+        result["audio"] = audio
+    return result
 
 
 def _source_latent(tensors: dict[str, Any]) -> tuple[dict[str, Any], str]:
@@ -667,7 +764,7 @@ def _conditioning_from_tagged_upscale_override(
     scene = int(state["index"])
     scene_count = _source_scene_count(manifest)
     length = int(source.get("raw_frames", 0))
-    geometry = chain.saved_resolution(source) or compatibility
+    geometry = _source_geometry(source, compatibility)
     width = int(geometry.get("width", 0))
     height = int(geometry.get("height", 0))
     if target_video_latent is not None:
@@ -789,13 +886,16 @@ def _cpu_latent(latent: dict[str, Any] | None) -> dict[str, Any] | None:
     samples = latent.get("samples") if isinstance(latent, dict) else None
     if samples is None:
         raise ValueError("Upscale latent has no samples value.")
-    streams = chain._streams_from_latent(latent)
+    streams = ([samples] if chain.torch.is_tensor(samples)
+               else chain._streams_from_latent(latent))
     copied = [chain._tensor_cpu_clone(item) for item in streams]
     return {"samples": _packed_samples(copied)}
 
 
 def _latent_checkpoint_tensors(latent: dict[str, Any]) -> tuple[dict[str, Any], str]:
-    streams = chain._streams_from_latent(latent)
+    samples = latent.get("samples") if isinstance(latent, dict) else None
+    streams = ([samples] if chain.torch.is_tensor(samples)
+               else chain._streams_from_latent(latent))
     if not streams:
         raise ValueError("Upscale latent contains no tensor streams.")
     if len(streams) == 2:
@@ -871,6 +971,41 @@ def _load_previous_upscaled_context(
     return {"samples": context}, route
 
 
+def _upscale_source_contract(source: dict[str, Any]) -> str:
+    """Per-scene inputs; selection endpoints/editorial bookkeeping aren't inputs."""
+    return chain._fingerprint({key: source.get(key) for key in (
+        "index", "id", "revision", "checkpoint_sha256", "segment_sha256",
+        "raw_frames", "delivered_frames", "sample_rate", "prompt", "prompt_hash",
+        "seed", "steps", "width", "height", "resolution", "audio_mode",
+        "continuation_mode", "context_length", "audio_context_length",
+        "visual_context_blocks", "source_audio", "source_audio_timing",
+        "reference_cache", "generation_fingerprint",
+        *(["presentation_source"] if source.get("presentation_source") else []),
+        *(["processing_source"] if source.get("processing_source") else []),
+    )})
+
+
+def _verify_upscale_source(metadata: dict[str, Any], source: dict[str, Any],
+                           index: int) -> None:
+    segment = metadata["segment"]
+    for saved_key, source_key in (
+            ("source_revision", "revision"),
+            ("source_checkpoint_sha256", "checkpoint_sha256"),
+            ("source_segment_sha256", "segment_sha256")):
+        if not source.get(source_key) or segment.get(saved_key) != source[source_key]:
+            raise ValueError("Upscale scene %d points to a different source revision or media "
+                             "(including the selected ALT). Restart at that scene or use a new profile." % index)
+    # These fields were persisted before per-scene contracts existed, so old
+    # HQ saves can resume an extended branch without rewriting their metadata.
+    for key in ("raw_frames", "delivered_frames", "prompt", "prompt_hash", "seed", "steps"):
+        expected = str(source.get(key) or "") if key in ("prompt", "prompt_hash") else source.get(key)
+        if segment.get(key) != expected:
+            raise ValueError("Upscale scene %d used different source timing or settings (%s)." % (index, key))
+    saved_contract = metadata.get("source_scene_contract")
+    if saved_contract and saved_contract != _upscale_source_contract(source):
+        raise ValueError("Upscale scene %d used different source scene settings." % index)
+
+
 def _load_upscale_prefix(state: dict[str, Any], start_clip: int
                          ) -> list[dict[str, Any]]:
     values = []
@@ -883,8 +1018,9 @@ def _load_upscale_prefix(state: dict[str, Any], start_clip: int
         metadata = chain._read_json(paths["metadata"])
         if metadata.get("format") != "h3_chain_upscale_segment_v1":
             raise ValueError("Upscale scene %d metadata has an unknown format." % index)
-        if metadata.get("source_manifest_hash") != state["source_manifest_hash"]:
-            raise ValueError("Upscale scene %d belongs to a different source branch." % index)
+        if (metadata.get("run_name") != state["run_name"] or
+                metadata.get("profile") != state["profile"]):
+            raise ValueError("Upscale scene %d belongs to a different run or profile." % index)
         if metadata.get("profile_config_hash") != state["profile_config"]["config_hash"]:
             raise ValueError("Upscale scene %d used different profile settings." % index)
         segment = metadata.get("segment")
@@ -892,10 +1028,7 @@ def _load_upscale_prefix(state: dict[str, Any], start_clip: int
             raise ValueError("Upscale scene %d metadata has no segment." % index)
         _verify_upscale_segment(segment, index)
         source = _source_segment(state, index)
-        if (segment.get("source_revision") != source.get("revision") or
-                segment.get("source_checkpoint_sha256") !=
-                source.get("checkpoint_sha256")):
-            raise ValueError("Upscale scene %d points to a different source revision." % index)
+        _verify_upscale_source(metadata, source, index)
         values.append(_public_upscale_segment(segment))
     return values
 
@@ -968,8 +1101,9 @@ class MiniMaxH3ChainUpscaleAdapter:
         return {
             "required": {
                 "source_manifest": (chain.MANIFEST_TYPE, {
-                    "tooltip": "Verified generated lineage emitted directly "
-                               "by Checkpoint Manager. It may stop before "
+                    "tooltip": "Verified lineage emitted by Checkpoint Manager. "
+                               "Selected final-cut ALTs supply picture and conditioning; "
+                               "original audio and generation ancestry are preserved. It may stop before "
                                "later ungenerated Plan scenes; no source Plan "
                                "is needed."}),
                 "profile": ("STRING", {
@@ -1032,11 +1166,20 @@ class MiniMaxH3ChainUpscaleAdapter:
               initial_state=None):
         if initial_state is None:
             manifest = _verified_source_manifest(source_manifest)
+            if any(item.get("processing_source", {}).get("profile_path") ==
+                   chain._relative_output_path(_profile_dir(
+                       manifest["run_name"], chain._safe_name(profile, "upscale"), manifest))
+                   for item in manifest["segments"]):
+                raise ValueError("Choose a new output profile; do not overwrite the selected DeRoPE source profile.")
             first, last = _source_bounds(manifest)
             start = first if int(start_clip) == 1 else int(start_clip)
             stop = last if int(end_clip) == 0 else int(end_clip)
             if start < first or start > last:
-                raise ValueError("start_clip must be 1 (first selected scene) or between %d and %d." % (first, last))
+                raise ValueError(
+                    "start_clip must be 1 (first selected scene) or between %d and %d. "
+                    "Use original scene numbers, not chapter-relative positions. "
+                    "Checkpoint Manager supplied scenes %d–%d; choose the whole branch "
+                    "there if later scenes are missing." % (first, last, first, last))
             if stop < start or stop > last:
                 raise ValueError("end_clip must be between start_clip and %d." % last)
             state = {
@@ -1075,6 +1218,10 @@ class MiniMaxH3ChainUpscaleAdapter:
         context_status = str(state.get("previous_context_status") or "")
         if context_status:
             status += "; %s" % context_status
+        alternates = (manifest.get("presentation_source") or {}).get("scenes") or []
+        if alternates:
+            status += "; final-cut ALT pictures: " + ", ".join(
+                "%s/%s" % (item["scene"], item["alternate_revision"][:8]) for item in alternates)
         return ("h3_upscale", state, manifest, status)
 
 
@@ -1123,6 +1270,12 @@ class MiniMaxH3ChainUpscaleCurrent:
         source = _source_segment(state)
         tensors = _load_source_tensors(source)
         latent, route = _source_latent(tensors)
+        if source.get("processing_source"):
+            route = "saved recovered DeRoPE %s; %s audio latent" % (
+                source["revision"][:8], "recovered" if source["latent_layout"] == "joint_av" else "original")
+        elif source.get("presentation_source"):
+            route += "; ALT %s picture; original %s audio" % (
+                source["revision"][:8], source["presentation_source"]["original"]["revision"][:8])
         video_stream, audio_stream = chain._streams_from_latent(latent)
         video_latent = {"samples": video_stream}
         audio_latent = {"samples": audio_stream}
@@ -1137,7 +1290,7 @@ class MiniMaxH3ChainUpscaleCurrent:
         delivered = int(source["delivered_frames"])
         trim = raw - delivered
         compatibility = state["source_manifest"].get("compatibility") or {}
-        geometry = chain.saved_resolution(source) or compatibility
+        geometry = _source_geometry(source, compatibility)
         width = int(geometry.get("width", 0))
         height = int(geometry.get("height", 0))
         if width < 1 or height < 1:
@@ -1580,9 +1733,11 @@ class MiniMaxH3ChainUpscaleReferenceConditioning:
                                "cached Ref2VA presentation at pass 2."}),
                 "missing_cache": (("text_only", "error"), {
                     "default": "text_only",
-                    "tooltip": "text_only keeps non-reference and older runs "
-                               "usable when no matching cache exists. error "
-                               "requires the exact automatic Ref2VA cache."}),
+                    "tooltip": "Missing caches are first rebuilt from saved "
+                               "reference identities and archived media, using "
+                               "the connected VAEs. If recovery is unavailable, "
+                               "text_only falls back to text; error reports the "
+                               "missing source or VAE without dropping refs."}),
                 "motion_ref_mode": (MOTION_REFERENCE_MODES, {
                     "default": "exclude_video_keep_audio",
                     "tooltip": "Pass-2 motion-reference policy. The default "
@@ -1679,11 +1834,18 @@ class MiniMaxH3ChainUpscaleReferenceConditioning:
         if motion_ref_mode not in MOTION_REFERENCE_MODES:
             raise ValueError(
                 "Unknown H3 motion reference mode %r." % motion_ref_mode)
-        geometry = chain.saved_resolution(source) or compatibility
+        geometry = _source_geometry(source, compatibility)
         width = int(geometry.get("width", 0))
         height = int(geometry.get("height", 0))
         length = int(source.get("raw_frames", 0))
         descriptor = source.get("reference_cache")
+        if source.get("processing_source"):
+            # Cache lookup belongs to generation, not the later canvas. Adapt
+            # the found references to the processing canvas separately.
+            target_size = target_size or (width, height)
+            original = source["processing_source"]["original"]
+            original_geometry = chain.saved_resolution(original) or compatibility
+            width, height = int(original_geometry["width"]), int(original_geometry["height"])
         if tagged_references is not None:
             if override_ref_image_size not in ("inherit", "match", "max"):
                 raise ValueError(
@@ -1715,12 +1877,39 @@ class MiniMaxH3ChainUpscaleReferenceConditioning:
             if custom_prompt:
                 status += "; custom pass-2 prompt override"
             return conditioning, compiled, False, status
-        cached = (chain._load_run_reference_cache_descriptor(
-                      manifest.get("run_name"), scene, descriptor)
-                  if isinstance(descriptor, dict) else
-                  chain._find_reference_cache(
-                      fingerprint, scene, scene_count, prompt, width, height,
-                      length))
+        from .reference_cache_recovery import (
+            ReferenceRecoveryUnavailable, cache_payload_missing,
+            recover_reference_cache,
+        )
+        recovery_status = ""
+        recovery_error = ""
+        try:
+            cached = (chain._load_run_reference_cache_descriptor(
+                          manifest.get("run_name"), scene, descriptor)
+                      if isinstance(descriptor, dict) else
+                      chain._find_reference_cache(
+                          fingerprint, scene, scene_count, prompt, width, height,
+                          length))
+        except FileNotFoundError:
+            cached = None
+        except ValueError:
+            # The legacy loader reports a missing tensor as an integrity
+            # error. Recover only if the pinned descriptor still matches its
+            # metadata and a payload file is actually absent, not corrupted.
+            pinned = (chain._read_json(chain._absolute_output_path(descriptor["metadata"]))
+                      if isinstance(descriptor, dict) else None)
+            if (pinned is None or chain._reference_cache_descriptor(pinned) != descriptor
+                    or not cache_payload_missing(chain, pinned)):
+                raise
+            cached = None
+        if cached is not None and cache_payload_missing(chain, cached):
+            cached = None
+        if cached is None:
+            try:
+                cached, recovery_status = recover_reference_cache(
+                    chain, source, manifest, scene_count, video_vae, audio_vae)
+            except ReferenceRecoveryUnavailable as exc:
+                recovery_error = str(exc)
         if cached is not None:
             target_detail = None
             if target_size is not None:
@@ -1763,13 +1952,15 @@ class MiniMaxH3ChainUpscaleReferenceConditioning:
             if custom_prompt:
                 status += "; custom pass-2 prompt override"
             status += "; motion refs=%s" % motion_ref_mode
+            if recovery_status:
+                status += "; " + recovery_status
             return conditioning, compiled, True, status
         if str(missing_cache) == "error":
             raise FileNotFoundError(
                 "No automatic H3 reference cache matches source scene %d. "
-                "This branch may predate reference caching; render that source "
-                "scene once with Tagged/Scheduled Ref2VA cache_for_upscale "
-                "enabled, or choose text_only." % scene)
+                "Saved-reference recovery could not complete: %s "
+                "Restore the named source media/connect Tagged references, "
+                "or explicitly choose text_only." % (scene, recovery_error))
         compiled = custom_prompt or prompt
         tokens = clip.tokenize(compiled)
         conditioning = clip.encode_from_tokens_scheduled(tokens)
@@ -1784,6 +1975,8 @@ class MiniMaxH3ChainUpscaleReferenceConditioning:
         if custom_prompt:
             status += "; custom pass-2 prompt override"
         status += "; motion refs=%s" % motion_ref_mode
+        if recovery_error:
+            status += "; saved-reference recovery unavailable: " + recovery_error
         return conditioning, compiled, False, status
 
 
@@ -2150,6 +2343,7 @@ class MiniMaxH3ChainUpscaleSegmentSave:
                                "the same repeated-head trim as video and "
                                "replaces the source checkpoint audio."}),
             },
+            "hidden": {"dynprompt": "DYNPROMPT", "unique_id": "UNIQUE_ID"},
         }
 
     RETURN_TYPES = (UPSCALE_SEGMENT_TYPE, "STRING")
@@ -2171,7 +2365,7 @@ class MiniMaxH3ChainUpscaleSegmentSave:
         return float("NaN")
 
     def save(self, state, images, upscaled_latent=None,
-             recovered_audio=None):
+             recovered_audio=None, dynprompt=None, unique_id=None):
         if chain._st_save is None or chain.torch is None:
             raise RuntimeError("safetensors and torch are required for H3 upscale saves.")
         index = int(state["index"])
@@ -2247,6 +2441,18 @@ class MiniMaxH3ChainUpscaleSegmentSave:
             latent_tensors, latent_layout = _latent_checkpoint_tensors(
                 upscaled_latent)
             tensors.update(latent_tensors)
+            from .checkpoint_variants import processing_stage
+            if processing_stage(state["profile_config"]) == "derope":
+                # The saver also guards callers that bypass Recovered AV.
+                video = _video_stream_from_latent(upscaled_latent, "Saved DeRoPE latent")
+                expected_steps = (chain._validate_h3_length(raw, "DeRoPE RAW length") - 5) // 17 * 5 + 2
+                if (int(video.shape[2]) != expected_steps or
+                        int(video.shape[3]) * 16 != height or int(video.shape[4]) * 16 != width):
+                    raise ValueError("Save the full DeRoPE latent after Exact Recover and VAE Encode on the original RAW clock/canvas.")
+                if recovered_audio is not None and latent_layout != "joint_av":
+                    raise ValueError("Saving recovered DeRoPE audio requires audio_latent on Recovered AV for later deferred passes.")
+                if latent_layout == "joint_av":
+                    _validate_recovered_audio_shape(tensors["upscaled_audio"].shape, int(video.shape[0]), raw)
         if context_steps:
             tensors["upscaled_video_context"] = _upscaled_context_tensor(
                 upscaled_latent, context_steps)
@@ -2351,18 +2557,26 @@ class MiniMaxH3ChainUpscaleSegmentSave:
                 "run_name": state["run_name"],
                 "profile": state["profile"],
                 "source_manifest_hash": state["source_manifest_hash"],
+                "source_scene_contract": _upscale_source_contract(source),
                 "profile_config_hash": state["profile_config"]["config_hash"],
                 "profile_config": state["profile_config"],
                 "segment": segment,
             }
-            with chain.checkpoint_run_lock(chain._output_root(), state["run_name"]):
-                chain._atomic_json(metadata_path, metadata)
-                chain._atomic_json(paths["metadata"], metadata)
+            from .checkpoint_variants import processing_lineage
+            metadata["processing_lineage"] = processing_lineage(
+                list(state.get("segments", [])) + [segment])
             prefix = list(state.get("segments", [])) + [segment]
             complete = (index == _source_bounds(state["source_manifest"])[1])
             partial = _upscale_manifest(state, prefix, complete=complete)
-            chain._atomic_json(
-                paths["manifest"] if complete else paths["partial"], partial)
+            from .processing_checkpoint_delete import require_saved_processing_segments
+            with chain.checkpoint_run_lock(chain._output_root(), state["run_name"]):
+                require_saved_processing_segments(chain._output_root(),
+                    list(state.get("segments", [])) + [item for item in
+                        state["source_manifest"]["segments"] if item.get("processing_source")])
+                chain._atomic_json(metadata_path, metadata)
+                chain._atomic_json(paths["metadata"], metadata)
+                chain._atomic_json(
+                    paths["manifest"] if complete else paths["partial"], partial)
             committed = True
         finally:
             chain._safe_unlink(checkpoint_tmp)
@@ -2372,6 +2586,8 @@ class MiniMaxH3ChainUpscaleSegmentSave:
                     if value:
                         chain._safe_unlink(value)
 
+        cache_cleanup = chain.confirm_saved_use(
+            dynprompt, unique_id, metadata_path, chain._output_root(), chain._LOG)
         status = ("saved HQ scene %d/%d at %dx%d; latent %s -> %s" %
                   (index, _source_bounds(state["source_manifest"])[1], width,
                    height, "saved" if save_latent else "omitted", segment_path))
@@ -2379,6 +2595,8 @@ class MiniMaxH3ChainUpscaleSegmentSave:
             status += "; %s" % audio_route
         if context_steps:
             status += "; retained %d-step Drift-Control HQ tail" % context_steps
+        if cache_cleanup:
+            status += "; retired %d verified legacy reference bundle(s)" % len(cache_cleanup)
         return {
             "ui": {"text": [status],
                    "images": [chain._video_output_item(segment_path)],
@@ -2556,8 +2774,12 @@ class MiniMaxH3ChainUpscaleLoopEnd:
         complete = index == _source_bounds(state["source_manifest"])[1]
         manifest = _upscale_manifest(state, next_state["segments"], complete)
         paths = _state_profile_paths(state, index)
-        chain._atomic_json(paths["manifest"] if complete else paths["partial"],
-                           manifest)
+        from .processing_checkpoint_delete import require_saved_processing_segments
+        with chain.checkpoint_run_lock(chain._output_root(), state["run_name"]):
+            require_saved_processing_segments(chain._output_root(),
+                next_state["segments"] + [item for item in
+                    state["source_manifest"]["segments"] if item.get("processing_source")])
+            chain._atomic_json(paths["manifest"] if complete else paths["partial"], manifest)
         manifest_json = json.dumps(manifest, ensure_ascii=False, indent=2,
                                    sort_keys=True)
         return (manifest, manifest_json, next_state["previous_frames"],
@@ -2597,6 +2819,7 @@ class MiniMaxH3ChainUpscaleHandoff:
         return schema
 
     RETURN_TYPES = (UPSCALE_STATE_TYPE,)
+    OUTPUT_TOOLTIPS = ("Small continuation state after completed scene pixels are released.",)
     FUNCTION = "prepare"
     CATEGORY = "_internal/minimax/upscale"
     DESCRIPTION = "Internal tensor-to-context handoff for Upscale Loop End."
@@ -2610,11 +2833,14 @@ class MiniMaxH3ChainUpscaleAdvance:
     """Only the small handoff remains an input while recursion is pending."""
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"next_state": (UPSCALE_STATE_TYPE,),
-                             "loop_id": ("STRING",)},
+        return {"required": {"next_state": (UPSCALE_STATE_TYPE, {
+                                 "tooltip": "Prepared state for the next upscale scene."}),
+                             "loop_id": ("STRING", {
+                                 "tooltip": "Originating Upscale Loop End node id."})},
                 "hidden": {"dynprompt": "DYNPROMPT"}}
 
     RETURN_TYPES = MiniMaxH3ChainUpscaleLoopEnd.RETURN_TYPES
+    OUTPUT_TOOLTIPS = MiniMaxH3ChainUpscaleLoopEnd.OUTPUT_TOOLTIPS
     FUNCTION = "advance"
     CATEGORY = "_internal/minimax/upscale"
     DESCRIPTION = "Internal continuation for Upscale Loop End; no full pixel input."
@@ -2700,6 +2926,10 @@ def _assembly_manifest(manifest: dict[str, Any],
                 assembly[key] = (chain._json_document(source[key])
                                  if isinstance(source[key], dict) else source[key])
         assembly["chapter"]["resolution"] = resolution
+    if source.get("presentation_source"):
+        # ALT pictures have already been baked into HQ. Keep the frozen cut's
+        # timing but never substitute low-resolution alternates during assembly.
+        assembly["editorial"] = {**chain._json_document(source["editorial"]), "replacements": []}
     return assembly
 
 

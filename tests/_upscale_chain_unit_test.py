@@ -51,6 +51,29 @@ def audio_for_frames(frames, sample_rate=8000):
     }
 
 
+def legacy_cache_fixture(chain, metadata, version="h3_reference_cache_v2"):
+    """Materialize a real old bundle so legacy reader tests stay meaningful."""
+    tensors = chain._reference_cache_tensors(metadata)
+    legacy = dict(metadata)
+    legacy.pop("tensor_objects", None)
+    legacy["format"] = version
+    legacy["signature"] = chain._fingerprint({
+        "format": version, "reference_fingerprint": legacy["reference_fingerprint"],
+        **{key: legacy[key] for key in ("scene", "scene_count", "prompt", "compiled_prompt",
+                                       "width", "height", "length", "ref_image_size")},
+        "presentation": legacy.get("presentation_contract"),
+    })
+    metadata_path = pathlib.Path(chain._absolute_output_path(legacy["metadata"])).with_name(
+        "scene_%04d.%s.json" % (legacy["scene"], legacy["signature"][:24]))
+    legacy["metadata"] = chain._relative_output_path(str(metadata_path))
+    path = metadata_path.with_suffix(".safetensors")
+    chain._st_save({key: value.clone() for key, value in tensors.items()}, str(path))
+    legacy["tensors"] = chain._relative_output_path(str(path))
+    legacy["tensors_sha256"] = chain._file_sha256(str(path))
+    chain._atomic_json(chain._absolute_output_path(legacy["metadata"]), legacy)
+    return legacy
+
+
 def main():
     package, chain, upscale = load_package()
     required = {
@@ -238,6 +261,9 @@ def main():
         assert "reference cache saved" in cache_status
         cache_metadata = chain._find_reference_cache(
             "unit-test", 1, 2, source["prompt"], 32, 32, 5)
+        assert cache_metadata["format"] == "h3_reference_cache_v3"
+        # Exercise backward compatibility with an actual V2 tensor bundle.
+        cache_metadata = legacy_cache_fixture(chain, cache_metadata)
         cache_descriptor = chain._reference_cache_descriptor(cache_metadata)
         assert cache_descriptor is not None
         assert cache_metadata["format"] == "h3_reference_cache_v2"
@@ -886,6 +912,153 @@ def main():
                 latent_segment["checkpoint"]), framework="pt",
                 device="cpu") as saved:
             assert {"upscaled_video", "upscaled_audio"} <= set(saved.keys())
+
+        # Deferred DeRoPE -> latent upscale, using actual CPU safetensors and
+        # the same immutable selection contract emitted by Checkpoint Manager.
+        from importlib import import_module
+        catalogue = import_module(package.__name__ + ".checkpoint_variants")
+        sources = import_module(package.__name__ + ".deferred_checkpoint_source")
+        saver = upscale.MiniMaxH3ChainUpscaleSegmentSave()
+        originals = [{"scene": item["index"], "revision": item["revision"],
+                      "checkpoint_sha256": item["checkpoint_sha256"]}
+                     for item in selected_manifest["segments"]]
+
+        def processing_selection(profile):
+            records = catalogue.saved_checkpoint_variants(temporary, "upscale_test", originals)["variants"]
+            record = next(item for item in records if item["profile"] == profile)
+            assert record["processing_branch"]
+            return {"stage": "derope", "profile_path": record["profile_path"],
+                    "branch": record["processing_branch"]}
+
+        def rejected(call, message):
+            try:
+                call()
+            except (ValueError, FileNotFoundError) as exc:
+                assert message.lower() in str(exc).lower(), str(exc)
+            else:
+                raise AssertionError("Expected rejection: " + message)
+
+        _flow, motion_state, _, _ = adapter.adapt(
+            selected_manifest, "motion", "h3_latent", '{"derope":true}', 1, 0, True, 18)
+        recovered = upscale.MiniMaxH3ChainRecoveredAV().pack(
+            motion_state, {"samples": torch.full((1, 24, 2, 4, 4), 0.6)},
+            {"samples": torch.full((1, 32, 2, 9), 0.4)})[0]
+        recovered_wave = audio_for_frames(5)
+        recovered_wave["waveform"].fill_(0.3)
+        motion = saver.save(motion_state, hq_images, recovered, recovered_wave)["result"][0]
+        choice = processing_selection("motion")
+        processed = manager.passthrough(json.dumps({**json.loads(selection), "processing_source": choice}))[0]
+        assert processed["clip_count"] == 2  # Never pin only the previewed prefix.
+        assert processed["segments"][0]["revision"] == motion["revision"]
+        assert processed["segments"][1] == selected_manifest["segments"][1]  # absent -> original
+        assert processed["segments"][0]["processing_source"]["original"] == selected_manifest["segments"][0]
+        assert selected_manifest["segments"][0]["revision"] == source["revision"]
+        _, processed_state, _, _ = adapter.adapt(processed, "after_motion", "h3_latent", "{}", 1, 0, True, 18)
+        read = upscale.MiniMaxH3ChainUpscaleCurrent().current(processed_state)
+        assert torch.all(read[2]["samples"] == 0.6)
+        assert torch.all(read[3]["samples"] == 0.4)
+        assert torch.all(read[13]["waveform"] == 0.3)
+        assert read[7:9] == (64, 64)
+        assert "recovered DeRoPE" in read[-1]
+        # Ref2VA's legacy lookup must use original generation geometry even
+        # when the DeRoPE save already changed the canvas.
+        from unittest.mock import patch
+        with patch.object(chain, "_find_reference_cache", return_value=None) as lookup:
+            upscale.MiniMaxH3ChainUpscaleReferenceConditioning().condition(
+                processed_state, FakeClip(), missing_cache="text_only")
+            assert lookup.call_args.args[4:6] == (32, 32)
+        rejected(lambda: adapter.adapt(processed, "motion", "h3_latent", "{}", 1, 0, True, 18), "new output profile")
+        # Saving a second processing stage keeps transitive provenance.
+        after = saver.save(processed_state, hq_images, recovered)["result"][0]
+        after_record = next(item for item in catalogue.saved_checkpoint_variants(
+            temporary, "upscale_test", originals)["variants"] if item["revision"] == after["revision"])
+        assert after_record["originals"] == [{"scene": 1, "revision": source["revision"]}]
+        _, resumed, _, _ = adapter.adapt(processed, "after_motion", "h3_latent", "{}", 2, 0, True, 18)
+        assert resumed["index"] == 2 and len(resumed["segments"]) == 1
+        assert torch.all(upscale.MiniMaxH3ChainUpscaleCurrent().current(resumed)[2]["samples"] == 0.85)
+        # A video-only DeRoPE save reuses the exact original denoised audio,
+        # while its delivered audio is read from the processing checkpoint.
+        _, single_state, _, _ = adapter.adapt(selected_manifest, "motion_video", "h3_latent", '{"derope":true}', 1, 0, True, 18)
+        single = {"samples": torch.full((1, 24, 2, 4, 4), 0.2)}
+        saver.save(single_state, hq_images, single)
+        single_manifest = sources.derope_source_manifest(selected_manifest, processing_selection("motion_video"), chain, upscale)
+        loaded = upscale._load_source_tensors(single_manifest["segments"][0])
+        assert torch.all(loaded["video"] == 0.2) and torch.all(loaded["audio"] == 0.75)
+        assert set(upscale._load_source_tensors(single_manifest["segments"][0], ("delivered_audio",))) == {"delivered_audio"}
+        saved_single, layout = upscale._latent_checkpoint_tensors({"samples": torch.zeros((2, 24, 2, 4, 4))})
+        assert layout == "single" and tuple(saved_single["upscaled_samples"].shape) == (2, 24, 2, 4, 4)
+        assert tuple(upscale._cpu_latent(single)["samples"].shape) == (1, 24, 2, 4, 4)
+        # Recover the accidentally omitted B=1 axis in older video-only saves.
+        legacy = json.loads(json.dumps(single_manifest["segments"][0]))
+        legacy_path = pathlib.Path(temporary) / "legacy_single.safetensors"
+        chain._st_save({"upscaled_samples": single["samples"][0].clone()}, str(legacy_path))
+        legacy.update(checkpoint="legacy_single.safetensors", checkpoint_sha256=chain._file_sha256(str(legacy_path)))
+        upscale._validate_processed_latent_header(legacy)
+        assert tuple(upscale._load_source_tensors(legacy)["video"].shape) == (1, 24, 2, 4, 4)
+        rejected(lambda: saver.save(single_state, hq_images, single, recovered_wave), "audio_latent")
+        rejected(lambda: saver.save(single_state, hq_images, {"samples": torch.zeros((1, 24, 7, 4, 4))}), "RAW clock")
+        rejected(lambda: saver.save(single_state, hq_images, {"samples": [single["samples"], torch.zeros((1, 32, 2, 100))]}), "audio latent")
+        # Chapter-local sources retain original indexes and scheduling clocks.
+        chapter = json.loads(json.dumps(selected_manifest))
+        chapter.update(segments=[chapter["segments"][1]], clip_count=1,
+                       total_delivered_frames=source_2["delivered_frames"], scene_start=2, scene_end=2,
+                       source_scene_count=13, chapter={"number": 2, "id": "second", "start_scene": 2,
+                       "end_scene": 2, "planned_end_scene": 2, "complete": True, "source_start_frame": 5})
+        _, chapter_state, _, _ = adapter.adapt(chapter, "chapter_motion", "h3_latent", '{"derope":true}', 1, 0, True, 18)
+        chapter_video = {"samples": torch.zeros((1, 24, (second_raw - 5) // 17 * 5 + 2, 4, 4))}
+        chapter_child = saver.save(chapter_state, hq_images_2, chapter_video)["result"][0]
+        chapter_choice = processing_selection("chapter_motion")
+        assert "/chapters/" in chapter_choice["profile_path"]
+        chapter_processed = sources.derope_source_manifest(chapter, chapter_choice, chain, upscale)
+        _, chapter_next, _, _ = adapter.adapt(chapter_processed, "chapter_after", "h3_latent", "{}", 1, 0, True, 18)
+        chapter_read = upscale.MiniMaxH3ChainUpscaleCurrent().current(chapter_next)
+        assert chapter_read[4:6] == (2, 13)
+        assert chapter_processed["chapter"]["source_start_frame"] == 5
+        assert chapter_processed["segments"][0]["revision"] == chapter_child["revision"]
+        # Availability/lineage failures must not silently substitute originals.
+        _, preview_state, _, _ = adapter.adapt(selected_manifest, "motion_preview", "h3_latent", '{"derope":true}', 1, 0, False, 18)
+        saver.save(preview_state, hq_images)
+        rejected(lambda: sources.derope_source_manifest(selected_manifest, processing_selection("motion_preview"), chain, upscale), "no full latent")
+        wrong = json.loads(json.dumps(selected_manifest))
+        wrong["segments"][0]["revision"] = "f" * 32
+        rejected(lambda: sources.derope_source_manifest(wrong, choice, chain, upscale), "different original take")
+        wrong["segments"][0]["adopted_from_revision"] = source["revision"]
+        assert sources.derope_source_manifest(wrong, choice, chain, upscale)["segments"][0]["revision"] == motion["revision"]
+        rejected(lambda: sources.derope_source_manifest(selected_manifest, {**choice, "profile_path": "../escape"}, chain, upscale), "outside")
+        changed = json.loads(json.dumps(choice))
+        changed["branch"]["lineage"][0]["revision"] = "e" * 32
+        rejected(lambda: sources.derope_source_manifest(selected_manifest, changed, chain, upscale), "branch changed")
+        # Delete a real saved chapter take during a downstream encode. The
+        # saver must not publish a new branch against its now-deleted source.
+        deletion = import_module(package.__name__ + ".processing_checkpoint_delete")
+        processing_manager = deletion.ProcessingCheckpointManager(temporary)
+        delete_preview = processing_manager.deletion_preview(
+            "upscale_test", chapter_child["revision_metadata"])
+        assert delete_preview["allowed"]
+        write_video = chain._write_segment_video
+
+        def delete_source_during_encode(*args, **kwargs):
+            result = write_video(*args, **kwargs)
+            processing_manager.delete("upscale_test", chapter_child["revision_metadata"],
+                                      delete_preview["snapshot"])
+            return result
+
+        with patch.object(chain, "_write_segment_video", side_effect=delete_source_during_encode):
+            rejected(lambda: saver.save(chapter_next, hq_images_2, chapter_video), "deleted")
+        failed_profile = pathlib.Path(upscale._state_profile_paths(chapter_next, 2)["metadata"]).parent.parent
+        assert not any(path.is_file() for path in failed_profile.rglob("*"))
+        assert pathlib.Path(chain._absolute_output_path(source_2["checkpoint"])).is_file()
+        assert not any(item["revision"] == chapter_child["revision"] for item in
+                       catalogue.saved_checkpoint_variants(temporary, "upscale_test", originals)["variants"])
+        # Existing saves can use the exact full/partial profile manifest.
+        motion_metadata = chain._read_json(chain._absolute_output_path(motion["revision_metadata"]))
+        motion_metadata.pop("processing_lineage")
+        chain._atomic_json(chain._absolute_output_path(motion["revision_metadata"]), motion_metadata)
+        legacy_choice = processing_selection("motion")
+        assert legacy_choice["branch"]["kind"] == "manifest"
+        assert sources.derope_source_manifest(selected_manifest, legacy_choice, chain, upscale)["segments"][0]["revision"] == motion["revision"]
+        pathlib.Path(chain._absolute_output_path(motion["checkpoint"])).unlink()
+        rejected(lambda: sources.derope_source_manifest(selected_manifest, legacy_choice, chain, upscale), "missing")
 
     print("H3 upscale child run: denoised source preference, optional HQ latent, "
           "self-contained audio, unified manifest, assembler, and output copy pass")

@@ -1,5 +1,22 @@
 # Runs, review, and recovery
 
+## Stable 0.6.2 recovery update
+
+Update the Context Loop pack and restart ComfyUI to load the upscale/cache fixes.
+Existing workflows and legacy reference bundles remain supported; conversion is
+optional. The PNG exporter is still **MiniMax H3 Context Loop Export PNG Sequence
++ Audio**, with optional file-backed VIDEO/state inputs and an appended VIDEO
+passthrough output. No replacement of the old latent-export workflow is required.
+
+New generation and alternate takes save immutable recovery documents under
+`h3_chains/<run>/recovery_archives/<revision>/`. The active Run also retains
+`plan.json`, `workflow.json`, and `api_prompt.json` for older recovery tools.
+Historical checkpoint output uses its own snapshot, not a later edited Plan.
+Older root-only archives remain readable but cannot retroactively supply unknown
+reference timing/settings. Rebuilding disposable reference latents still requires
+the original saved reference media and identities; missing or altered originals
+produce an actionable error instead of silently changing the render.
+
 ## Review Gate
 
 Place **Review Gate** between Segment + Checkpoint and Loop End. Each scene is
@@ -155,20 +172,33 @@ The node outputs only `selected_manifest`; it is not a Plan pass-through and is
 normally kept beside the generation route. Its run selector can inspect any
 other folder under `output/h3_chains`.
 
-For an experiment, select a generated branch tip and click **Use branch
-locally**. This pins the exact lineage on `selected_manifest` in this workflow
+Select a **branch heading** to choose the whole generated branch for output.
+Clicking an individual clip only previews it; it does not shorten the output
+or switch its branch. Use the downstream upscale/export range controls to
+choose which scenes to process.
+
+For an experiment, click **Use branch locally**. This saves the entire browsed
+branch (the row containing the previewed clip), not just its prefix through
+that clip. It pins the exact lineage on `selected_manifest` in this workflow
 only, including the earlier chapters included in that selection. Browsing
 other takes, refreshing, reopening the workflow, or activating another branch
 in a different tab cannot move this pin. Saved files are still verified on
 execution: a missing or corrupt pinned take fails instead of falling back to
 the project's active branch. The output row and **local output** badges show
-which revisions are pinned. **Follow browsing** releases the pin; an explicit
+which revisions are pinned. **Follow branch selection** releases the pin;
+output then follows branch-heading selections, never clip previews. An explicit
 run switch asks before releasing it. Save the workflow to keep the pin on disk.
+
+Older workflows can contain a partial pin saved while previewing an ancestor.
+The output row flags this. Choose the intended branch heading and click
+**Use branch locally** once to replace that old selection. Shared ancestors
+can lead to multiple branches, so reopening a workflow never guesses which
+descendant you intended or silently switches an existing snapshot.
 
 **Make branch active (project)**, **Roll active branch back (project)** and
 **Load selected branch** remain project-wide actions. Local selection neither
-restores connected Plan settings nor arms generation/resume. It does not require
-project ownership; downstream nodes retain their own write protections. Use the
+restores connected Plan settings nor arms generation/resume. Downstream nodes
+retain their own save and deletion protections. Use the
 manager's manifest output for the experiment, not Manifest Load (which reads the
 project's active checkpoints).
 
@@ -239,6 +269,91 @@ This first release does not bulk-delete branches. The leaf-first workflow makes
 the exact context consequences visible and avoids silently orphaning later
 checkpoints.
 
+Chapter recovery snapshots also protect the takes and recovery files they use.
+Historical `supersedes` links do **not** protect a replaced take: they are an
+audit trail, not recovery inputs. Actual scene, alternate and recovery-file
+references still block deletion.
+
+If an unwanted snapshot is the blocker, the deletion inspector offers
+**Retire Chapter … snapshot …**. Inspect the scenes and confirm to move only
+that snapshot's JSON from `chapters/<chapter>/manifests/` into the sibling
+`retired_manifests/` directory. No clip, active pointer, processing take,
+reference or assembled export is deleted. Other retained snapshots and branch
+dependencies still block unsafe deletion; remove unused leaves first.
+
+Retired snapshots no longer appear in Chapter Loader, release their recovery
+pins and cannot be silently republished by a stale selection. Workflows pinned
+to them need a new source. The archived JSON keeps the original bytes; it can
+be moved back to `manifests/` to restore the snapshot only while all its inputs
+still exist. Deleting those inputs later makes full recovery unavailable.
+Retirement requires a fresh preview on confirmation and uses the Run mutation
+lock. Workflow-ownership locking remains nightly-only.
+
+### Saved processing tabs
+
+Checkpoint Manager has **Original**, **DeRoPE**, and **Latent Upscale** tabs.
+**Pixel Upscale** and **Other processing** also appear when those saved profiles
+exist. Chapter filtering applies to the processing views. The original branch
+rows stay in place, with each clip's saved processing takes shown beneath its
+source revision, including retained older takes and multiple profiles.
+
+The catalogue reads the existing `upscaled/<profile>/checkpoints/` directories
+at run and chapter scope. It matches both source revision and checkpoint hash;
+scene number alone never attaches a take to another branch. Attributed aliases
+with matching saved content can share versions. Unresolved sources remain
+visible in a separate section. Stage labels come from the saved recipe/backend,
+not the profile folder name; the bundled combined LBH + DeRoPE recipe appears
+under DeRoPE at its actual saved resolution.
+
+Switching tabs or inspecting a derivative does not rewrite `selected_manifest`,
+move a local pin, activate a branch, restore a Plan, or delete a checkpoint.
+For a later latent-upscale pass, select a saved take in **DeRoPE**, then click
+**Use DeRoPE branch locally**. This pins the whole saved processing branch to
+the browsed original branch; the downstream Adapter still controls start/end.
+Scenes absent from that DeRoPE branch automatically use their selected original
+take. A saved but incomplete/corrupt latent is an error, not an original fallback.
+Return to **Original → Use branch locally** to explicitly use originals again.
+
+New saves keep an immutable processing-lineage snapshot. Older saves can use
+their existing full/partial profile manifest if it identifies the chosen take.
+A shared take with multiple processing descendants is ambiguous: choose a later
+take unique to the desired processing branch. No "latest scene" mixing occurs.
+
+The inspector reports canvas, RAW/delivered frames, audio route, full-latent
+save status, profile and metadata location. A continuation tail is explicitly
+not a full latent. Listing checks file availability without loading tensors or
+hashing every large checkpoint; availability is not execution validation.
+
+To remove a saved processing take, select it in its processing tab and click
+**Delete processed version**. The file/size preview and confirmation cover only
+that take's video, checkpoint, audio and prompt sidecars, its revision metadata,
+its current processed pointer (if still selected), and affected full/partial
+branch manifests. Removing a pointer does not promote another take. Older takes,
+original generation checkpoints, shared references/caches and assembled videos
+are kept. This also works for processing takes whose original is unavailable.
+
+Deletion is blocked while another saved take depends on that processing source
+or requires its saved branch; the inspector lists clickable dependents to
+delete first. Independent **pixel** takes are the exception to sequence ordering:
+the saved pixel backend with zero HQ context proves that a later clip does not
+consume its predecessor's processed output. Such later clips are kept when an
+earlier take is deleted. This applies to legacy full/partial manifests and new
+immutable lineage snapshots, not just newly rendered clips. Actual source or
+context references still block deletion, and unproven/other backends retain
+their conservative branch protection.
+
+Affected sequence manifests are invalidated, not shortened or spliced across
+the missing scene. Surviving clip files, pointers and immutable metadata stay
+unchanged and visible in their processing tab. An old lineage with a missing
+take is no longer offered as a complete source branch. Rebuild the missing
+scenes before resuming a full sequence; no other take is silently substituted.
+
+Ownership is checked again on confirmation, and changed files or
+dependencies require a fresh preview. An in-flight save cannot republish a
+deleted processing dependency. A workflow-local pin is never silently redirected:
+if it referenced the deleted take, explicitly select another source before running.
+Deletion is permanent; the preview does not load or hash large tensor files.
+
 ### Alternate final-cut takes
 
 Use an alternate when one accepted scene needs a prompt-level visual correction
@@ -250,9 +365,26 @@ but later scenes already depend on its original checkpoint.
 4. Approve the alternate in Review Gate.
 
 Acceptance selects the alternate picture for preview, assembly, PNG export,
-and whole-chain latent finishing. It does not replace the active generation
+whole-chain latent finishing, and deferred latent/pixel/CAT upscale loops.
+It does not replace the active generation
 checkpoint: later scenes keep their original visual/audio ancestry, and final
 audio for the corrected scene remains the original audio.
+
+Deferred upscale resolves the selected ALT before reading source tensors or
+reference conditioning, for both full-branch and chapter output. It uses the
+ALT's video latent, prompt, seed and reference identity, but reads the original
+audio separately without loading another full video tensor. Adapter/current
+status names the selected ALT, and saved processing takes remain linked to the
+base scene in Checkpoint Manager. A sealed chapter uses its frozen final-cut
+selection; an unsealed full-branch input uses the current selection when the
+loop starts.
+
+Resume checks the actual picture source: an upscale previously made from the
+original cannot be reused for a newly selected ALT (or vice versa). Restart at
+the affected scene, or use a new profile. Saved DeRoPE must likewise belong to
+the selected picture; scenes absent from a partial DeRoPE branch use their
+selected ALT/original. Changing an ALT never overwrites generation checkpoints
+or silently swaps an already selected DeRoPE latent for unprocessed media.
 
 Plan Studio marks the selection `ALT`. Checkpoint Manager nests the immutable
 alternate under its base take rather than drawing a new continuation branch.
@@ -347,7 +479,7 @@ selected lineage, including earlier chapters; the scope controls the filtering.
 
 ### Deferred H3 upscale child runs
 
-Select the right-hand generated tip you want in Checkpoint Manager and click
+Select the generated branch heading you want in Checkpoint Manager and click
 **Use branch locally** to keep that source fixed while experimenting,
 then connect its **selected_manifest** output to **MiniMax H3 Checkpoint Upscale
 Adapter**. The manager verifies the immutable lineage and embeds recovery-only
@@ -359,7 +491,7 @@ live under `output/h3_chains/<run>/upscaled/<profile>/`; a local source pin is
 not a separate output folder and does not isolate experiments sharing a profile.
 
 To upscale or export just one chapter, set the manager's output scope to
-**Selected chapter only**, select that chapter's generated tip, and click
+**Selected chapter only**, select that chapter's branch heading, and click
 **Use branch locally**. Changing the scope of an existing local pin keeps its
 pinned tip; browsing another take does not move it. Earlier chapters may have
 different resolutions: only the selected chapter's media and compatibility are
@@ -373,6 +505,15 @@ On Upscale Adapter, `start_clip=1` starts at the first selected scene (8 here),
 `end_clip=0` means the last selected scene (10), and `start_clip=9` resumes after
 verifying scene 8's saved HQ output. No HQ prefix from Chapter 1 is required.
 Reference schedules retain their original Plan scene numbering.
+
+Extending the selected branch from scene 8 to scenes 8–10 does not invalidate
+an unchanged scene 8 upscale. Resume validates every completed scene's source
+revision and media hashes, RAW/delivered frame clock, saved prompt/sampling
+settings, and upscale profile, plus its saved output artifacts. New saves also
+record a per-scene source contract. Older saves use their existing source
+provenance without rewriting the files. The whole-manifest hash remains
+provenance, not a reason to reject an unchanged prefix when later clips are
+added. Changed completed sources or profile settings still require a new pass.
 
 Chapter upscale profiles and finals are isolated under
 `output/h3_chains/<run>/chapters/<number>_<chapter_id>/upscaled/<profile>/`.
@@ -461,6 +602,40 @@ adapter's scene range or reduce oracle aggressiveness when RAM or wall time is
 too high. Spatial upscale and de-rope remain in the same regeneration pass so
 a later independent upscale cannot undo the recovered motion timing.
 
+#### Saving DeRoPE for a later deferred pass
+
+The current combined example already wires recovered frames through VAE Encode
+and **Chain Recovered AV**, and sends that recovered latent to Upscale Segment
+Save and Loop End. The example now has **save_latent ON**, so new renders retain
+the complete recovered latent for a later pass. Existing workflows keep their
+stored setting; preview-only results do not gain a latent by opening the tab.
+
+For a separate later latent-upscale pass, a DeRoPE save needs:
+
+- `save_latent` enabled **before rendering**, with Recovered AV connected to
+  Segment Save's `upscaled_latent`. Enabling it changes the profile configuration;
+  use a new profile instead of resuming a prefix saved with the old setting.
+- A full video latent re-encoded **after Exact Recover** on the original RAW
+  clock, including the continuation head (the saver trims delivered pixels
+  separately). Recovered AV checks the H3 temporal length; a stretched pass-2
+  intermediate is not a recovered output.
+- Aligned recovered audio where appropriate. Joint AV saves reuse recovered
+  audio latents and the saved delivered waveform. Video-only saves that preserve
+  the original performance reuse the exact original take's audio latent, loading
+  only audio from that checkpoint. If recovered audio replaces the performance,
+  connect its re-encoded `audio_latent` to Recovered AV before saving.
+- Source revision/hash and reference-cache provenance retained through each
+  stage. Saved child tensors use `upscaled_video`/`upscaled_audio` or
+  `upscaled_samples`; Current Scene translates these into its source AV streams.
+  Reference-cache lookup retains the original generation fingerprint and canvas,
+  then rebuilds conditioning for the processing canvas. New upscale results
+  remain linked through their DeRoPE parent to the original checkpoint.
+
+Select a **different output profile** for the later pass. The original generation
+and DeRoPE source files are not overwritten. Full latent headers and checksums
+are checked at execution; a continuation tail or time-stretched intermediate is
+not a valid recovered source.
+
 When pass 2 should use a different reference set, insert **Upscale Reference +
 Prompt Override** on the normal `H3_TAGGED_REFERENCES` line and connect its
 `references` and `prompt_override` outputs to **Upscale Reference
@@ -483,13 +658,49 @@ action from identity, framing, or continuity clauses. The bundled LBH workflow
 therefore leaves the override blank and uses the original compiled prompt by
 default. Its How To Run note retains a neutral preservation/detail replacement
 prompt for an explicit copy/paste A/B test.
-Revisions without a cache can use `text_only`; select `error` when the second
-pass must not proceed without Ref2VA conditioning.
+Missing reference caches are rebuilt automatically before applying
+`missing_cache`, including in Pixel Conditioning and the CAT video wrapper.
+Recovery uses the selected generation take's saved reference lineage (also
+through DeRoPE), not the current Plan or current tag assignments. It verifies
+archived/input project media against saved content hashes, decodes only active
+references, and re-encodes them with the connected H3 VAEs. Native pictures,
+video/audio references, and Qwen-only semantic anchors retain their separate
+roles. No diffusion sampling or source-scene regeneration is needed.
+
+Recovered caches use the existing deduplicated V3 tensor store and a run-local
+`reference_cache/rebuilt_<identity>.json` index. Subsequent upscales reuse them;
+original checkpoint metadata, source media and legacy bundles are not rewritten
+or deleted. An absent cache bundle/object is recoverable; an existing corrupt
+payload still fails integrity validation.
+
+Recovery keeps presentation settings from an exact surviving cache manifest or
+immutable saved recipe/reference lineage. Older takes without those settings
+use `match`, semantic size `512`, and `timestamped_video`; the status explicitly
+lists these defaults. Sequential/source-timeline references additionally need
+their immutable saved Plan timing. Recovery never executes archived workflows.
+
+Connect `video_vae` for native visual reference rebuilds and `audio_vae` for
+native audio. If an original file, saved reference identity, or required VAE is
+unavailable, `error` names the recovery requirement; `text_only` explicitly
+falls back without reference conditioning. Connected Tagged references remain
+an intentional override and bypass automatic recovery.
 
 Segment Save adopts each verified cache object into
 `output/h3_chains/<run_name>/reference_cache/` and records only that run-local
 descriptor. Copying or backing up the parent run therefore preserves everything
 required to rebuild pass-2 Ref2VA conditioning.
+
+New V3 scene caches are small JSON manifests pointing into
+`reference_cache/objects/<tensor-content-hash>.safetensors`. Identical reference
+originals, previews, and encoded latents are stored once across scenes/revisions
+within the project. Shared staging objects are hard-linked into the project
+where supported, otherwise copied once. V1/V2 scene-sized bundles remain readable
+and unchanged until explicitly converted. Updating the nodes does not compact
+or delete existing bundles. The [reference-cache converter](SCHEDULED_REFERENCES.md#converting-existing-bundles)
+can split them losslessly, then retire each old bundle after a verified render
+using the conversion successfully commits through an H3 saver. Small legacy JSON
+addresses and conversion/retirement receipts remain for checkpoint compatibility.
+Objects must not be deleted individually while any scene still references them.
 
 Legacy checkpoints that still point into `output/h3_reference_cache/` migrate
 without a rerender. Selecting their complete branch in Checkpoint Manager
@@ -498,6 +709,8 @@ hard link is unavailable) and returns a run-local descriptor. Migration never
 deletes the global object or rewrites immutable revision metadata. Later branch
 loads resolve the verified run-local equivalent first, so the old staging copy
 can be archived or removed after a successful selection and upscale check.
+Read-only workflow-local/chapter-only selections do not perform this migration;
+checkpoints without an exact cache descriptor still use shared-cache discovery.
 
 Send the backend's decoded **raw** frame batch to both Segment Save and Loop
 End. They remove the parent scene's repeated context head exactly once, persist
@@ -610,6 +823,8 @@ output/h3_chains/<run_name>/
 ├── checkpoints/clip_0001.<revision>.safetensors
 ├── generated_audio/
 ├── reference_cache/
+│   ├── scene_0001.<scene-contract>.json
+│   └── objects/<tensor-content-hash>.safetensors
 ├── chapters/<number>_<chapter_id>/
 │   ├── manifests/<snapshot_id>.json
 │   ├── final/
@@ -692,6 +907,76 @@ relative to that output root, supports nested folders and the same date tokens,
 and may be empty to place the copy directly in `output/`. The existing
 `filename` value is used for both copies, and collisions are versioned.
 
+## Stream pixel-upscale VIDEO to PNG, scene by scene
+
+**Export PNG Sequence + Audio** also has a VIDEO passthrough mode for pixel
+upscales with no saved latent. Put it **inside** the scene loop, before the
+lossy MP4 segment save:
+
+```text
+Final pixel refiner VIDEO -> Export PNG.video -> Segment Save.video
+                                             -> Loop End.video
+Current Scene.state      -> Export PNG.state
+```
+
+Disconnect the exporter's `manifest`, `video_vae` and `audio_vae` in this mode.
+Do not connect the final Loop End manifest back into the in-loop exporter.
+The original four output positions are unchanged; the new `video` output is
+the exact incoming VIDEO, released downstream after the current scene is saved.
+Segment Save still preserves the original audio. The PNG node does not turn
+compressed MP4s back into supposedly lossless originals.
+
+Use `output_folder` for a chosen subfolder of ComfyUI output (relative or
+absolute). When blank, the sequence goes under the upscale profile's
+`frames/<export_name>/`, including the chapter scope when applicable. The first
+exported scene starts at `first_frame_number`; subsequent scenes append without
+resetting numbering. Each scene's repeated RAW context frames are removed using
+the current state, just as in Segment Save. This is the sequential upscale
+delivery clock, not a later editorial reordering or blend pass.
+
+`png_bit_depth` is a user choice: **8** is the existing default; **16** preserves
+the RGB16 file-backed intermediate's precision. Both use lossless PNG compression,
+but 8-bit explicitly quantizes higher-precision input. Neither is an H3 latent
+checkpoint; these are full-resolution pixel backups with provenance and hashes.
+Keep the upscaler's file-backed VIDEO path for bounded memory. Native in-memory
+VIDEO, lazy trims/crops, wrong frame counts and mismatched frame clocks are
+rejected rather than silently materialized or exported incorrectly.
+
+Existing controls remain: `png_compression`, `embed_workflow`, `save_workers`,
+`checkpoint_verification`, and `reuse_existing`. Compression affects speed/size,
+not precision. The decoder streams one frame at a time and never loads all
+scenes; at most `save_workers` PNG jobs are in flight (0 chooses up to eight).
+There is no VAE encode/decode or GPU work in this export path.
+
+Each complete scene is committed to a continuous image sequence plus
+`export.json` before passthrough. The index records source identity, RAW trim,
+numbering, bit depth, profile, source manifest, and PNG hashes. Interrupted
+decode/save operations roll back that scene and keep every earlier scene intact.
+Resume at the next missing scene with the same folder/settings. Exact repeated
+scenes can be reused; `cached` skips hashing when previous PNG size/mtime match,
+but verifies SHA-256 if only the timestamp differs. `strict` always hashes.
+A timestamp difference alone never invalidates byte-identical PNGs or WAVs.
+Incoming VIDEO files are always hashed. Different takes, changed
+settings, missing/modified PNGs, untracked frames or out-of-order scenes never
+overwrite a sequence: select a new folder/export name, or resume the missing
+scene. With reuse disabled, use a new folder for a fresh export. Abrupt process
+death during publication can leave untracked frames; these are kept and reported,
+not silently overwritten. Concurrent writers to one folder are rejected.
+
+Hard links are an optional publishing optimization, not a storage requirement.
+If a network share rejects them (including permission denied / errno 13), the
+exporter falls back to an exclusive file copy with a 1 MiB buffer. Existing
+files are never replaced, and genuine write-permission or storage failures
+still stop the export; no filesystem permissions or project ownership change.
+
+The sequence is a verified export, not an editable working copy. Editing a
+saved PNG makes its checksum differ and prevents VIDEO-mode reuse or append
+when detected, including when exporting a later scene. Even metadata-only edits
+or recompressing identical pixels can change the file hash. Existing PNGs are
+never overwritten. Keep intentional retouches in a separate working copy;
+the VIDEO passthrough still contains the incoming video, not edits made to the
+PNG files. This node does not currently adopt edits into its saved index.
+
 ## Re-decode checkpoints to PNG and WAV
 
 Connect a manifest to **Export PNG Sequence + Audio**, then connect the original
@@ -702,7 +987,8 @@ audio latents, preserves the generated AV boundary ownership, and follows the
 same selected scene order and latent-safe trims as the gap-free PNG sequence.
 
 The node verifies each safetensors checkpoint, decodes one scene at a time,
-removes repeated overlap, converts small frame chunks to 8-bit RGB in one
+removes repeated overlap, converts small frame chunks to the selected 8-bit or
+16-bit RGB depth in one
 operation, and writes each chunk through bounded parallel atomic PNG workers.
 ComfyUI's progress bar covers verification, GPU decode, and saving. The server
 log reports verify, checkpoint-load, decode, conversion, and save timings. The
@@ -711,6 +997,41 @@ deliverables and `export.json` are written under:
 ```text
 output/h3_chains/<run_name>/frames/<export_name>/
 ```
+
+For a Chapter Delivery manifest the equivalent path is
+`chapters/<number>_<chapter_id>/frames/<export_name>/`; `export.json` records
+the chapter number and immutable snapshot id.
+
+Chapter exports default to `reuse_existing = true`. A later export using the
+same export name looks for a successful matching export and reuses its unchanged
+PNG prefix. New scenes continue the existing frame numbering in that folder,
+without decoding or rewriting the earlier PNGs. An identical export skips both
+video and audio decoding. When new scenes extend the chapter, the synchronized
+`audio.wav` is rebuilt and atomically replaced so audio joins remain correct;
+WAV bytes are not blindly appended.
+
+Changed checkpoint revisions, trims, placements, frame numbering, or relevant
+export settings create a new numbered folder instead of mixing old and new
+output. A shorter/older chapter snapshot never truncates a longer export.
+Missing, modified, or untracked PNGs, interrupted exports, and legacy exports
+without the new verification records also use a fresh folder; their existing
+files are left untouched. `cached` checks recorded size and modification time;
+`strict` additionally re-hashes the reusable PNGs and WAV. Concurrent appenders
+to the same chapter/export name are rejected while the first export is running.
+
+Set `reuse_existing = false` to force a fresh folder, especially after changing
+VAE weights, precision, ComfyUI version, or decode settings. The reuse signature
+identifies the VAE class, not the full weights. Whole-Run exports retain their
+existing fresh-folder behaviour regardless of this switch.
+
+Reused PNGs retain their original embedded workflow/manifest metadata.
+`export.json` is the current export index and points to the latest selected
+immutable chapter snapshot; earlier indexes remain in `export.history/`.
+`complete` means that this export succeeded; `chapter_complete` separately
+indicates whether all planned chapter scenes have been generated. The node's
+frame count includes reused frames, and its status reports reused/new counts.
+MP4 assembly still creates a new assembled movie; incremental PNG reuse does
+not imply in-place MP4 appending.
 
 PNG compression is lossless. Use the same VAE, ComfyUI version, precision, and
 decode settings for the closest reconstruction. The checkpointed latent is

@@ -55,7 +55,7 @@ import {
     promptRevisionHelp,
     promptRevisionLabel,
     promptRevisionNavigation,
-} from "./h3_prompt_history_core.mjs?v=0.6.1";
+} from "./h3_prompt_history_core.mjs?v=0.6.2";
 import {
     availableReferenceRecords,
     convertTaggedPictureReference,
@@ -81,7 +81,7 @@ import {
 import {
     availableLoRARoutes,
     loraRouteLabel,
-} from "./h3_lora_scheduler_core.mjs?v=0.6.1";
+} from "./h3_lora_scheduler_core.mjs?v=0.6.2";
 import {
     h3StudioGridMarkers,
     locateStudioTimelineSegment,

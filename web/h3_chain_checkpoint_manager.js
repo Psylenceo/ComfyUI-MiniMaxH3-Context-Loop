@@ -1,8 +1,12 @@
 import {app} from "/scripts/app.js";
 import {api} from "/scripts/api.js";
 import {
+    CHECKPOINT_STAGES,
+    checkpointStageVariants,
+    checkpointVariantLatentStatus,
     checkpointBranchRows,
     checkpointChapterBranchRows,
+    checkpointOutputBranchTip,
     checkpointActivationMode,
     checkpointDeletionTitle,
     checkpointDependencyText,
@@ -11,10 +15,11 @@ import {
     checkpointSelectionJson,
     checkpointLocalSelection,
     checkpointLocalSelectionJson,
+    checkpointDeropeSelectionJson,
     checkpointOutputSelectionJson,
     formatCheckpointBytes,
     selectedCheckpointRevision,
-} from "./h3_checkpoint_manager_core.mjs?v=0.6.5";
+} from "./h3_checkpoint_manager_core.mjs?v=0.6.6";
 import {
     parsePlanJson,
     planToJson,
@@ -36,6 +41,8 @@ const SCENE_PROPERTY = "h3_checkpoint_manager_scene";
 const REVISION_PROPERTY = "h3_checkpoint_manager_revision";
 const CHAPTER_PROPERTY = "h3_checkpoint_manager_chapter";
 const OUTPUT_SCOPE_PROPERTY = "h3_checkpoint_manager_output_scope";
+const STAGE_PROPERTY = "h3_checkpoint_manager_stage";
+const VARIANT_PROPERTY = "h3_checkpoint_manager_variant";
 const COLLAPSED_CHAPTERS_PROPERTY = "h3_checkpoint_manager_collapsed_chapters";
 const PREVIEW_HEIGHT_PROPERTY = "h3_checkpoint_manager_preview_height";
 const DEFAULT_PREVIEW_HEIGHT = 280;
@@ -167,6 +174,7 @@ function injectStyles() {
         --h3cm-panel:var(--comfy-input-bg,#15171d); --h3cm-border:var(--border-color,#586174);
         --h3cm-text:var(--input-text,#edf1f8); --h3cm-muted:color-mix(in srgb,var(--h3cm-text) 58%,transparent);
         --h3cm-accent:color-mix(in srgb,var(--h3cm-text) 38%,#4f83ff);
+        --h3cm-chapter:color-mix(in srgb,var(--h3cm-text) 68%,#d99121);
         --h3cm-danger:color-mix(in srgb,var(--h3cm-text) 40%,#d44747);
         box-sizing:border-box; width:100%; height:100%; min-height:620px; display:flex; flex-direction:column;
         gap:8px; overflow:hidden; padding:10px; border:1px solid var(--h3cm-border); border-radius:9px;
@@ -189,9 +197,14 @@ function injectStyles() {
       .h3cm-output-summary { flex:1 1 250px; overflow-wrap:anywhere; }
       .h3cm-local-label { color:var(--h3cm-accent) !important; font-weight:700; }
       .h3cm-scenes { flex:0 0 auto; overflow:auto; padding-bottom:2px; }
+      .h3cm-stage-tabs { display:flex; flex:0 0 auto; gap:6px; overflow:auto; }
+      .h3cm-stage-tab { white-space:nowrap; }
+      .h3cm-stage-tab[aria-selected="true"] { color:var(--h3cm-accent); border-color:var(--h3cm-accent); }
+      .h3cm-stage-note { flex:0 0 auto; color:var(--h3cm-muted); overflow-wrap:anywhere; }
+      .h3cm-variant-group { display:flex; flex-direction:column; gap:5px; }
       .h3cm-chapter-tabs { flex:0 0 auto; overflow:auto; padding:2px 0; }
       .h3cm-chapter-tab { white-space:nowrap; border-radius:999px !important; }
-      .h3cm-chapter-selected { color:#ffe0a2 !important; border-color:#d6a650 !important;
+      .h3cm-chapter-selected { color:var(--h3cm-chapter) !important; border-color:#d6a650 !important;
         background:color-mix(in srgb,var(--h3cm-panel) 78%,#6d4b16) !important; }
       .h3cm-scene { white-space:nowrap; }
       .h3cm-scene-selected,.h3cm-revision-selected { border-color:var(--h3cm-accent) !important;
@@ -207,7 +220,7 @@ function injectStyles() {
       .h3cm-branch-chapter:last-child { margin-bottom:0; }
       .h3cm-branch-chapter-title { width:100%; min-height:0 !important; display:flex; align-items:center;
         justify-content:flex-start; gap:7px; margin:0 0 7px; padding:2px !important; border:0 !important;
-        background:transparent !important; color:#ffe0a2 !important; font-size:11px !important;
+        background:transparent !important; color:var(--h3cm-chapter) !important; font-size:11px !important;
         font-weight:750 !important; text-align:left; }
       .h3cm-branch-chapter-title:hover,.h3cm-branch-chapter-title:focus-visible {
         color:var(--h3cm-accent) !important; outline:1px solid var(--h3cm-accent) !important; }
@@ -293,12 +306,15 @@ function mount(node) {
         scene:Number(node.properties[SCENE_PROPERTY]) || null,
         revision:String(node.properties[REVISION_PROPERTY] ?? ""),
         chapterTab:String(node.properties[CHAPTER_PROPERTY] ?? "all"),
+        stage:CHECKPOINT_STAGES.some(item => item.id === node.properties[STAGE_PROPERTY])
+            ? node.properties[STAGE_PROPERTY] : "original",
+        variantKey:String(node.properties[VARIANT_PROPERTY] ?? ""),
         collapsedChapters:new Set(
             Array.isArray(node.properties[COLLAPSED_CHAPTERS_PROPERTY])
                 ? node.properties[COLLAPSED_CHAPTERS_PROPERTY].map(String) : [],
         ),
         previewHeight:previewHeight(node.properties[PREVIEW_HEIGHT_PROPERTY]),
-        selected:null, deletion:null, busy:false, requestToken:0,
+        selected:null, outputTip:null, previewTip:null, deletion:null, busy:false, requestToken:0,
         initialRefresh:true, attribution:null, attributionButton:null,
     };
     const root = element("div", "h3cm-root");
@@ -323,7 +339,7 @@ function mount(node) {
     const outputScope = element("select", "h3cm-output-scope");
     outputScope.title = "Output scope only; never changes the project's active branch. Chapter output keeps original scene numbers.";
     outputScope.setAttribute("aria-label", "Checkpoint output scope");
-    for (const [value, label] of [["project", "Through selected scene (all chapters)"], ["chapter", "Selected chapter only"]]) {
+    for (const [value, label] of [["project", "Selected branch + earlier chapters"], ["chapter", "Selected chapter only"]]) {
         const option = element("option", "", label);
         option.value = value;
         outputScope.append(option);
@@ -339,18 +355,23 @@ function mount(node) {
         render();
     });
     const useLocal = button("Use branch locally",
-        "Pin the browsed lineage to selected_manifest in this workflow only. No project activation or Plan change.",
+        "Use the entire browsed branch in this workflow. Previewing an earlier clip does not trim it. Set the processing range downstream. No project activation or Plan change.",
         () => pinLocalOutput());
-    const followSelection = button("Follow browsing",
-        "Release the local pin: selected_manifest will follow the browsed revision again. The project's active branch is unchanged.",
+    const followSelection = button("Follow branch selection",
+        "Release the local pin: output follows branch selections, not clip previews. The project's active branch is unchanged.",
         () => releaseLocalOutput());
     outputRow.append(outputSummary, outputScope, useLocal, followSelection);
     const chapterTabs = element("div", "h3cm-chapter-tabs");
+    const stageTabs = element("div", "h3cm-stage-tabs");
+    stageTabs.setAttribute("role", "tablist");
+    stageTabs.setAttribute("aria-label", "Saved clip processing stage");
+    const stageNote = element("div", "h3cm-stage-note");
     const scenes = element("div", "h3cm-scenes");
     const main = element("div", "h3cm-main");
     const branchesPanel = element("section", "h3cm-panel");
     const branchesTitle = element("div", "h3cm-panel-title", "Revision branches");
-    branchesTitle.append(element("span", "h3cm-shared-legend", "matching color = same saved clip"));
+    const branchLegend = element("span", "h3cm-shared-legend", "matching color = same saved clip");
+    branchesTitle.append(branchLegend);
     const branches = element("div", "h3cm-branches");
     branchesPanel.append(branchesTitle, branches);
     const detail = element("section", "h3cm-panel h3cm-detail");
@@ -379,6 +400,7 @@ function mount(node) {
     const deletionTitle = element("div", "h3cm-delete-title", "Select a checkpoint revision.");
     const deletionBody = element("div");
     const deletionActions = element("div", "h3cm-delete-actions");
+    let retireButtons = [];
     const status = element("div", "h3cm-status");
     const load = button("Load selected branch", "Project-wide: activate this chapter lineage and restore the connected Plan for generation", () => void loadSelected());
     const activate = button("Make branch active (project)", "Project-wide: promote this chapter for all workflows using this Run", () => void activateSelected());
@@ -388,7 +410,7 @@ function mount(node) {
     remove.disabled = true;
     deletionActions.append(load, activate, status, remove);
     deletion.append(deletionTitle, deletionBody, deletionActions);
-    root.append(head, runRow, outputRow, chapterTabs, scenes, main, deletion);
+    root.append(head, runRow, outputRow, stageTabs, stageNote, chapterTabs, scenes, main, deletion);
 
     function setPreviewHeight(value, persist = false) {
         state.previewHeight = previewHeight(value);
@@ -503,10 +525,10 @@ function mount(node) {
             previousScene !== state.scene ||
             previousRevision !== state.revision ||
             previousChapter !== state.chapterTab || previousScope !== outputScope.value;
-        if (selectionWidget) {
+        if (selectionWidget && state.stage === "original") {
             const value = checkpointOutputSelectionJson(
-                selectionWidget.value, state.payload, state.runName, state.selected,
-                selectedChapterRange(), outputScope.value);
+                selectionWidget.value, state.payload, state.runName, state.outputTip,
+                chapterRangeFor(state.outputTip), outputScope.value);
             if (selectionWidget.value !== value) {
                 selectionWidget.value = value;
                 selectionWidget.callback?.(value);
@@ -525,12 +547,18 @@ function mount(node) {
     }
 
     function pinLocalOutput() {
-        if (state.busy || state.attribution || !selectionWidget) return;
+        if (!["original", "derope"].includes(state.stage) || state.busy || state.attribution || !selectionWidget) return;
         try {
-            writeOutputSelection(checkpointLocalSelectionJson(
-                state.payload, state.runName, state.selected, selectedChapterRange(), outputScope.value));
+            const tip = state.previewTip;
+            if (!tip) throw new Error("Choose a branch heading first; this clip belongs to more than one branch.");
+            writeOutputSelection(state.stage === "derope"
+                ? checkpointDeropeSelectionJson(state.payload, state.runName, tip, currentVariant(), chapterRangeFor(tip), outputScope.value)
+                : checkpointLocalSelectionJson(state.payload, state.runName, tip, chapterRangeFor(tip), outputScope.value));
+            state.outputTip = tip;
             status.className = "h3cm-status";
-            status.textContent = "Output pinned to this workflow. Project active branch and connected Plan unchanged.";
+            status.textContent = state.stage === "derope"
+                ? "DeRoPE branch selected for deferred processing. Unsaved scenes use the selected original take; missing/corrupt full latents fail explicitly. Set the range downstream. Project unchanged."
+                : "Whole original branch saved for this workflow. Set start/end on the downstream range selector. Project active branch and connected Plan unchanged.";
             render();
         } catch (error) {
             status.className = "h3cm-status h3cm-error";
@@ -539,11 +567,13 @@ function mount(node) {
     }
 
     function releaseLocalOutput() {
-        if (state.busy || !checkpointLocalSelection(selectionWidget?.value)) return;
+        if (state.stage !== "original" || state.busy || !checkpointLocalSelection(selectionWidget?.value)) return;
+        if (!state.previewTip) return;
+        state.outputTip = state.previewTip;
         writeOutputSelection(checkpointSelectionJson(
-            state.payload, state.runName, state.selected, selectedChapterRange(), outputScope.value));
+            state.payload, state.runName, state.outputTip, chapterRangeFor(state.outputTip), outputScope.value));
         status.className = "h3cm-status";
-        status.textContent = "Output follows browsing again. Project active branch unchanged.";
+        status.textContent = "Output follows whole-branch selections. Clip previews do not change the processing range.";
         render();
     }
 
@@ -556,10 +586,16 @@ function mount(node) {
 
     function renderOutputSelection() {
         const local = checkpointLocalSelection(selectionWidget?.value);
-        outputScope.disabled = state.busy;
+        outputScope.disabled = state.busy || state.stage !== "original";
         if (local) restoreOutputScope();
-        useLocal.disabled = state.busy || Boolean(state.attribution) || !selectionWidget || !canLoadSelected();
-        followSelection.disabled = state.busy || !local;
+        useLocal.textContent = state.stage === "derope" ? "Use DeRoPE branch locally" : "Use branch locally";
+        useLocal.disabled = state.busy || Boolean(state.attribution) || !selectionWidget || !["original", "derope"].includes(state.stage) || !state.previewTip?.ready;
+        useLocal.title = state.stage === "derope"
+            ? "Use this saved DeRoPE branch as the deferred source, with original takes for unsaved scenes. No project activation. A full recovered latent is required."
+            : state.previewTip
+            ? "Save the entire browsed branch for this workflow; set start/end on the downstream range selector. No project activation or Plan change."
+            : "Choose a branch heading first. A shared clip alone does not identify which branch to use.";
+        followSelection.disabled = state.busy || !local || state.stage !== "original" || !state.previewTip;
         outputSummary.className = "h3cm-output-summary";
         if (local) {
             const tip = local.lineage?.at(-1);
@@ -576,8 +612,23 @@ function mount(node) {
                 }
             }
         } else {
-            outputSummary.textContent = "Output follows browsing · use branch locally to pin it; project activation is separate";
+            outputSummary.textContent = state.outputTip
+                ? `Output branch · scenes ${outputScope.value === "chapter" ? chapterRangeFor(state.outputTip).start : 1}–${state.outputTip.scene} · clip clicks preview only; set the processing range downstream`
+                : "Choose a branch heading for output · clip clicks preview only";
         }
+        let saved = local;
+        try { saved ??= JSON.parse(selectionWidget?.value || "null"); } catch { /* invalid selections fail at execution */ }
+        if (saved && state.payload && saved.run_name === state.runName) {
+            const tip = saved.lineage?.at(-1);
+            const range = {start:saved.scope_start_scene, end:saved.scope_end_scene};
+            const fullTip = checkpointOutputBranchTip(state.payload, tip, range);
+            if (!fullTip || Number(fullTip.scene) > Number(tip?.scene)) {
+                outputSummary.textContent += " · old partial selection: choose the desired branch heading"
+                    + (local ? ", then Use branch locally" : "") + " to include its later clips";
+            }
+        }
+        if (saved?.processing_source?.stage === "derope") outputSummary.textContent += ` · DeRoPE source: ${saved.processing_source.profile_path} · original fallback for unsaved scenes`;
+        if (state.stage !== "original") outputSummary.textContent += " · tab browsing does not change output";
     }
 
     function setBusy(value, message = "") {
@@ -589,10 +640,12 @@ function mount(node) {
         load.disabled = state.busy || Boolean(state.attribution) || !canLoadSelected();
         activate.disabled = state.busy || Boolean(state.attribution) || !canActivateSelected();
         remove.disabled = state.busy || Boolean(state.attribution) || !state.deletion?.allowed;
+        for (const control of retireButtons) control.disabled = state.busy || Boolean(state.attribution);
         if (state.attributionButton) {
             state.attributionButton.disabled = state.busy || !state.attribution?.candidate;
         }
         renderOutputSelection();
+        renderStageTabs();
         if (message) status.textContent = message;
     }
 
@@ -604,7 +657,7 @@ function mount(node) {
     function canLoadSelected() {
         const lineage = selectedLineage();
         const scope = selectedChapterRange();
-        return Boolean(state.selected?.ready &&
+        return Boolean(state.stage === "original" && state.selected?.ready &&
             state.selected?.take_kind !== "editorial_alternate" &&
             lineage.length === Number(state.selected.scene) - scope.start + 1);
     }
@@ -614,19 +667,92 @@ function mount(node) {
     }
 
     function selectedActivationMode() {
+        if (state.stage !== "original") return "disabled";
         return checkpointActivationMode(
             state.payload, state.selected, selectedChapterRange());
     }
 
-    function selectRevision(record, requestDeletion = true) {
+    function selectRevision(record, requestDeletion = true, variantKey = "", branchTip = null) {
         state.attribution = null;
+        state.variantKey = variantKey;
+        node.properties[VARIANT_PROPERTY] = variantKey;
         state.selected = record;
         state.scene = record ? Number(record.scene) : null;
         state.revision = record ? String(record.revision) : "";
+        if (state.stage === "original") {
+            state.previewTip = branchTip ?? checkpointOutputBranchTip(
+                state.payload, record, chapterRangeFor(record), state.previewTip ?? state.outputTip);
+        }
         state.deletion = null;
+        state.requestToken += 1;
         persistSelection();
         render();
-        if (record && requestDeletion) void refreshDeletionPreview();
+        if (requestDeletion) void refreshDeletionPreview();
+    }
+
+    function selectOutputBranch(tip) {
+        if (state.stage !== "original") return;
+        state.outputTip = tip;
+        selectRevision(tip, true, "", tip);
+    }
+
+    function stageLabel() {
+        return CHECKPOINT_STAGES.find(item => item.id === state.stage)?.label ?? "Original";
+    }
+
+    function currentVariant() {
+        const records = checkpointStageVariants(state.payload, state.stage);
+        const exact = records.find(item => item.key === state.variantKey);
+        if (exact) return exact;
+        // A vanished explicitly browsed take must not silently turn into
+        // another take on refresh. A key belonging to another tab is fine.
+        if (state.variantKey && !(state.payload?.processing_variants ?? []).some(item => item.key === state.variantKey)) return null;
+        return state.selected ? checkpointStageVariants(state.payload, state.stage, state.selected)[0] ?? null : null;
+    }
+
+    function selectVariant(record, original = null, branchTip = null) {
+        original ??= (state.payload?.revisions ?? []).find(item => (record.originals ?? []).some(
+            source => checkpointRevisionKey(item.scene, item.revision) === checkpointRevisionKey(source.scene, source.revision)));
+        state.previewTip = branchTip ?? checkpointOutputBranchTip(state.payload, original, chapterRangeFor(original), state.previewTip);
+        selectRevision(original, true, record.key);
+    }
+
+    function selectStage(stage) {
+        if (state.busy) return;
+        state.stage = stage;
+        state.attribution = null;
+        state.deletion = null;
+        state.requestToken += 1;
+        node.properties[STAGE_PROPERTY] = stage;
+        if (stage === "original") state.previewTip = checkpointOutputBranchTip(
+            state.payload, state.selected, chapterRangeFor(state.selected));
+        node.graph?.setDirtyCanvas?.(true, true);
+        // A view switch never writes selection_json or promotes a branch.
+        render();
+        void refreshDeletionPreview();
+    }
+
+    function renderStageTabs() {
+        stageTabs.replaceChildren();
+        for (const stage of CHECKPOINT_STAGES) {
+            const count = stage.id === "original" ? (state.payload?.revisions ?? []).filter(item => sceneVisible(item.scene)).length
+                : checkpointStageVariants(state.payload, stage.id, null, activeChapterRange()).length;
+            if (["pixel_upscale", "other"].includes(stage.id) && !count && state.stage !== stage.id) continue;
+            const tab = button(`${stage.label} · ${count}`, `Browse saved ${stage.label} versions; does not activate a generation branch`,
+                () => selectStage(stage.id), "h3cm-stage-tab");
+            tab.setAttribute("role", "tab");
+            tab.setAttribute("aria-selected", String(state.stage === stage.id));
+            tab.disabled = state.busy;
+            stageTabs.append(tab);
+        }
+        stageNote.textContent = state.stage === "original" ? ""
+            : `${stageLabel()} versions grouped by their original source branch. Browsing does not change output.`
+                + (state.stage === "derope" ? " Select a saved take, then Use DeRoPE branch locally for deferred upscaling. Unsaved scenes use their original take." : "");
+        const warnings = state.payload?.processing_variant_warnings ?? [];
+        if (warnings.length) stageNote.textContent += ` ${warnings.length} processing metadata warning(s): ${warnings[0]}`;
+        stageNote.hidden = !stageNote.textContent;
+        branchLegend.textContent = state.stage === "original" ? "matching color = same saved clip"
+            : "saved versions per source clip";
     }
 
     function selectAttribution(parent, slot) {
@@ -679,7 +805,11 @@ function mount(node) {
     }
 
     function selectedChapterRange() {
-        const scene = Number(state.selected?.scene);
+        return chapterRangeFor(state.selected);
+    }
+
+    function chapterRangeFor(record) {
+        const scene = Number(record?.scene);
         const ranges = chapterRanges();
         const selected = ranges.find((range) =>
             scene >= range.start && scene <= range.end);
@@ -717,6 +847,8 @@ function mount(node) {
 
     function selectChapterTab(chapterId) {
         state.chapterTab = chapterId;
+        state.variantKey = "";
+        node.properties[VARIANT_PROPERTY] = "";
         const visibleScenes = (state.payload?.scenes ?? []).filter(
             (scene) => sceneVisible(scene.scene),
         );
@@ -762,8 +894,13 @@ function mount(node) {
         scenes.replaceChildren();
         for (const scene of state.payload?.scenes ?? []) {
             if (!sceneVisible(scene.scene)) continue;
-            const label = `${scene.scene} · ${scene.scene_id} · ${scene.revision_count} take${scene.revision_count === 1 ? "" : "s"}`;
-            const item = button(label, `${formatCheckpointBytes(scene.bytes)} saved for this scene`, () => {
+            const original = state.stage === "original";
+            const count = original ? scene.revision_count : checkpointStageVariants(state.payload, state.stage)
+                .filter(item => Number(item.scene) === Number(scene.scene)).length;
+            const noun = original ? "take" : "version";
+            const label = `${scene.scene} · ${scene.scene_id} · ${count} ${noun}${count === 1 ? "" : "s"}`;
+            const item = button(label, original ? `${formatCheckpointBytes(scene.bytes)} saved for this scene`
+                : `${count} saved ${stageLabel()} versions for this scene`, () => {
                 selectRevision(selectedCheckpointRevision(state.payload, scene.scene));
             }, "h3cm-scene");
             if (Number(scene.scene) === Number(state.scene)) item.classList.add("h3cm-scene-selected");
@@ -772,6 +909,10 @@ function mount(node) {
     }
 
     function renderBranchRows(container, rows) {
+        if (state.stage !== "original") {
+            renderVariantBranchRows(container, rows);
+            return;
+        }
         const localKeys = localRevisionKeys();
         const occurrences = new Map();
         for (const branch of rows) {
@@ -785,18 +926,18 @@ function mount(node) {
             const header = element("div", "h3cm-branch-head");
             const tip = branch.revisions.at(-1) ?? null;
             const selectedTip = Boolean(tip &&
-                Number(state.selected?.scene) === Number(tip.scene) &&
-                String(state.selected?.revision) === String(tip.revision));
+                Number(state.previewTip?.scene) === Number(tip.scene) &&
+                String(state.previewTip?.revision) === String(tip.revision));
             if (selectedTip) row.classList.add("h3cm-branch-selected");
             if (tip) {
                 header.role = "button";
                 header.tabIndex = 0;
-                header.title = `Select this branch through scene ${tip.scene}`;
-                header.addEventListener("click", () => selectRevision(tip));
+                header.title = `Select this whole branch (ends at scene ${tip.scene}); set start/end downstream`;
+                header.addEventListener("click", () => selectOutputBranch(tip));
                 header.addEventListener("keydown", (event) => {
                     if (event.key !== "Enter" && event.key !== " ") return;
                     event.preventDefault();
-                    selectRevision(tip);
+                    selectOutputBranch(tip);
                 });
             }
             const name = element("span", branch.active ? "h3cm-branch-active" : "", branch.active ? "Project active branch" : branch.label);
@@ -810,7 +951,7 @@ function mount(node) {
                 const card = button(
                     `S${revision.scene} · ${revision.revision.slice(0, 8)}`,
                     revision.prompt_preview || revision.scene_id,
-                    () => selectRevision(revision), "h3cm-revision",
+                    () => selectRevision(revision, true, "", tip), "h3cm-revision",
                 );
                 const selected = state.selected?.scene === revision.scene &&
                     state.selected?.revision === revision.revision;
@@ -883,6 +1024,51 @@ function mount(node) {
         }
     }
 
+    function variantCard(record, original = null, branchTip = null) {
+        const card = button(`S${record.scene} · ${record.revision.slice(0, 8)}`,
+            `${record.profile_path}\n${checkpointVariantLatentStatus(record)}`,
+            () => selectVariant(record, original, branchTip), "h3cm-revision h3cm-processing-variant");
+        card.append(element("small", "", record.profile));
+        card.append(element("small", "", `${record.width || "?"}×${record.height || "?"} · ${record.ready ? "saved" : "missing artifacts"}`));
+        card.append(element("small", "", record.latent_saved ? "full latent saved" : "full latent not saved"));
+        if (currentVariant()?.key === record.key) card.classList.add("h3cm-revision-selected");
+        return card;
+    }
+
+    function renderVariantBranchRows(container, rows) {
+        for (const branch of rows) {
+            const row = element("div", "h3cm-branch");
+            const header = element("div", "h3cm-branch-head");
+            header.append(element("span", branch.active ? "h3cm-branch-active" : "",
+                `Source: ${branch.active ? "Project active branch" : branch.label}`));
+            const path = element("div", "h3cm-branch-path");
+            branch.revisions.forEach((original, index) => {
+                if (index) path.append(element("span", "h3cm-arrow", "→"));
+                const group = element("div", "h3cm-variant-group");
+                group.append(element("small", "h3cm-muted", `Original S${original.scene} · ${original.revision.slice(0, 8)}`));
+                const records = checkpointStageVariants(state.payload, state.stage, original);
+                for (const record of records) group.append(variantCard(record, original, branch.revisions.at(-1)));
+                if (!records.length) group.append(button(`S${original.scene} · not saved`,
+                    `No saved ${stageLabel()} version of this source revision`,
+                    () => selectRevision(original, false), "h3cm-revision h3cm-revision-empty"));
+                path.append(group);
+            });
+            row.append(header, path);
+            container.append(row);
+        }
+    }
+
+    function renderUnlinkedVariants() {
+        if (state.stage === "original") return;
+        const records = checkpointStageVariants(state.payload, state.stage, null, activeChapterRange())
+            .filter(item => !(item.originals ?? []).length);
+        if (!records.length) return;
+        branches.append(element("div", "h3cm-muted", "Saved versions with an unavailable or mismatched original (not attached to another take)"));
+        const row = element("div", "h3cm-branch-path");
+        for (const record of records) row.append(variantCard(record));
+        branches.append(row);
+    }
+
     function renderBranches() {
         branches.replaceChildren();
         const ranges = chapterRanges();
@@ -942,7 +1128,8 @@ function mount(node) {
         attributionPanel.replaceChildren();
         attributionPanel.hidden = !state.attribution;
         state.attributionButton = null;
-        const record = state.attribution?.candidate ?? state.selected;
+        const processing = state.stage !== "original";
+        const record = processing ? currentVariant() : state.attribution?.candidate ?? state.selected;
         if (!record) {
             preview.removeAttribute("src");
             delete preview.dataset.source;
@@ -950,7 +1137,10 @@ function mount(node) {
             audio.hidden = true;
             audio.removeAttribute("src");
             delete audio.dataset.source;
-            prompt.textContent = "Select a revision from the branch graph.";
+            prompt.textContent = processing ? (state.variantKey
+                ? "The previously browsed processing take is unavailable. Select a saved version; no other take has been substituted."
+                : `No saved ${stageLabel()} version for this source revision. The original clip has not been substituted.`)
+                : "Select a revision from the branch graph.";
             return;
         }
         if (state.attribution) {
@@ -1015,6 +1205,22 @@ function mount(node) {
             audio.removeAttribute("src");
             delete audio.dataset.source;
         }
+        if (processing) {
+            addInspector("Version", `${stageLabel()} · Scene ${record.scene} · ${record.revision}`);
+            addInspector("Profile", record.profile_path);
+            addInspector("State", record.ready ? "Saved files present (integrity checked at execution)" : `Missing: ${(record.missing_files ?? []).join(", ")}`);
+            addInspector("Original", (record.originals ?? []).map(item => `Scene ${item.scene} · ${item.revision.slice(0, 8)}`).join(", ") || record.source_status);
+            addInspector("Immediate source", record.source_revision || "Unknown");
+            addInspector("Created", localTime(record.created_at));
+            addInspector("Canvas", `${record.width || "?"}×${record.height || "?"} @ 24 fps`);
+            addInspector("Frames", `${record.raw_frames} raw · ${record.delivered_frames} delivered`);
+            addInspector("Latent", checkpointVariantLatentStatus(record));
+            addInspector("Audio", record.audio_route);
+            addInspector("Storage", formatCheckpointBytes(record.size_bytes));
+            addInspector("Metadata", record.metadata_path);
+            prompt.textContent = record.prompt || "No saved scene prompt.";
+            return;
+        }
         addInspector("Identity", `${state.attribution ? "Candidate " : ""}Scene ${record.scene} · ${record.scene_id} · ${record.revision}`);
         addInspector("State", record.take_kind === "editorial_alternate"
             ? `Editorial alternate · ${record.used_in_final_cut ? "used in final cut" : "available"} · ${record.ready ? "Ready" : "Broken"}`
@@ -1050,17 +1256,30 @@ function mount(node) {
 
     function renderDeletion() {
         deletionBody.replaceChildren();
+        retireButtons = [];
+        const processing = state.stage !== "original";
         const activationMode = selectedActivationMode();
-        const rollsBack = activationMode === "rollback";
-        activate.textContent = rollsBack
-            ? "Roll active branch back (project)" : "Make branch active (project)";
-        activate.title = rollsBack
-            ? "Project-wide: retire later active scene pointers in this chapter without deleting saved revisions"
-            : "Project-wide: promote this chapter for all workflows using this Run";
+        const rollsBack = !processing && activationMode === "rollback";
+        remove.textContent = processing ? "Delete processed version" : "Delete selected revision";
+        remove.title = processing ? "Preview and permanently delete only this processed take's owned files" : "Delete an inactive leaf or roll back the active branch tip after confirmation";
         deletion.classList.toggle("h3cm-delete-blocked", Boolean(state.deletion && !state.deletion.allowed));
-        deletionTitle.textContent = checkpointDeletionTitle(state.deletion);
-        load.disabled = state.busy || !canLoadSelected();
-        activate.disabled = state.busy || !canActivateSelected();
+        if (processing) {
+            deletionTitle.textContent = !state.deletion ? "Select a processed version to inspect deletion safety."
+                : state.deletion.allowed
+                    ? `Delete processed version · ${state.deletion.owned_file_count} files · ${formatCheckpointBytes(state.deletion.reclaimed_bytes)} · originals kept`
+                    : state.deletion.blockers?.join(" ") || "Deletion is blocked.";
+            activate.textContent = "Make branch active (project)";
+            load.disabled = activate.disabled = true;
+        } else {
+            activate.textContent = rollsBack
+                ? "Roll active branch back (project)" : "Make branch active (project)";
+            activate.title = rollsBack
+                ? "Project-wide: retire later active scene pointers in this chapter without deleting saved revisions"
+                : "Project-wide: promote this chapter for all workflows using this Run";
+            deletionTitle.textContent = checkpointDeletionTitle(state.deletion);
+            load.disabled = state.busy || !canLoadSelected();
+            activate.disabled = state.busy || !canActivateSelected();
+        }
         remove.disabled = state.busy || !state.deletion?.allowed;
         if (state.attribution) {
             load.disabled = true;
@@ -1068,6 +1287,21 @@ function mount(node) {
             remove.disabled = true;
         }
         if (!state.deletion) return;
+        if (!processing && state.deletion.chapter_references?.length) {
+            const snapshots = element("div", "h3cm-delete-actions");
+            for (const reference of state.deletion.chapter_references) {
+                if (reference.error || !reference.path || !reference.snapshot) continue;
+                const control = button(
+                    `Retire Chapter ${reference.number} snapshot ${reference.snapshot.slice(0, 8)}…`,
+                    "Preview releasing this snapshot's recovery pins. Its JSON is archived; no clips are deleted.",
+                    () => void retireChapterSnapshot(reference),
+                );
+                control.disabled = state.busy || Boolean(state.attribution);
+                retireButtons.push(control);
+                snapshots.append(control);
+            }
+            deletionBody.append(snapshots);
+        }
         const files = (state.deletion.files ?? []).filter((item) => item.exists);
         if (files.length) {
             const list = element("ul", "h3cm-files");
@@ -1077,6 +1311,12 @@ function mount(node) {
                     `${file.shared ? " · shared, kept" : ""}`));
             }
             deletionBody.append(list);
+        }
+        if (processing && state.deletion.retained_independent_takes?.length) {
+            deletionBody.append(element("div", "h3cm-muted",
+                "Independent pixel takes kept: " + state.deletion.retained_independent_takes.map(item =>
+                    `Scene ${item.scene} · ${String(item.revision).slice(0, 8)}`).join(", ") +
+                ". Affected sequence manifests are invalidated; rebuild missing scenes before full-sequence resume."));
         }
         if (state.deletion.dependents?.length) {
             const heading = element(
@@ -1091,6 +1331,16 @@ function mount(node) {
             }
             const list = element("ul", "h3cm-dependents");
             for (const dependent of state.deletion.dependents) {
+                if (processing) {
+                    const item = element("li", "h3cm-dependent",
+                        `Scene ${dependent.scene ?? "?"} · ${String(dependent.revision ?? "").slice(0, 8)} · ${dependent.reason} · ${dependent.metadata_path}`);
+                    item.addEventListener("click", () => {
+                        const variant = (state.payload?.processing_variants ?? []).find(v => v.key === dependent.metadata_path);
+                        if (variant) { selectStage(variant.stage); selectVariant(variant); }
+                    });
+                    list.append(item);
+                    continue;
+                }
                 const action = dependent.leaf
                     ? (dependent.active
                         ? " · active leaf: select to delete it"
@@ -1131,23 +1381,28 @@ function mount(node) {
             : "Select a saved run";
         renderOutputSelection();
         renderChapterTabs();
+        renderStageTabs();
         renderScenes();
         renderBranches();
+        renderUnlinkedVariants();
         renderDetail();
         renderDeletion();
     }
 
     async function refreshDeletionPreview() {
-        const record = state.selected;
+        const processing = state.stage !== "original";
+        const record = processing ? currentVariant() : state.selected;
         const token = ++state.requestToken;
-        if (!record || !state.runName) return;
+        if (!record || !state.runName || state.attribution) return;
         deletionTitle.textContent = "Inspecting owned files and dependencies…";
         remove.disabled = true;
         try {
             const payload = await jsonRequest(
-                "/minimax_h3_context_loop/checkpoint-revisions/delete-preview", {
+                processing ? "/minimax_h3_context_loop/processing-checkpoints/delete-preview"
+                    : "/minimax_h3_context_loop/checkpoint-revisions/delete-preview", {
                     method:"POST", headers:{"Content-Type":"application/json"},
-                    body:JSON.stringify({run_name:state.runName, scene:record.scene, revision:record.revision}),
+                    body:JSON.stringify({run_name:state.runName, scene:record.scene, revision:record.revision,
+                        ...(processing ? {metadata_path:record.key} : {})}),
                 });
             if (token !== state.requestToken) return;
             state.deletion = payload;
@@ -1176,9 +1431,20 @@ function mount(node) {
                 `/minimax_h3_context_loop/checkpoints?${query}`,
                 {cache:"no-store"},
             );
+            // Output is a branch selection, independent of the preview cursor.
+            // Preserve old snapshots on reload; never guess a descendant of a
+            // shared ancestor. The output row explains how to replace an old
+            // partial pin with an explicitly chosen whole branch.
+            let savedOutput = null;
+            try { savedOutput = JSON.parse(selectionWidget?.value || "null"); } catch { /* validated at execution */ }
+            const savedTip = savedOutput?.run_name === state.runName ? savedOutput.lineage?.at(-1) : null;
+            state.outputTip = savedTip
+                ? (state.payload.revisions ?? []).find(item => checkpointRevisionKey(item.scene, item.revision)
+                    === checkpointRevisionKey(savedTip.scene, savedTip.revision)) ?? savedTip
+                : selectedCheckpointRevision(state.payload);
             let selected = selectedCheckpointRevision(
                 state.payload, state.scene, state.revision);
-            if (state.initialRefresh && !checkpointLocalSelection(selectionWidget?.value)) {
+            if (state.stage === "original" && state.initialRefresh && !checkpointLocalSelection(selectionWidget?.value)) {
                 const activeTip = selectedCheckpointRevision(state.payload);
                 if (checkpointRevisionLineage(
                         state.payload, activeTip).length >
@@ -1192,8 +1458,8 @@ function mount(node) {
             status.textContent = state.payload.summary?.broken_count
                 ? `${state.payload.summary.broken_count} broken revision${state.payload.summary.broken_count === 1 ? "" : "s"} found`
                 : "Checkpoint graph is current";
-            selectRevision(selected, false);
-            if (selected) void refreshDeletionPreview();
+            selectRevision(selected, false, state.variantKey);
+            void refreshDeletionPreview();
         } catch (error) {
             state.payload = null;
             state.selected = null;
@@ -1444,6 +1710,11 @@ function mount(node) {
             state.scene = Number(payload.scene);
             state.revision = String(payload.revision);
             await refreshCheckpoints();
+            // Attachment is an explicit branch edit, unlike a preview click.
+            const attached = (state.payload?.revisions ?? []).find(item =>
+                Number(item.scene) === Number(payload.scene) && item.revision === payload.revision);
+            if (attached) selectOutputBranch(checkpointOutputBranchTip(
+                state.payload, attached, chapterRangeFor(attached)) ?? attached);
             status.className = "h3cm-status";
             status.textContent = payload.message;
         } catch (error) {
@@ -1584,7 +1855,49 @@ function mount(node) {
         }
     }
 
+    async function retireChapterSnapshot(reference) {
+        const runName = state.runName, record = state.selected;
+        if (state.busy || state.stage !== "original" || state.attribution || !record) return;
+        setBusy(true, "Inspecting chapter snapshot retirement…");
+        try {
+            const plan = await jsonRequest(
+                "/minimax_h3_context_loop/chapter-snapshots/retire-preview", {
+                    method:"POST", headers:{"Content-Type":"application/json"},
+                    body:JSON.stringify({run_name:runName, path:reference.path}),
+                });
+            // A slow response must not apply to a different run or selection.
+            if (state.runName !== runName || state.selected !== record || state.stage !== "original") return;
+            const scenes = (plan.scenes ?? []).map(item =>
+                `Scene ${item.scene} · ${String(item.revision).slice(0, 8)}${item.active ? " · currently active" : ""}`).join("\n");
+            if (!window.confirm(
+                `Retire Chapter ${plan.chapter_number} snapshot ${plan.chapter_manifest_id.slice(0, 8)}?\n\n` +
+                `${scenes}\n\n${plan.message}\n\n` +
+                `Archive: ${plan.retired_path}\n\n` +
+                "This snapshot will no longer load in Chapter Loader or protect its old takes from cleanup. " +
+                "Workflows pinned to it need a new source. Deleting its inputs later makes full recovery unavailable. " +
+                "Other snapshots and branch dependencies remain protected.")) {
+                status.textContent = "Snapshot retirement cancelled; nothing changed.";
+                return;
+            }
+            const result = await jsonRequest(
+                "/minimax_h3_context_loop/chapter-snapshots/retire", {
+                    method:"POST", headers:{"Content-Type":"application/json"},
+                    body:JSON.stringify({run_name:runName, path:plan.path, snapshot:plan.snapshot}),
+                });
+            await refreshDeletionPreview();
+            status.className = "h3cm-status";
+            status.textContent = result.message;
+        } catch (error) {
+            await refreshDeletionPreview();
+            status.className = "h3cm-status h3cm-error";
+            status.textContent = error.message;
+        } finally {
+            setBusy(false);
+        }
+    }
+
     async function deleteSelected() {
+        if (state.stage !== "original") return deleteProcessedVersion();
         const record = state.selected;
         const plan = state.deletion;
         if (!record || !plan?.allowed || state.busy) return;
@@ -1620,6 +1933,44 @@ function mount(node) {
         }
     }
 
+    async function deleteProcessedVersion() {
+        const record = currentVariant(), plan = state.deletion, runName = state.runName;
+        if (state.busy || !record || !plan?.allowed || plan.metadata_path !== record.key) return;
+        const confirmed = window.confirm(
+            `Permanently delete ${stageLabel()} scene ${record.scene} take ${record.revision.slice(0, 8)} (${record.profile})?\n\n` +
+            `${plan.owned_file_count} files · ${formatCheckpointBytes(plan.reclaimed_bytes)}\n` +
+            "Its current processed pointer and affected branch manifests will be cleared. Original clips, shared references, other takes and assembled videos are kept. " +
+            (plan.retained_independent_takes?.length
+                ? "Later independent pixel clips are kept; rebuild missing scenes before full-sequence resume. " : "") +
+            "This cannot be undone.");
+        if (!confirmed) return;
+        setBusy(true, "Deleting processed version…");
+        try {
+            const payload = await jsonRequest(
+                "/minimax_h3_context_loop/processing-checkpoints/delete", {
+                    method:"POST", headers:{"Content-Type":"application/json"},
+                    body:JSON.stringify({run_name:runName, metadata_path:record.key, snapshot:plan.snapshot}),
+                });
+            // Keep the vanished browse key and output pin: never substitute a different take.
+            await refreshCheckpoints();
+            status.className = "h3cm-status";
+            status.textContent = `${payload.message} Reclaimed ${formatCheckpointBytes(payload.reclaimed_bytes)}.`;
+            let selection;
+            try { selection = JSON.parse(selectionWidget?.value || "null"); } catch { /* unchanged invalid selection */ }
+            if (selection?.processing_source?.branch?.lineage?.some(item => item.metadata_path === record.key)) {
+                status.textContent += " This workflow's output pin referenced the deleted take; explicitly select another source branch before running.";
+            }
+            if (payload.cleanup_pending?.length) status.textContent += ` Cleanup pending: ${payload.cleanup_pending.join(", ")}`;
+        } catch (error) {
+            state.deletion = error.payload?.preview ?? null;
+            status.className = "h3cm-status h3cm-error";
+            status.textContent = error.message;
+            renderDeletion();
+        } finally {
+            setBusy(false);
+        }
+    }
+
     runSelect.addEventListener("change", () => {
         if (checkpointLocalSelection(selectionWidget?.value)) {
             if (!window.confirm("Switch runs and release this workflow's local output pin? The project active branches will not change.")) {
@@ -1631,6 +1982,7 @@ function mount(node) {
         state.runName = runSelect.value;
         state.payload = null;
         state.selected = null;
+        state.outputTip = state.previewTip = null;
         state.scene = null;
         state.revision = "";
         persistSelection();
@@ -1667,6 +2019,9 @@ function mount(node) {
         state.scene = Number(node.properties[SCENE_PROPERTY]) || null;
         state.revision = String(node.properties[REVISION_PROPERTY] ?? "");
         state.chapterTab = String(node.properties[CHAPTER_PROPERTY] ?? "all");
+        state.stage = CHECKPOINT_STAGES.some(item => item.id === node.properties[STAGE_PROPERTY])
+            ? node.properties[STAGE_PROPERTY] : "original";
+        state.variantKey = String(node.properties[VARIANT_PROPERTY] ?? "");
         state.initialRefresh = !state.scene || !state.revision;
     };
     bindSelectionSerializer();

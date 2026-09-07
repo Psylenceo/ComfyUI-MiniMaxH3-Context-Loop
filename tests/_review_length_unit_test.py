@@ -619,6 +619,8 @@ def check_exact_candidate_selection():
     original_st_load = chain._st_load
     original_atomic_json = chain._atomic_json
     original_lock = chain.checkpoint_run_lock
+    original_promote = chain._promote_checkpoint_run_archives
+    promotions = []
     writes = []
     chain._load_checkpoint_revision = lambda *_args: (metadata, "selected.json")
     chain._st_load = lambda _path: {
@@ -628,6 +630,7 @@ def check_exact_candidate_selection():
     }
     chain._atomic_json = lambda path, value: writes.append((path, value))
     chain.checkpoint_run_lock = lambda *_args: nullcontext()
+    chain._promote_checkpoint_run_archives = lambda plan, metadata: promotions.append((plan, metadata))
     try:
         accepted, selected_state = chain._select_review_candidate({
             "plan": current_plan,
@@ -644,11 +647,13 @@ def check_exact_candidate_selection():
         assert selected_state["plan"]["shots"][1]["seed"] == 2
         assert "candidate_batch" not in selected_state
         assert writes and writes[0][1] is metadata
+        assert promotions == [(selected_state["plan"], metadata)]
     finally:
         chain._load_checkpoint_revision = original_load_revision
         chain._st_load = original_st_load
         chain._atomic_json = original_atomic_json
         chain.checkpoint_run_lock = original_lock
+        chain._promote_checkpoint_run_archives = original_promote
 
 
 check_exact_candidate_selection()

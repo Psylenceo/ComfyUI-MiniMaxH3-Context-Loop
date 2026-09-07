@@ -15,13 +15,26 @@ result later—without keeping the whole production in memory.
 
 ## Changelog
 
-### Unreleased
+### 0.6.2 — Upscale recovery and saving
+
+- **Recover lost reference caches.** Upscale rebuilds missing Ref2VA tensors
+  from verified saved reference media. Per-reference tensor files avoid repeated
+  bundles; legacy caches remain readable and can be converted safely.
+- **Reliable deferred sources.** Full-sequence upscale respects selected final-cut
+  alternates and saved DeRoPE sources. Checkpoint previews no longer shorten the
+  processing range. Processing tabs expose saved versions and guarded cleanup.
+- **Scene-by-scene PNG export.** The existing PNG Sequence + Audio node accepts
+  file-backed VIDEO and passes it through after saving each scene, with selectable
+  8/16-bit PNGs, bounded memory, and network-storage-safe reuse.
+- **Exact recovery records.** New takes keep their own Plan/workflow snapshots;
+  later edits cannot replace those saved settings. Original media must still
+  exist for a lost reference cache to be rebuilt.
 
 - **Grouped source audio.** Assign full mix, vocals and instrumental in the
   Carousel or Audio Tracks node. Vocals drive lip-sync; the full mix stays the
   soundtrack. Per-scene Lip-sync On/Off controls do not alter delivery.
 
-### 0.6.1 — Latest updates
+### 0.6.1 — Chapter output and authoring
 
 - **Chapter output.** Export or recover a chosen chapter, including its already
   generated scenes while it is unfinished. Chapters can use different resolutions;

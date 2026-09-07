@@ -52,12 +52,12 @@ import {
 import {
     availableLoRARoutes,
     loraRouteLabel,
-} from "./h3_lora_scheduler_core.mjs?v=0.6.1";
+} from "./h3_lora_scheduler_core.mjs?v=0.6.2";
 import {
     MODERN_PLAN_NODE as MODERN_NODE_NAME,
     MODERN_PLAN_WIDGET_NAMES as MODERN_BACKING_WIDGETS,
     upgradeLegacyPlanNode,
-} from "./h3_plan_upgrade_core.mjs?v=0.6.1";
+} from "./h3_plan_upgrade_core.mjs?v=0.6.2";
 
 // This scene editor is an original implementation. Its quick @ reference and
 // # dialogue interactions are inspired by nkxx188/ComfyUI-MiniMaxH3-Easy,

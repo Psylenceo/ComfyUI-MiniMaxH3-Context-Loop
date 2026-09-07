@@ -7,11 +7,11 @@ import {
     assetInputNumber,
     collectAssetBindings,
     nodeType,
-} from "./h3_run_assets_core.mjs?v=0.6.1";
+} from "./h3_run_assets_core.mjs?v=0.6.2";
 import {
     runArchiveOptionLabel,
     runManagerIdentity,
-} from "./h3_run_manager_core.mjs?v=0.6.1";
+} from "./h3_run_manager_core.mjs?v=0.6.2";
 import {
     refreshRestoredPlanEditors,
     restoreConnectedPolicyInputs,

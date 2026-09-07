@@ -11,11 +11,11 @@ import {
     buildPromptAssistantContext,
     makePromptAssistRequest,
 } from "./h3_prompt_assistant_core.mjs?v=0.6.5";
-import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.6.1";
+import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.6.2";
 import {
     directOptimizerConfigurationError,
     makeDirectPromptOptimizeRequest,
-} from "./h3_prompt_optimizer_core.mjs?v=0.6.1";
+} from "./h3_prompt_optimizer_core.mjs?v=0.6.2";
 import {
     openPromptOptimizerSettings,
     promptOptimizerBackend,
@@ -27,7 +27,7 @@ import {
     promptRevisionLabel,
     promptRevisionNavigation,
     promptRevisionTree,
-} from "./h3_prompt_history_core.mjs?v=0.6.1";
+} from "./h3_prompt_history_core.mjs?v=0.6.2";
 import {
     availableReferenceRecords,
     convertTaggedPictureReference,
