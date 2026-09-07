@@ -127,6 +127,16 @@ app.registerExtension({
         add("Direct API format", {
             id: PROMPT_OPTIMIZER_SETTING_IDS.apiFormat,
             name: "Direct API format",
+            tooltip: "Which endpoint and request shape the Direct API call uses:\n\n" +
+                "• OpenAI-compatible Chat Completions — POST {Direct API URL}/v1/chat/completions. " +
+                "Works with OpenAI, most local servers (LM Studio, llama.cpp, Ollama's OpenAI-compatible " +
+                "route, etc.), and most third-party proxies. Reference media: images only.\n\n" +
+                "• OpenAI Responses — POST {Direct API URL}/v1/responses. OpenAI's newer Responses " +
+                "API shape; use this only against a server that actually implements /v1/responses. " +
+                "Reference media: images only.\n\n" +
+                "• Gemini Native — POST {Direct API URL}/v1beta/models/{Direct API model}:" +
+                "generateContent. Google's native Gemini request/response shape; requires a Direct API " +
+                "key. Reference media: images, video, and audio.",
             type: "combo",
             defaultValue: "openai",
             options: [
