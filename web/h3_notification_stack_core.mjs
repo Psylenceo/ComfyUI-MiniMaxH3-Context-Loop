@@ -35,6 +35,7 @@ export function createNotificationStack({
         throw new Error("A document with createElement is required.");
     }
     const items = new Map();
+    const dismissTimers = new Map();
     let root = null;
     let anchor = null;
     let anchorResizeObserver = null;
@@ -174,13 +175,27 @@ export function createNotificationStack({
     function show(key, message, tone = "info", {
         role = tone === "error" ? "alert" : "status",
         live = tone === "error" ? "assertive" : "polite",
+        durationMs = 0,
     } = {}) {
         const item = ensureItem(key, tone, role, live);
         item.textContent = String(message);
+        const priorTimer = dismissTimers.get(key);
+        if (priorTimer != null) window?.clearTimeout?.(priorTimer);
+        dismissTimers.delete(key);
+        if (Number(durationMs) > 0) {
+            const timer = (window?.setTimeout ?? globalThis.setTimeout)(() => {
+                dismissTimers.delete(key);
+                clear(key);
+            }, Number(durationMs));
+            dismissTimers.set(key, timer);
+        }
         return item;
     }
 
     function clear(key) {
+        const priorTimer = dismissTimers.get(key);
+        if (priorTimer != null) window?.clearTimeout?.(priorTimer);
+        dismissTimers.delete(key);
         const item = items.get(key);
         if (!item) return;
         item.remove();

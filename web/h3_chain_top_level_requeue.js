@@ -45,6 +45,7 @@ const PLAN_TYPES = new Set(["MiniMaxH3ChainPlan", "MiniMaxH3ChainPlanModern"]);
 const QUEUE_POLL_INTERVAL_MS = 500;
 const QUEUE_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_OBSERVED_PROMPTS = 100;
+const TRANSIENT_NOTICE_MS = 5000;
 
 let notifications = null;
 let pumpActive = false;
@@ -126,7 +127,9 @@ function ensureNotifications() {
 }
 
 function showTransient(message) {
-    ensureNotifications().show("requeue-transient", message, "info");
+    ensureNotifications().show("requeue-transient", message, "info", {
+        durationMs: TRANSIENT_NOTICE_MS,
+    });
 }
 
 function showWarning(message) {
