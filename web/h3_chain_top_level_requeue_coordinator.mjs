@@ -35,6 +35,16 @@ export async function runRequeueLifecycle({current, waitSafe, cleanup, select, c
 
 // Identity selection is kept in the coordinator boundary so callers cannot
 // accidentally fall back to list order. `match` is the shared strict matcher.
+export function resolveProjectRun(planNode) {
+    const widget = (node, name) => node?.widgets?.find((item) => item.name === name)?.value;
+    const input = planNode?.inputs?.find((item) => item.name === "project_assets");
+    const link = input?.link != null ? planNode?.graph?.links?.[input.link] : null;
+    const manager = link ? planNode?.graph?.getNodeById?.(link.origin_id) : null;
+    const managed = manager?.comfyClass === "MiniMaxH3ProjectAssetManager"
+        ? String(widget(manager, "run_name") ?? "").trim() : "";
+    return managed || String(widget(planNode, "run_name") ?? "").trim();
+}
+
 export async function selectAndClaim({record, handoffs, match, resolveRun, claim}) {
     const runName = resolveRun(record);
     if (!runName || runName !== record.runName) return null;

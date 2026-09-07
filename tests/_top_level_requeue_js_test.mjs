@@ -219,7 +219,6 @@ assert.match(source, /defaultValue:\s*false/);
 assert.match(source, /getSettingValue\?\.\(SETTING_ID\) === true/);
 // Workflow/run identity validation before requeue.
 assert.match(source, /function requireVisibleWorkflow\(record\)/);
-assert.match(source, /widgetByName\(planNode, "run_name"\)/);
 assert.match(source, /workflowIdentity !== record\.workflowIdentity/);
 // Predecessor checkpoint validation (spec: queue-safe requirement).
 assert.match(source, /checkpoints\?run_name=/);

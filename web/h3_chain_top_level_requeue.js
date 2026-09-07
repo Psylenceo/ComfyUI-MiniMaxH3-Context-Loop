@@ -13,7 +13,7 @@ import {
     resumeHint,
 } from "./h3_chain_top_level_requeue_core.mjs?v=0.6.5";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.2";
-import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
+import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, resolveProjectRun} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
 
 // Top-level scene requeue coordinator (M3, candidate_count = 1).
 //
@@ -286,14 +286,7 @@ function onTerminalFailure(kind, detail) {
 }
 
 function authoritativeRunName(planNode) {
-    const input = planNode?.inputs?.find((item) => item.name === "project_assets");
-    const link = input?.link != null ? planNode.graph?.links?.[input.link] : null;
-    const manager = link ? planNode.graph?.getNodeById?.(link.origin_id) : null;
-    if (nodeType(manager) === PROJECT_ASSET_MANAGER_TYPE) {
-        const managed = String(widgetByName(manager, "run_name")?.value ?? "").trim();
-        if (managed) return managed;
-    }
-    return String(widgetByName(planNode, "run_name")?.value ?? "").trim();
+    return resolveProjectRun(planNode);
 }
 
 function requireVisibleWorkflow(record) {
