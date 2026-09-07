@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import {submitWithPromptIdentity, submissionFailure} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
+import {submitWithPromptIdentity, submissionFailure, createContinuationTracker} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
 import {
     DEFAULT_CLEANUP_DELAY_MS,
     EXECUTION_MODES,
@@ -26,6 +26,13 @@ assert.deepEqual(await submitWithPromptIdentity({app: {queuePrompt: async () => 
 assert.deepEqual(await submitWithPromptIdentity({app: {queuePrompt: async () => true}, api: {}}), {kind: "uncertain", promptId: ""});
 assert.equal(submissionFailure({status: 422}), "rejected");
 assert.equal(submissionFailure(new Error("network")), "uncertain");
+const transitions = [];
+const tracker = createContinuationTracker({transition: async (...args) => transitions.push(args)});
+tracker.track("run", "handoff", "accepted-123");
+assert.equal(await tracker.started("other"), false);
+assert.deepEqual(transitions, []);
+assert.equal(await tracker.started("accepted-123"), true);
+assert.deepEqual(transitions, [["run", "handoff", "consumed"]]);
 
 // --- mode contract ---------------------------------------------------------
 
@@ -229,7 +236,6 @@ assert.doesNotMatch(source, /plan_json/);
 // Same workflow queued as a NEW top-level prompt.
 // queued/consumed lifecycle via the durable routes.
 assert.match(source, /handoffs\/transition/);
-assert.match(source, /"consumed"/);
 assert.match(source, /"queued"/);
 assert.match(source, /"uncertain"/);
 assert.match(source, /accepted === false/);

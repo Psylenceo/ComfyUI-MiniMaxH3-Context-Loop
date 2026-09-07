@@ -13,7 +13,7 @@ import {
     resumeHint,
 } from "./h3_chain_top_level_requeue_core.mjs?v=0.6.5";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.2";
-import {submitWithPromptIdentity, submissionFailure} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
+import {submitWithPromptIdentity, submissionFailure, createContinuationTracker} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
 
 // Top-level scene requeue coordinator (M3, candidate_count = 1).
 //
@@ -52,7 +52,8 @@ const TRANSIENT_NOTICE_MS = 5000;
 
 let notifications = null;
 let pumpActive = false;
-let continuationWait = null; // {runName, handoffId, promptId} after acceptance
+let continuationWait = null; // legacy mirror for completion notices
+let continuationTracker = null;
 let requeueEpoch = 0; // invalidates sleeps/polls when opt-in is withdrawn
 const sceneRecords = new Map();   // prompt_id -> observed H3 scene record
 const requeueQueue = [];
@@ -266,13 +267,7 @@ function onExecutionSuccess(detail) {
 
 function onContinuationStart(detail) {
     const promptId = String(detail?.prompt_id ?? "");
-    if (!continuationWait || continuationWait.promptId !== promptId) return;
-    // execution_start is emitted for every normal prompt; unlike a UI output
-    // from Loop Start it is a real, prompt-specific executor event.
-    const wait = continuationWait;
-    continuationWait = null;
-    void postHandoffTransition(wait.runName, wait.handoffId, "consumed")
-        .catch((error) => showError(`Marking the handoff consumed failed: ${error?.message || error}`));
+    void continuationTracker?.started(promptId);
 }
 
 function onTerminalFailure(kind, detail) {
@@ -513,6 +508,11 @@ async function processRequeue(record, epoch) {
                 handoffId: String(handoff.handoff_id),
                 promptId: acceptedPromptId,
             };
+            continuationTracker ??= createContinuationTracker({
+                transition: postHandoffTransition,
+                reportError: (error) => showError(`Marking the handoff consumed failed: ${error?.message || error}`),
+            });
+            continuationTracker.track(runName, handoff.handoff_id, acceptedPromptId);
             await postHandoffTransition(
                 runName, handoff.handoff_id, "queued", acceptedPromptId);
         } catch (error) {
