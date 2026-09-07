@@ -5,6 +5,23 @@ this file records the detailed changes.
 
 ## Unreleased
 
+- Added a durable review-gate snapshot (`review_inventory.py`, format
+  `h3_review_snapshot_v1`) under the run-local orchestration directory so a
+  candidate batch stays reviewable after a browser refresh or a ComfyUI
+  crash/restart without a live PromptExecutor. The snapshot holds identity
+  only (token, run, scene, candidate revisions/seeds, deadline); previews
+  come from the saved segment/checkpoint inventory, tensors are rejected on
+  write, and the Plan JSON is unchanged. Approve & continue still promotes
+  the selected revision and creates the lightweight next-scene handoff;
+  Approve & stop never queues.
+- Added a top-level scene requeue mode (`execution_mode` on Chain Loop End,
+  default `recursive_legacy`). In `top_level_requeue` mode the loop stops
+  after the scene checkpoint, writes a durable `next_scene` handoff plus a
+  partial through-clip manifest instead of recursing, and the frontend
+  coordinator (new web extension) re-queues the same workflow as a new
+  top-level prompt after queue-safe state plus a configurable cleanup
+  interval, claiming the handoff exactly once. The mode lives on the node,
+  never in the Plan JSON; errors and interruptions never auto-queue.
 - Added a durable top-level handoff store (`handoff_state.py`, format
   `h3_top_level_handoff_v1`) under
   `output/h3_chains/<run_name>/orchestration/` for separate run-local

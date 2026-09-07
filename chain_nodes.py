@@ -101,6 +101,11 @@ from .handoff_state import (
     HandoffStore as _HandoffStore,
     IllegalHandoffTransitionError as _IllegalHandoffTransitionError,
 )
+from .review_inventory import (
+    load_review_snapshots as _load_review_snapshots,
+    mark_review_snapshot_decided as _mark_review_snapshot_decided,
+    write_review_snapshot as _write_review_snapshot,
+)
 from .prompt_history import PromptHistoryStore
 from .prompt_optimizer import optimize_prompt_payload
 from .run_manager import RunArchiveManager, archive_policy_inputs
@@ -20585,6 +20590,22 @@ class MiniMaxH3ChainReview:
             "current_length": int(shot["raw_frames"]),
             "candidates": candidates,
         }
+        # M5 durable review: persist a lightweight (tensor-free) snapshot so
+        # the batch stays reviewable after a browser refresh or a ComfyUI
+        # crash/restart. The snapshot holds identity only (token, run,
+        # scene, candidate revision/seed, deadline); previews come from the
+        # saved segment/checkpoint inventory, never from live tensors. The
+        # Plan JSON is never touched (PLAN_SCHEMA_INVARIANT_SPEC).
+        try:
+            _write_review_snapshot(
+                _run_dir(plan), token, str(plan.get("run_name") or ""),
+                int(payload.get("clip_index") or index),
+                _review_public_candidates(candidates),
+                deadline, float(server_now))
+        except (OSError, TypeError, ValueError) as exc:
+            _LOG.warning(
+                "H3 Chain durable review snapshot failed (review stays "
+                "live only): %s", exc)
         PromptServer.instance.send_sync(
             "minimax_h3_context_loop_review", dict(payload),
             PromptServer.instance.client_id)
@@ -20658,6 +20679,20 @@ class MiniMaxH3ChainReview:
             _PENDING_REVIEWS.pop(token, None)
             if not future.done():
                 future.cancel()
+            # M5 durable review: mark the snapshot decided so a restart does
+            # not resurface a resolved gate. Interrupts are marked with
+            # action "interrupted": the durable candidate records remain
+            # reviewable, the live gate does not.
+            try:
+                decided_action = "interrupted"
+                if isinstance(locals().get("decision"), dict):
+                    decided_action = str(
+                        locals()["decision"].get("action") or "interrupted")
+                _mark_review_snapshot_decided(
+                    _run_dir(plan), token, decided_action, time.time())
+            except (OSError, TypeError, ValueError) as exc:
+                _LOG.warning(
+                    "H3 Chain durable review snapshot update failed: %s", exc)
 
         action = decision["action"]
         if action == "next_candidate":
@@ -26133,6 +26168,47 @@ async def _list_pending_reviews(_request):
         payload = dict(item["public"])
         payload["server_now"] = time.time()
         reviews.append(payload)
+    # M5 durable review: after a browser refresh (or a ComfyUI crash/restart)
+    # the live pending-review object may be gone, but saved candidate batches
+    # remain reviewable from the durable orchestration snapshots. Surface
+    # pending snapshots that have no live entry; media previews come from the
+    # saved segment/checkpoint inventory, never from live tensors.
+    live_tokens = {
+        str(item["public"].get("token") or "")
+        for item in list(_PENDING_REVIEWS.values())
+        if not item["future"].done()
+    }
+    runs_dir = os.path.join(_output_root(), "h3_chains")
+    try:
+        run_names = sorted(os.listdir(runs_dir))
+    except OSError:
+        run_names = []
+    for run_name in run_names:
+        run_dir = os.path.join(runs_dir, run_name)
+        if not os.path.isdir(run_dir):
+            continue
+        for snapshot in _load_review_snapshots(run_dir):
+            if snapshot.get("status") != "pending":
+                continue
+            token = str(snapshot.get("token") or "")
+            if not token or token in live_tokens:
+                continue
+            live_tokens.add(token)
+            reviews.append({
+                "token": token,
+                "durable": True,
+                "run_name": str(snapshot.get("run_name") or run_name),
+                "clip_index": snapshot.get("scene"),
+                "candidates": snapshot.get("candidates") or [],
+                "deadline": snapshot.get("deadline"),
+                "server_now": time.time(),
+                "video": None,
+                "has_audio": False,
+                "warning": (
+                    "Durable review: saved candidates remain reviewable "
+                    "after a restart; previews load from the saved "
+                    "segment/checkpoint inventory."),
+            })
     return web.json_response({"reviews": reviews})
 
 

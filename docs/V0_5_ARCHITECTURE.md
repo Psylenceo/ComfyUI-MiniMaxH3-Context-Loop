@@ -246,6 +246,36 @@ re-claim. Corrupt or unknown-version records raise, are listed with a
 corruption reason, and are never auto-queued, auto-repaired, or reverted;
 they are left exactly as found for manual recovery.
 
+## Durable review gate
+
+A pending Review Gate also persists a lightweight identity snapshot
+(`review_inventory.py`, format `h3_review_snapshot_v1`) under
+`output/h3_chains/<run_name>/orchestration/review_<token>.json`: token, run
+name, scene, the public candidate list (number, revision, seed, created_at,
+has_audio, warning), and the deadline. No IMAGE tensors or media bytes are
+stored; previews always come from the saved segment/checkpoint inventory,
+which remains authoritative. Snapshots are written when a review becomes
+pending, marked `decided` (with the decision action) when it resolves, and
+re-surfaced by the review list route with `durable: true` after a browser
+refresh or a ComfyUI crash/restart, so saved candidates stay reviewable
+without a live PromptExecutor. Tensor-like values are rejected on write, and
+the Plan JSON is never touched.
+
+## Top-level scene requeue mode
+
+`MiniMax H3 Context Loop End` exposes an optional `execution_mode` widget
+(default `recursive_legacy`, unchanged behavior). In `top_level_requeue`
+mode the loop stops immediately after the scene checkpoint is persisted: it
+writes a durable `next_scene` handoff and a partial through-clip manifest
+instead of recursively expanding the next H3 scene inside the same prompt.
+The frontend coordinator waits for queue-safe state plus a configurable
+cleanup interval, validates the workflow identity and the predecessor
+checkpoint, claims the handoff exactly once, sets the existing Loop Start
+widgets, and queues the same workflow as a new top-level prompt. Errors and
+interruptions never auto-queue; a pending handoff can be resumed or
+cancelled manually. The mode lives on the node (workflow JSON), never in
+the Plan JSON.
+
 ## Socket presentation rules
 
 The primary graph displays only generation-bearing connections. Status,
