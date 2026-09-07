@@ -406,13 +406,12 @@ async function processRequeue(record, epoch) {
                 const remaining = delay - (Date.now() - startedAt);
                 if (remaining > 0) await sleep(remaining);
             },
-            claim: async () => {
-                // The remaining validation/claim block below is reached only
-                // after the shared lifecycle's cancellation boundary.
-                return true;
-            },
-            submit: async () => true,
+            select: async () => true,
+            claim: async () => true,
+            prepare: async () => {},
+            submit: async () => ({kind: "accepted"}),
             release: async () => {},
+            uncertain: async () => {},
         });
         requireCurrentOperation(epoch);
         showTransient("Checking the workflow and predecessor checkpoint…");

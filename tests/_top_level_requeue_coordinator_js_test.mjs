@@ -11,8 +11,8 @@ async function scenario(which) {
   const work = runRequeueLifecycle({current,
     waitSafe: async () => { if (which === "poll") await poll.promise; },
     cleanup: async () => { if (which === "cleanup") await delay.promise; },
-    claim: async () => { claims++; if (which === "claim") await claimed.promise; return "h"; },
-    submit: async () => { submits++; return "ok"; }, release: async () => { releases++; }}).catch(() => {});
+    select: async () => "h", claim: async () => { claims++; if (which === "claim") await claimed.promise; return "h"; },
+    prepare: async () => {}, submit: async () => { submits++; return {kind:"accepted"}; }, release: async () => { releases++; }, uncertain: async () => {}}).catch(() => {});
   await Promise.resolve(); await Promise.resolve();
   enabled = false;
   poll.resolve(); delay.resolve(); claimed.resolve(); await work;
@@ -35,4 +35,9 @@ calls=[]; selected=await selectAndClaim({record,handoffs:{handoffs:[exact]},matc
 assert.equal(selected,null); assert.deepEqual(calls,[]);
 const projectRecord={...record,runName:"actual-run"}; calls=[]; selected=await selectAndClaim({record:projectRecord,handoffs:{handoffs:[{...exact,workflow_fingerprint:"wf-current"}]},match:matchingNextSceneHandoff,resolveRun:()=>"actual-run",claim:async (...x)=>calls.push(x)});
 assert.equal(selected.handoff_id,"exact"); assert.deepEqual(calls,[["actual-run","exact"]]);
+for (const mode of ["rejected", "network"]) {
+ let claim=0, submit=0, release=0, uncertain=0;
+ await runRequeueLifecycle({current:()=>{},waitSafe:async()=>{},cleanup:async()=>{},select:async()=>exact,claim:async()=>claim++,prepare:async()=>{},submit:async()=>{submit++; if(mode==="network") throw Error("network"); return {kind:"rejected"};},release:async()=>release++,uncertain:async()=>uncertain++});
+ assert.equal(claim,1); assert.equal(submit,1); assert.equal(release,mode==="rejected"?1:0); assert.equal(uncertain,mode==="network"?1:0);
+}
 console.log("top-level requeue coordinator lifecycle: ok");
