@@ -28891,6 +28891,29 @@ async def _plan_studio_source_preview(request):
     })
 
 
+_PROMPT_OPTIMIZER_EXTRA_ORIGINS_SETTING = \
+    "MiniMaxH3ContexLoop.PromptOptimizer.ExtraAllowedOrigins"
+
+
+def _prompt_optimizer_extra_allowed_origins(request) -> str:
+    """Read the requesting user's own additional-origins setting.
+
+    Reads the signed-in user's persisted ``comfy.settings.json`` the same
+    way ComfyUI's own GET /settings route does - never from the request
+    body - so a workflow itself can never grant its own Direct API origin
+    an exemption from the allow-list.
+    """
+    if PromptServer is None or PromptServer.instance is None:
+        return ""
+    try:
+        settings = PromptServer.instance.user_manager.settings.get_settings(request)
+    except web.HTTPUnauthorized:
+        return ""
+    if not isinstance(settings, dict):
+        return ""
+    return str(settings.get(_PROMPT_OPTIMIZER_EXTRA_ORIGINS_SETTING) or "")
+
+
 async def _optimize_scene_prompt(request):
     try:
         body = await request.json()
@@ -28898,8 +28921,10 @@ async def _optimize_scene_prompt(request):
         return web.json_response(
             {"error": "The prompt optimizer request must contain JSON."},
             status=400)
+    extra_origins = await asyncio.to_thread(
+        _prompt_optimizer_extra_allowed_origins, request)
     try:
-        payload = await optimize_prompt_payload(body)
+        payload = await optimize_prompt_payload(body, extra_origins)
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=400)
     except RuntimeError as exc:

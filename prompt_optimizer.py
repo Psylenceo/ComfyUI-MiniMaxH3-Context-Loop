@@ -88,15 +88,15 @@ def _normalized_origin(value: str, label: str) -> str:
     return "%s://%s" % (scheme, authority)
 
 
-def _allowed_origins() -> frozenset[str]:
-    """Build the server-owned exact-origin allow-list.
+def _parse_extra_origins(configured: str, label: str) -> frozenset[str]:
+    """Parse a comma-separated origin list from a single trusted source.
 
-    Operators may add compatible public or local providers through an
-    environment variable. Request bodies can never extend this list.
+    Shared by the environment variable and the per-user setting below -
+    both are server-owned inputs a request body can never reach, just with
+    different operator-facing configuration surfaces.
     """
-    allowed = set(DEFAULT_ALLOWED_ORIGINS)
-    configured = str(os.environ.get(ALLOWED_ORIGINS_ENV) or "").strip()
-    for raw in configured.split(","):
+    extra: set[str] = set()
+    for raw in str(configured or "").split(","):
         entry = raw.strip()
         if not entry:
             continue
@@ -104,25 +104,43 @@ def _allowed_origins() -> frozenset[str]:
         if parsed.path not in ("", "/") or parsed.query or parsed.fragment:
             raise ValueError(
                 "%s entries must be origins such as "
-                "https://api.example.com or http://127.0.0.1:1234." %
-                ALLOWED_ORIGINS_ENV)
-        allowed.add(_normalized_origin(entry, ALLOWED_ORIGINS_ENV))
+                "https://api.example.com or http://127.0.0.1:1234." % label)
+        extra.add(_normalized_origin(entry, label))
+    return frozenset(extra)
+
+
+def _allowed_origins(extra_origins: str = "") -> frozenset[str]:
+    """Build the server-owned exact-origin allow-list.
+
+    Operators may add compatible public or local providers through an
+    environment variable, and a signed-in user may add their own through a
+    ComfyUI setting (``extra_origins``, read server-side from that user's
+    persisted settings file - never from the request body). Request bodies
+    can never extend this list themselves either way.
+    """
+    allowed = set(DEFAULT_ALLOWED_ORIGINS)
+    allowed |= _parse_extra_origins(
+        os.environ.get(ALLOWED_ORIGINS_ENV) or "", ALLOWED_ORIGINS_ENV)
+    allowed |= _parse_extra_origins(
+        extra_origins, "Additional allowed Direct API origins")
     return frozenset(allowed)
 
 
-def _validate_api_destination(value: str) -> urllib.parse.SplitResult:
+def _validate_api_destination(
+        value: str, extra_origins: str = "") -> urllib.parse.SplitResult:
     parsed = urllib.parse.urlsplit(str(value or "").strip())
     origin = _normalized_origin(value, "Direct API URL")
-    if origin not in _allowed_origins():
+    if origin not in _allowed_origins(extra_origins):
         raise ValueError(
             "Direct API origin %s is not allowed by this server. Use OpenAI, "
-            "Gemini, or OpenRouter, or add the exact origin to %s before "
-            "starting ComfyUI." % (origin, ALLOWED_ORIGINS_ENV))
+            "Gemini, or OpenRouter, add the exact origin to %s before "
+            "starting ComfyUI, or add it to \"Additional allowed Direct API "
+            "origins\" in ComfyUI Settings." % (origin, ALLOWED_ORIGINS_ENV))
     return parsed
 
 
-def _base_url(value: str) -> str:
-    parsed = _validate_api_destination(value)
+def _base_url(value: str, extra_origins: str = "") -> str:
+    parsed = _validate_api_destination(value, extra_origins)
     return urllib.parse.urlunsplit(
         (parsed.scheme.lower(), parsed.netloc, parsed.path.rstrip("/"),
          parsed.query, ""))
@@ -131,8 +149,12 @@ def _base_url(value: str) -> str:
 class _AllowedRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Re-apply the exact-origin allow-list to every redirect hop."""
 
+    def __init__(self, extra_origins: str = "") -> None:
+        super().__init__()
+        self._extra_origins = extra_origins
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        _validate_api_destination(newurl)
+        _validate_api_destination(newurl, self._extra_origins)
         original_origin = _normalized_origin(req.full_url, "Direct API URL")
         redirect_origin = _normalized_origin(newurl, "Direct API redirect URL")
         if redirect_origin != original_origin:
@@ -142,8 +164,9 @@ class _AllowedRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def _open_direct_api_request(request: urllib.request.Request, timeout: int):
-    opener = urllib.request.build_opener(_AllowedRedirectHandler())
+def _open_direct_api_request(request: urllib.request.Request, timeout: int,
+                             extra_origins: str = ""):
+    opener = urllib.request.build_opener(_AllowedRedirectHandler(extra_origins))
     return opener.open(request, timeout=timeout)
 
 
@@ -154,9 +177,10 @@ def _strip_known_endpoint(path: str) -> str:
         "", path, flags=re.I).rstrip("/")
 
 
-def optimizer_url(api_url: str, api_format: str, model: str) -> str:
+def optimizer_url(api_url: str, api_format: str, model: str,
+                  extra_origins: str = "") -> str:
     """Resolve base URLs and already-complete provider endpoints safely."""
-    base = _base_url(api_url)
+    base = _base_url(api_url, extra_origins)
     parsed = urllib.parse.urlsplit(base)
     clean_path = parsed.path.rstrip("/")
     query = parsed.query
@@ -328,8 +352,9 @@ def _media_parts(resources: list[Any], api_format: str) -> list[dict[str, Any]]:
 
 def call_direct_optimizer(api_url: str, api_key: str, model: str,
                           api_format: str, user_prompt: str,
-                          media_parts: list[dict[str, Any]] | None = None) -> str:
-    url = optimizer_url(api_url, api_format, model)
+                          media_parts: list[dict[str, Any]] | None = None,
+                          extra_origins: str = "") -> str:
+    url = optimizer_url(api_url, api_format, model, extra_origins)
     media_parts = list(media_parts or [])
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if api_format == "gemini":
@@ -384,7 +409,7 @@ def call_direct_optimizer(api_url: str, api_key: str, model: str,
         headers=headers, method="POST")
     try:
         with _open_direct_api_request(
-                request, REQUEST_TIMEOUT_SECONDS) as response:
+                request, REQUEST_TIMEOUT_SECONDS, extra_origins) as response:
             raw_response = response.read(MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -423,7 +448,15 @@ def call_direct_optimizer(api_url: str, api_key: str, model: str,
     return _clean_result(result)
 
 
-async def optimize_prompt_payload(value: Any) -> dict[str, str]:
+async def optimize_prompt_payload(
+        value: Any, extra_origins: str = "") -> dict[str, str]:
+    """Run one Direct API optimization request.
+
+    ``extra_origins`` must come only from a server-side, per-user source
+    (a signed-in user's persisted ComfyUI settings, or an operator's
+    environment variable) - never from ``value`` (the request body), or a
+    workflow could grant itself an origin the allow-list was meant to deny.
+    """
     if not isinstance(value, Mapping):
         raise ValueError("Prompt optimizer request must contain a JSON object.")
     api_format = str(value.get("api_format") or "openai").strip().lower()
@@ -447,7 +480,7 @@ async def optimize_prompt_payload(value: Any) -> dict[str, str]:
         value.get("allow_media") is True) else []
     result = await asyncio.to_thread(
         call_direct_optimizer, api_url, api_key, model, api_format, user_prompt,
-        media_parts)
+        media_parts, extra_origins)
     return {
         "message": "Optimized with the configured Direct API provider.",
         "prompt": result,

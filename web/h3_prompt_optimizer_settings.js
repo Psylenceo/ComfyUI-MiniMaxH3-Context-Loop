@@ -10,6 +10,7 @@ export const PROMPT_OPTIMIZER_SETTING_IDS = Object.freeze({
     serverProfile: "MiniMaxH3ContexLoop.PromptOptimizer.ServerProfile",
     apiFormat: "MiniMaxH3ContexLoop.PromptOptimizer.ApiFormat",
     apiUrl: "MiniMaxH3ContexLoop.PromptOptimizer.ApiUrl",
+    extraAllowedOrigins: "MiniMaxH3ContexLoop.PromptOptimizer.ExtraAllowedOrigins",
     apiKey: "MiniMaxH3ContexLoop.PromptOptimizer.ApiKey",
     model: "MiniMaxH3ContexLoop.PromptOptimizer.Model",
     allowMedia: "MiniMaxH3ContexLoop.PromptOptimizer.AllowMedia",
@@ -211,10 +212,23 @@ app.registerExtension({
             attrs: {type: "password", autocomplete: "off"},
             telemetry: {trackChanges: false},
         });
+        add("Additional allowed Direct API origins", {
+            id: PROMPT_OPTIMIZER_SETTING_IDS.extraAllowedOrigins,
+            name: "Additional allowed Direct API origins",
+            tooltip: "Comma-separated origins (e.g. http://127.0.0.1:1234,http://127.0.0.1:11434) " +
+                "allowed in addition to OpenAI, Gemini, and OpenRouter — the same format as the " +
+                "server operator's H3_PROMPT_OPTIMIZER_ALLOWED_ORIGINS environment variable, but " +
+                "set per-user through Settings instead of requiring a ComfyUI restart with a special " +
+                "environment variable. Read server-side from your own signed-in ComfyUI settings — " +
+                "a workflow JSON can never add to or read this list itself.",
+            type: "text",
+            defaultValue: "",
+            attrs: {placeholder: "http://127.0.0.1:1234,http://127.0.0.1:11434"},
+        });
         add("Direct API URL", {
             id: PROMPT_OPTIMIZER_SETTING_IDS.apiUrl,
             name: "Direct API URL",
-            tooltip: "A provider base URL or complete supported endpoint. OpenAI, Gemini, and OpenRouter are allowed by default. Server operators can add exact origins through H3_PROMPT_OPTIMIZER_ALLOWED_ORIGINS.",
+            tooltip: "A provider base URL or complete supported endpoint. OpenAI, Gemini, and OpenRouter are allowed by default. Server operators can add exact origins through H3_PROMPT_OPTIMIZER_ALLOWED_ORIGINS, or add your own through \"Additional allowed Direct API origins\" below.",
             type: "text",
             defaultValue: "",
             attrs: {placeholder: "https://api.example.com/v1"},
