@@ -55,20 +55,25 @@ function notifyChanged() {
     globalThis.dispatchEvent?.(new CustomEvent("h3-prompt-optimizer-settings-changed"));
 }
 
-const category = ["MiniMax H3 Context Loop", "Prompt optimizer", "Connection"];
+const CATEGORY_ROOT = ["MiniMax H3 Context Loop", "Prompt optimizer"];
 
 app.registerExtension({
     name: "minimax_h3_context_loop.prompt_optimizer_settings",
     init() {
-        const add = (definition) => app.ui?.settings?.addSetting?.({
-            category,
+        // Every setting needs its own distinct third category segment. The
+        // settings panel's default (unsearched) view renders one row per
+        // unique category path; six settings sharing the same literal leaf
+        // ("Connection") collapsed onto a single visible row, so the other
+        // five only ever turned up via search. Unique leaves fixed that.
+        const add = (leaf, definition) => app.ui?.settings?.addSetting?.({
+            category: [...CATEGORY_ROOT, leaf],
             ...definition,
             onChange(value, previous) {
                 definition.onChange?.(value, previous);
                 notifyChanged();
             },
         });
-        add({
+        add("Backend", {
             id: PROMPT_OPTIMIZER_SETTING_IDS.backend,
             name: "Prompt optimizer backend",
             tooltip: "Direct API works without comfyui-mcp and is the portable default. MCP agent uses the separately installed compatible orchestrator. Disabled hides optimizer execution.",
@@ -80,7 +85,7 @@ app.registerExtension({
                 {text: "Disabled", value: "disabled"},
             ],
         });
-        add({
+        add("MCP agent provider", {
             id: PROMPT_OPTIMIZER_SETTING_IDS.mcpProvider,
             name: "MCP agent provider",
             tooltip: "Used only when Prompt optimizer backend is MCP agent. The compatible comfyui-mcp bridge validates whether the provider is installed and authenticated.",
@@ -89,7 +94,7 @@ app.registerExtension({
             options: ["codex", "claude", "gemini", "hermes", "kimi", "moonshot", "glm", "minimax", "ollama", "openrouter", "lmstudio", "llamacpp", "custom"],
             attrs: {editable: true, filter: true},
         });
-        add({
+        add("Direct API format", {
             id: PROMPT_OPTIMIZER_SETTING_IDS.apiFormat,
             name: "Direct API format",
             type: "combo",
@@ -100,7 +105,7 @@ app.registerExtension({
                 {text: "Gemini Native", value: "gemini"},
             ],
         });
-        add({
+        add("Direct API URL", {
             id: PROMPT_OPTIMIZER_SETTING_IDS.apiUrl,
             name: "Direct API URL",
             tooltip: "A provider base URL or complete supported endpoint. OpenAI, Gemini, and OpenRouter are allowed by default. Server operators can add exact origins through H3_PROMPT_OPTIMIZER_ALLOWED_ORIGINS.",
@@ -108,7 +113,7 @@ app.registerExtension({
             defaultValue: "",
             attrs: {placeholder: "https://api.example.com/v1"},
         });
-        add({
+        add("Direct API key", {
             id: PROMPT_OPTIMIZER_SETTING_IDS.apiKey,
             name: "Direct API key",
             tooltip: "Stored in ComfyUI user settings, never in workflow JSON. Local endpoints require an exact server-side origin allow-list entry; Gemini Native requires a key.",
@@ -117,14 +122,14 @@ app.registerExtension({
             attrs: {type: "password", autocomplete: "off"},
             telemetry: {trackChanges: false},
         });
-        add({
+        add("Direct API model", {
             id: PROMPT_OPTIMIZER_SETTING_IDS.model,
             name: "Direct API model",
             type: "text",
             defaultValue: "",
             attrs: {placeholder: "model identifier"},
         });
-        add({
+        add("Reference media", {
             id: PROMPT_OPTIMIZER_SETTING_IDS.allowMedia,
             name: "Allow Direct API to read reference media",
             tooltip: "Off by default. Accessible reference files up to 32 MB are attached only when the selected API format supports their modality. OpenAI-compatible and Responses attach images; Gemini Native can attach image, video, and audio.",
