@@ -15,6 +15,15 @@ result later—without keeping the whole production in memory.
 
 ## Changelog
 
+### 0.6.3 — Cancellation-safe processing saves
+
+- Preserve saved DeRoPE/upscale scenes when manifest updates or network
+  acknowledgements fail.
+- Recover interrupted PNG publication from a scene journal; accept recreated
+  video containers when their delivered pixels match the existing PNGs.
+- Keep earlier scenes and conflicting partial files safe. See
+  [cancellation and scene-level resume](docs/processing-resume.md).
+
 ### 0.6.2 — Upscale recovery and saving
 
 - **Recover lost reference caches.** Upscale rebuilds missing Ref2VA tensors

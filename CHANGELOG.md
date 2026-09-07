@@ -3,6 +3,19 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
+## v0.6.3 — Cancellation-safe processing saves
+
+- DeRoPE/upscale publication retains media after uncertain checkpoint commits;
+  a failed manifest refresh no longer deletes a successfully saved scene.
+- VIDEO PNG exports journal staged publication and recover interrupted frame
+  copies or index commits on retry. Earlier scenes remain untouched; conflicting
+  incomplete files are preserved in the recovery staging folder.
+- Recreated VIDEO containers reuse existing PNGs when their delivered pixels
+  match at the selected precision, including legacy exports. Changed renders,
+  branches, and edited committed PNGs are still protected from silent adoption.
+- Added CPU cancellation/fault-injection and real process-exit regression tests.
+  See [processing cancellation and resume](docs/processing-resume.md).
+
 ## v0.6.2 — Upscale reference recovery and durable exports
 
 - Backported reference-cache deduplication, legacy conversion, reconstruction,
