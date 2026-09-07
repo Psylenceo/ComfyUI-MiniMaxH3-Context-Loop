@@ -52,7 +52,6 @@ const TRANSIENT_NOTICE_MS = 5000;
 
 let notifications = null;
 let pumpActive = false;
-let continuationWait = null; // legacy mirror for completion notices
 let continuationTracker = null;
 let requeueEpoch = 0; // invalidates sleeps/polls when opt-in is withdrawn
 const sceneRecords = new Map();   // prompt_id -> observed H3 scene record
@@ -250,11 +249,9 @@ async function pumpRequeues() {
 function onExecutionSuccess(detail) {
     const promptId = String(detail?.prompt_id ?? "");
     const record = sceneRecords.get(promptId);
-    if (continuationWait && continuationWait.promptId === promptId
+    if (continuationTracker?.current()?.promptId === promptId
         && !record?.loopEndExecuted) {
-        // Continuation prompt finished before its Loop Start event arrived;
-        // the consumed bookkeeping is best-effort and stays durable.
-        continuationWait = null;
+        continuationTracker.failed(promptId);
     }
     if (!record) return;
     sceneRecords.delete(promptId);
@@ -276,11 +273,10 @@ function onTerminalFailure(kind, detail) {
     requeueEpoch += 1;
     const promptId = String(detail?.prompt_id ?? "");
     sceneRecords.delete(promptId);
-    if (continuationWait && continuationWait.promptId === promptId) {
+    const wait = continuationTracker?.failed(promptId);
+    if (wait) {
         // The continuation prompt ended before/without a recorded Loop Start
         // execution. The handoff deliberately stays queued: no auto-retry.
-        const wait = continuationWait;
-        continuationWait = null;
         showError(
             `The requeued prompt for run "${wait.runName}" ended `
             + `${kind === "interrupted" ? "interrupted" : "with an error"} `
@@ -503,11 +499,6 @@ async function processRequeue(record, epoch) {
             }
             const acceptedPromptId = submission.promptId;
             queued = true;
-            continuationWait = {
-                runName,
-                handoffId: String(handoff.handoff_id),
-                promptId: acceptedPromptId,
-            };
             continuationTracker ??= createContinuationTracker({
                 transition: postHandoffTransition,
                 reportError: (error) => showError(`Marking the handoff consumed failed: ${error?.message || error}`),
