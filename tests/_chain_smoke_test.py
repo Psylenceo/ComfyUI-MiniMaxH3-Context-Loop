@@ -12,6 +12,7 @@ import hashlib
 import importlib.util
 import json
 import math
+import os
 import pathlib
 import subprocess
 import sys
@@ -24,6 +25,8 @@ from datetime import datetime
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 COMFY_CANDIDATES = [ROOT.parent / "Comfyui", ROOT.parent / "ComfyUI"]
+if os.environ.get("COMFYUI_PATH"):
+    COMFY_CANDIDATES.insert(0, pathlib.Path(os.environ["COMFYUI_PATH"]))
 COMFY = next((path for path in COMFY_CANDIDATES
               if (path / "comfy" / "options.py").is_file()), None)
 if COMFY is None:

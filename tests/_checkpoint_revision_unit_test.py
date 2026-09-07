@@ -64,7 +64,7 @@ def digest(path):
 def write_revision(run, scene, token, seed, active=False, predecessor=None,
                    run_name="revision_test", compatibility=None,
                    context_length=None, audio_context_length=None,
-                   generated_continuity=None):
+                   generated_continuity=None, recovery_archive=False):
     segments = run / "segments"
     checkpoints = run / "checkpoints"
     reviews = run / "reviews"
@@ -135,6 +135,23 @@ def write_revision(run, scene, token, seed, active=False, predecessor=None,
         },
         "segment": segment,
     }
+    archive_files = set()
+    if recovery_archive:
+        archive_dir = run / "recovery_archives" / token
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        archives = {}
+        for key, filename in (
+                ("plan", "plan.json"),
+                ("workflow", "workflow.json"),
+                ("api_prompt", "api_prompt.json")):
+            archive_path = archive_dir / filename
+            archive_path.write_text(
+                json.dumps({"revision": token, "kind": key}),
+                encoding="utf-8")
+            archives[key] = str(archive_path.relative_to(
+                folder_paths.output_directory))
+            archive_files.add(archive_path)
+        metadata["archives"] = archives
     metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
     review = reviews / (
         "clip_%04d.%s.audio.review.mp4" %
@@ -143,7 +160,10 @@ def write_revision(run, scene, token, seed, active=False, predecessor=None,
     if active:
         (checkpoints / ("clip_%04d.json" % scene)).write_text(
             json.dumps(metadata), encoding="utf-8")
-    return metadata, {segment_path, prompt_path, checkpoint_path, metadata_path, review}
+    return metadata, {
+        segment_path, prompt_path, checkpoint_path, metadata_path, review,
+        *archive_files,
+    }
 
 
 async def check():
@@ -210,6 +230,8 @@ async def check():
         # Exercise the listing worker synchronously in this fake server; the
         # route's asyncio.to_thread wakeup depends on ComfyUI's real event loop.
         payload = chain._saved_checkpoint_listing("revision_test")
+        assert payload["processing_variants"] == []
+        assert payload["processing_variant_warnings"] == []
         assert payload["editorial"]["chapters"][0]["text"] == "lyrics and notes"
         assert payload["editorial"]["placements"][0]["start_frame"] == 480
         assert payload["editorial"]["locked_scene_ids"] == ["scene_2"]

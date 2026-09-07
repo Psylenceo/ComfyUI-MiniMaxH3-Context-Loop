@@ -17,7 +17,7 @@
         "recipe_json": "{\"upscaler\":\"LBH 3D\",\"target_megapixels\":1.5,\"derope\":\"MAINodes adaptive pixel smear\",\"oracle\":\"balanced q0.75 dmax4\",\"pass2_steps\":8,\"inject\":0.5,\"audio_init\":0.5,\"audio_output\":\"original performance\"}",
         "start_clip": 1,
         "end_clip": 0,
-        "save_latent": false,
+        "save_latent": true,
         "segment_crf": 18
       },
       "inputs": {
@@ -316,7 +316,7 @@
       "key": "n20",
       "type": "Note",
       "settings": {
-        "text": "REQUIRES\nhttps://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler\nhttps://github.com/matlowai/ComfyUI-MAINodes\n\nThis uses MAINodes' stable decoded pixel-smear path, not experimental latent temporal insertion. The longer smeared IMAGE batch lives on CPU, then VAE Encode and LBH operate scene by scene; effective time can still reach roughly 2-3x on high-motion clips. If RAM or generation time is excessive, process a smaller start/end scene range or use a less aggressive oracle preset before lowering target resolution.\n\nDefaults: balanced oracle q=0.75 / d_max=4 / ramp ON / bridge=8; 1.5 MP LBH 3D; 20-step simple schedule injected from 0.50; res_multistep sampler; audio init follows the original performance at 0.5; Audio Recover delivers the original performance. Community testing consistently places d_max=4 at the useful H3 threshold and recommends doing spatial upscale and de-rope in this same regeneration pass.\n\nH3 Conditioning Sync now permits the longer target clock while resizing only spatial reference/keyframe latents. Motion refs remain excluded by default. The pass-2 Comfy Kitchen override is bypassed because large H3 sequences can exceed Sage prequantized int32 strides. save_latent remains OFF; the compact HQ continuation tail is retained automatically when the next scene needs it."
+        "text": "REQUIRES\nhttps://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler\nhttps://github.com/matlowai/ComfyUI-MAINodes\n\nThis uses MAINodes' stable decoded pixel-smear path, not experimental latent temporal insertion. The longer smeared IMAGE batch lives on CPU, then VAE Encode and LBH operate scene by scene; effective time can still reach roughly 2-3x on high-motion clips. If RAM or generation time is excessive, process a smaller start/end scene range or use a less aggressive oracle preset before lowering target resolution.\n\nDefaults: balanced oracle q=0.75 / d_max=4 / ramp ON / bridge=8; 1.5 MP LBH 3D; 20-step simple schedule injected from 0.50; res_multistep sampler; audio init follows the original performance at 0.5; Audio Recover delivers the original performance. Community testing consistently places d_max=4 at the useful H3 threshold and recommends doing spatial upscale and de-rope in this same regeneration pass.\n\nH3 Conditioning Sync now permits the longer target clock while resizing only spatial reference/keyframe latents. Motion refs remain excluded by default. The pass-2 Comfy Kitchen override is bypassed because large H3 sequences can exceed Sage prequantized int32 strides. save_latent is ON so the recovered RAW-clock latent is saved for deferred reuse. The compact HQ continuation tail is retained automatically when the next scene needs it."
       },
       "inputs": {},
       "label": "DEPENDENCIES / QUALITY AND MEMORY"

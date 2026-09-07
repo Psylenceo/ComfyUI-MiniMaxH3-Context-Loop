@@ -33,6 +33,7 @@ import time
 import uuid
 import wave
 from collections import deque
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from fractions import Fraction
 from typing import Any
@@ -110,6 +111,11 @@ from .prompt_history import PromptHistoryStore
 from .prompt_optimizer import optimize_prompt_payload
 from .run_manager import RunArchiveManager, archive_policy_inputs
 from .asset_store import MAX_DIRECT_ASSET_BINDINGS, RunAssetStore
+from .reference_cache_store import (
+    FORMAT as REFERENCE_CACHE_FORMAT, ReferenceTensorStore, objects_digest,
+)
+from .reference_cache_migration import ReferenceCacheMigrator, matches_legacy
+from .reference_cache_usage import note_converted_use, confirm_saved_use
 from .project_assets import (
     PROJECT_ASSET_FORMAT,
     ProjectAssetStore,
@@ -4206,8 +4212,8 @@ def _replace_conditioning_presentation(
     return merged, status
 
 
-REFERENCE_CACHE_FORMAT = "h3_reference_cache_v2"
-REFERENCE_CACHE_LEGACY_FORMATS = frozenset(("h3_reference_cache_v1",))
+REFERENCE_CACHE_LEGACY_FORMATS = frozenset((
+    "h3_reference_cache_v1", "h3_reference_cache_v2"))
 
 
 def _is_reference_cache_format(value: Any) -> bool:
@@ -4268,17 +4274,16 @@ def _reference_cache_presentation_contract(presentation: Any) -> Any:
 
 def _reference_cache_existing(paths: dict[str, str],
                               signature: str) -> bool:
-    if not (os.path.isfile(paths["metadata"])
-            and os.path.isfile(paths["tensors"])):
+    if not os.path.isfile(paths["metadata"]):
         return False
     try:
         metadata = _read_json(paths["metadata"])
-        return (
-            metadata.get("format") == REFERENCE_CACHE_FORMAT
-            and metadata.get("signature") == signature
-            and metadata.get("tensors_sha256") == _file_sha256(
-                paths["tensors"]))
-    except (OSError, ValueError, json.JSONDecodeError):
+        if (metadata.get("format") != REFERENCE_CACHE_FORMAT
+                or metadata.get("signature") != signature):
+            return False
+        _load_reference_cache_descriptor(_reference_cache_descriptor(metadata))
+        return True
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return False
 
 
@@ -4408,13 +4413,16 @@ def _cache_reference_scene(
     signature = _reference_cache_signature(
         fingerprint, scene, scene_count, prompt, compiled_prompt, width,
         height, length, ref_image_size, presentation_contract)
-    paths = _reference_cache_paths(fingerprint, scene, signature)
-    if _reference_cache_existing(paths, signature):
-        return "reference cache reused %s" % signature[:12]
     presentation, blocks, source_images = _h3_reference_cache_payload(
         vae, audio_vae, pictures, videos, audios, width, height, length,
         ref_image_size, semantic_presentation)
-    tensors: dict[str, Any] = {}
+    # Store references independently of prompt, scene index, ordering and run.
+    # Hash actual encoded bytes rather than guessing encoder/model identity.
+    # Identical masters can also be shared by different resolution variants.
+    store = ReferenceTensorStore(
+        _output_root(), os.path.join(_output_root(), "h3_reference_cache", "objects"),
+        _file_sha256)
+    tensor_objects: dict[str, Any] = {}
     public_presentation = []
     for index, item in enumerate(presentation):
         record = {"type": str(item["type"])}
@@ -4425,17 +4433,17 @@ def _cache_reference_scene(
         data = item.get("data")
         if data is not None:
             key = "presentation_%03d" % index
-            tensors[key] = torch.clamp(
+            tensor_objects[key] = store.put(torch.clamp(
                 data.detach().cpu().float(), 0.0, 1.0).mul(255).round().to(
-                    torch.uint8).contiguous()
+                    torch.uint8).contiguous())
             record["data_tensor"] = key
         public_presentation.append(record)
     public_source_images = []
     for index, image in enumerate(source_images):
         key = "source_image_%03d" % index
-        tensors[key] = torch.clamp(
+        tensor_objects[key] = store.put(torch.clamp(
             image.detach().cpu().float(), 0.0, 1.0).mul(255).round().to(
-                torch.uint8).contiguous()
+                torch.uint8).contiguous())
         public_source_images.append({"data_tensor": key})
     public_blocks = []
     for index, block in enumerate(blocks):
@@ -4446,19 +4454,16 @@ def _cache_reference_scene(
             if value is None:
                 continue
             key = "block_%03d_%s" % (index, field)
-            tensors[key] = value.detach().cpu().contiguous()
+            tensor_objects[key] = store.put(value)
             record[field + "_tensor"] = key
         public_blocks.append(record)
+    payload_digest = objects_digest(tensor_objects)
+    signature = _fingerprint({"scene_contract": signature,
+                              "tensors_sha256": payload_digest})
+    paths = _reference_cache_paths(fingerprint, scene, signature)
+    if _reference_cache_existing(paths, signature):
+        return "reference cache reused %s" % signature[:12]
     os.makedirs(paths["root"], exist_ok=True)
-    temporary = "%s.%s.tmp" % (paths["tensors"], uuid.uuid4().hex)
-    try:
-        _st_save(tensors, temporary, metadata={
-            "format": REFERENCE_CACHE_FORMAT,
-            "signature": signature,
-        })
-        os.replace(temporary, paths["tensors"])
-    finally:
-        _safe_unlink(temporary)
     metadata = {
         "format": REFERENCE_CACHE_FORMAT,
         "signature": signature,
@@ -4476,8 +4481,9 @@ def _cache_reference_scene(
         "source_images": public_source_images,
         "reference_blocks": public_blocks,
         "metadata": _relative_output_path(paths["metadata"]),
-        "tensors": _relative_output_path(paths["tensors"]),
-        "tensors_sha256": _file_sha256(paths["tensors"]),
+        "tensor_objects": tensor_objects,
+        # V3 pins the ordered-key/object digest map, independent of location.
+        "tensors_sha256": payload_digest,
         "created_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds").replace("+00:00", "Z"),
     }
@@ -4489,14 +4495,66 @@ def _reference_cache_descriptor(metadata: Any) -> dict[str, Any] | None:
     if not isinstance(metadata, dict) or not _is_reference_cache_format(
             metadata.get("format")):
         return None
-    required = ("signature", "reference_fingerprint", "metadata", "tensors",
-                "tensors_sha256")
+    required = ("signature", "reference_fingerprint", "metadata", "tensors_sha256")
+    if metadata["format"] != REFERENCE_CACHE_FORMAT:
+        required += ("tensors",)
     if not all(isinstance(metadata.get(key), str) and metadata.get(key)
                for key in required):
         return None
-    return {key: metadata[key] for key in (
-        "format", "signature", "reference_fingerprint", "metadata",
-        "tensors", "tensors_sha256")}
+    return {key: metadata[key] for key in ("format",) + required}
+
+
+def _reference_cache_object_store(metadata: dict[str, Any]) -> ReferenceTensorStore:
+    metadata_path = _absolute_output_path(metadata["metadata"])
+    parent = os.path.dirname(metadata_path)
+    shared = _absolute_output_path("h3_reference_cache")
+    # Shared scene manifests live one fingerprint directory below the store;
+    # run-local manifests and their objects are siblings within reference_cache.
+    root = shared if os.path.dirname(parent) == shared else parent
+    return ReferenceTensorStore(
+        _output_root(), os.path.join(root, "objects"), _file_sha256)
+
+
+def _verify_reference_cache_objects(metadata: dict[str, Any]) -> ReferenceTensorStore:
+    objects = metadata.get("tensor_objects")
+    if objects_digest(objects) != metadata.get("tensors_sha256"):
+        raise ValueError("H3 reference object manifest failed SHA-256 integrity checks.")
+    store = _reference_cache_object_store(metadata)
+    checked = set()
+    for record in objects.values():
+        identity = (record["tensors"], record["tensors_sha256"], record["tensor_sha256"])
+        if identity not in checked:
+            store.verify(record)
+            checked.add(identity)
+    return store
+
+
+def _reference_cache_tensors(metadata: dict[str, Any]) -> dict[str, Any]:
+    metadata = _resolve_converted_reference_cache(metadata)
+    if metadata.get("format") == REFERENCE_CACHE_FORMAT:
+        store = _verify_reference_cache_objects(metadata)
+        loaded = {}
+        tensors = {}
+        for key, record in metadata["tensor_objects"].items():
+            digest = record["tensor_sha256"]
+            if digest not in loaded:
+                loaded[digest] = store.load(record)
+            tensors[key] = loaded[digest]
+        return tensors
+    tensor_path = _absolute_output_path(metadata["tensors"])
+    expected = str(metadata.get("tensors_sha256") or "")
+    if (not os.path.isfile(tensor_path) or not expected
+            or _file_sha256(tensor_path) != expected):
+        raise ValueError("H3 reference cache failed its SHA-256 check.")
+    return _st_load(tensor_path)
+
+
+def _resolve_converted_reference_cache(metadata: dict[str, Any]) -> dict[str, Any]:
+    if metadata.get("format") in REFERENCE_CACHE_LEGACY_FORMATS:
+        converted = ReferenceCacheMigrator(_output_root()).resolve(metadata)
+        if converted is not None:
+            return converted
+    return metadata
 
 
 def _run_local_reference_cache(
@@ -4510,25 +4568,29 @@ def _run_local_reference_cache(
         _run_dir({"run_name": normalized_run}), "reference_cache"))
     signature = str(descriptor["signature"])
     stem = "scene_%04d.%s" % (int(scene), signature[:24])
-    metadata_path = os.path.join(root, stem + ".json")
     tensors_path = os.path.join(root, stem + ".safetensors")
-    if not (os.path.isfile(metadata_path) and os.path.isfile(tensors_path)):
-        return None
-    try:
-        metadata = _read_json(metadata_path)
-        local = _reference_cache_descriptor(metadata)
-        if local is None:
-            return None
-        identity = ("format", "signature", "reference_fingerprint",
-                    "tensors_sha256")
-        if any(local[key] != descriptor[key] for key in identity):
-            return None
-        if (_absolute_output_path(local["metadata"]) != metadata_path
-                or _absolute_output_path(local["tensors"]) != tensors_path):
-            return None
-        return _load_reference_cache_descriptor(local)
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
-        return None
+    for suffix in (".json", ".converted.json"):
+        metadata_path = os.path.join(root, stem + suffix)
+        if not os.path.isfile(metadata_path):
+            continue
+        try:
+            metadata = _read_json(metadata_path)
+            local = _reference_cache_descriptor(metadata)
+            if local is None:
+                continue
+            identity = ("format", "signature", "reference_fingerprint", "tensors_sha256")
+            if (any(local[key] != descriptor[key] for key in identity)
+                    and not matches_legacy(metadata, descriptor)):
+                continue
+            if _absolute_output_path(local["metadata"]) != metadata_path:
+                continue
+            if (local["format"] != REFERENCE_CACHE_FORMAT
+                    and _absolute_output_path(local["tensors"]) != tensors_path):
+                continue
+            return _load_reference_cache_descriptor(local)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return None
 
 
 def _adopt_reference_cache_for_run(
@@ -4545,13 +4607,6 @@ def _adopt_reference_cache_for_run(
         plan["run_name"], scene, descriptor)
     if existing is not None:
         return existing
-    source_tensors = _absolute_output_path(descriptor["tensors"])
-    expected_hash = descriptor["tensors_sha256"]
-    if (not os.path.isfile(source_tensors)
-            or _file_sha256(source_tensors) != expected_hash):
-        raise ValueError(
-            "H3 reference cache cannot be adopted: source tensors failed "
-            "integrity checks.")
     root = os.path.abspath(os.path.join(_run_dir(plan), "reference_cache"))
     run_root = os.path.abspath(_run_dir(plan))
     if os.path.commonpath([run_root, root]) != run_root:
@@ -4559,8 +4614,28 @@ def _adopt_reference_cache_for_run(
     signature = str(descriptor["signature"])
     stem = "scene_%04d.%s" % (scene, signature[:24])
     tensors_path = os.path.join(root, stem + ".safetensors")
-    metadata_path = os.path.join(root, stem + ".json")
+    suffix = ".converted.json" if metadata.get("legacy_conversion") else ".json"
+    metadata_path = os.path.join(root, stem + suffix)
     os.makedirs(root, exist_ok=True)
+    if descriptor["format"] == REFERENCE_CACHE_FORMAT:
+        source_store = _verify_reference_cache_objects(metadata)
+        local_store = ReferenceTensorStore(
+            _output_root(), os.path.join(root, "objects"), _file_sha256)
+        adopted = _json_document(metadata)
+        adopted.update({"run_name": str(plan["run_name"]),
+                        "metadata": _relative_output_path(metadata_path),
+                        "tensor_objects": {
+                            key: local_store.adopt(source_store, record)
+                            for key, record in metadata["tensor_objects"].items()}})
+        _atomic_json(metadata_path, adopted)
+        return _load_reference_cache_descriptor(_reference_cache_descriptor(adopted))
+    source_tensors = _absolute_output_path(descriptor["tensors"])
+    expected_hash = descriptor["tensors_sha256"]
+    if (not os.path.isfile(source_tensors)
+            or _file_sha256(source_tensors) != expected_hash):
+        raise ValueError(
+            "H3 reference cache cannot be adopted: source tensors failed "
+            "integrity checks.")
     if (not os.path.isfile(tensors_path)
             or _file_sha256(tensors_path) != expected_hash):
         temporary = "%s.%s.tmp" % (tensors_path, uuid.uuid4().hex)
@@ -4611,11 +4686,18 @@ def _load_reference_cache_descriptor(value: Any) -> dict[str, Any]:
     if expected is None or expected != descriptor:
         raise ValueError(
             "H3 checkpoint reference-cache descriptor does not match disk.")
-    tensor_path = _absolute_output_path(descriptor["tensors"])
-    if (not os.path.isfile(tensor_path) or _file_sha256(tensor_path) !=
-            descriptor["tensors_sha256"]):
-        raise ValueError(
-            "H3 checkpoint reference-cache tensors failed integrity checks.")
+    converted = _resolve_converted_reference_cache(metadata)
+    if converted is not metadata:
+        _verify_reference_cache_objects(converted)
+        return converted
+    if descriptor["format"] == REFERENCE_CACHE_FORMAT:
+        _verify_reference_cache_objects(metadata)
+    else:
+        tensor_path = _absolute_output_path(descriptor["tensors"])
+        if (not os.path.isfile(tensor_path) or _file_sha256(tensor_path) !=
+                descriptor["tensors_sha256"]):
+            raise ValueError(
+                "H3 checkpoint reference-cache tensors failed integrity checks.")
     return metadata
 
 
@@ -4631,7 +4713,8 @@ def _reference_cache_candidates(
     candidates = []
     prefix = "scene_%04d." % int(scene)
     for filename in os.listdir(root):
-        if not (filename.startswith(prefix) and filename.endswith(".json")):
+        if not (filename.startswith(prefix) and filename.endswith(".json")) or filename.endswith(
+                (".converted.json", ".retired.json")):
             continue
         path = os.path.join(root, filename)
         try:
@@ -4667,7 +4750,7 @@ def _find_reference_cache(
     args = (scene, scene_count, prompt, width, height, length)
     candidates = _reference_cache_candidates(fingerprint, *args)
     if candidates:
-        return max(candidates, key=lambda item: item[0])[1]
+        return _resolve_converted_reference_cache(max(candidates, key=lambda item: item[0])[1])
 
     # Project Assets / Plan may retain the base Tagged registry fingerprint,
     # while Tagged Ref2VA wraps it with its semantic presentation settings.
@@ -4690,7 +4773,7 @@ def _find_reference_cache(
             "different semantic-anchor settings, but this checkpoint has "
             "no exact cache link. Connect explicit Tagged references to "
             "select the intended pass-2 conditioning." % int(scene))
-    return max(candidates, key=lambda item: item[0])[1]
+    return _resolve_converted_reference_cache(max(candidates, key=lambda item: item[0])[1])
 
 
 def _reference_payload_from_cache(
@@ -4699,12 +4782,8 @@ def _reference_payload_from_cache(
     if _st_load is None or torch is None:
         raise RuntimeError(
             "safetensors and torch are required to load H3 reference cache.")
-    tensor_path = _absolute_output_path(metadata["tensors"])
-    expected = str(metadata.get("tensors_sha256") or "")
-    if (not os.path.isfile(tensor_path) or not expected
-            or _file_sha256(tensor_path) != expected):
-        raise ValueError("H3 reference cache failed its SHA-256 check.")
-    tensors = _st_load(tensor_path)
+    metadata = _resolve_converted_reference_cache(metadata)
+    tensors = _reference_cache_tensors(metadata)
     presentation = []
     for record in metadata.get("presentation", ()):
         item = {
@@ -4795,14 +4874,16 @@ def _conditioning_from_reference_cache_target(
         clip: Any, vae: Any, metadata: dict[str, Any],
         target_width: int, target_height: int,
         prompt_override: str | None = None,
-        motion_ref_mode: str = "resize_video") -> tuple[Any, dict[str, Any]]:
+        motion_ref_mode: str = "resize_video",
+        ref_image_size: str = "inherit") -> tuple[Any, dict[str, Any]]:
     """Rebuild cached Ref2VA conditioning for an actual pass-2 canvas.
 
     Only native picture references using Core H3's ``match`` policy are tied
     to generation area.  ``max`` pictures, video-reference canvases, audio,
     and Qwen-only semantic anchors retain their original geometry.  V2 caches
     keep the original picture master; V1 caches safely fall back to their
-    pass-1 presentation frame.
+    pass-1 presentation frame for match sizing. An explicit policy change to
+    max requires original masters, not relabelled match-sized tensors.
     """
     target_width, target_height = int(target_width), int(target_height)
     if target_width < 32 or target_height < 32:
@@ -4810,15 +4891,19 @@ def _conditioning_from_reference_cache_target(
     if not callable(getattr(vae, "encode", None)):
         raise ValueError(
             "Pass-2 target conditioning requires the MiniMax H3 video VAE.")
+    metadata = _resolve_converted_reference_cache(metadata)
     presentation, blocks, source_images = _reference_payload_from_cache(
         metadata)
     presentation, blocks = _h3_motion_reference_policy(
         presentation, blocks, motion_ref_mode)
-    policy = str(metadata.get("ref_image_size") or "match")
+    cached_policy = str(metadata.get("ref_image_size") or "match")
+    if ref_image_size not in ("inherit", "match", "max"):
+        raise ValueError("Override ref_image_size must be inherit, match, or max.")
+    policy = cached_policy if ref_image_size == "inherit" else ref_image_size
     rebuilt = 0
     master_rebuilds = 0
     fallback_rebuilds = 0
-    if policy == "match":
+    if policy == "match" or (policy == "max" and cached_policy != "max"):
         image_blocks = [
             block for block in blocks if block.get("kind") == "image"]
         marked = [
@@ -4838,6 +4923,11 @@ def _conditioning_from_reference_cache_target(
         for index, block in enumerate(image_blocks):
             presentation_item = presentation[marked[index]]
             has_master = index < len(source_images)
+            if not has_master and policy == "max":
+                raise ValueError(
+                    "Changing cached match references to max requires original "
+                    "picture masters. Restore saved reference media or connect "
+                    "explicit Tagged references.")
             master = (source_images[index] if has_master
                       else presentation_item.get("data"))
             if master is None:
@@ -4845,6 +4935,11 @@ def _conditioning_from_reference_cache_target(
                     "H3 reference cache image %d has no reusable picture." %
                     (index + 1))
             if has_master:
+                resized = _h3_picture_presentation(
+                    master, target_width, target_height, policy)
+            elif cached_policy == "max":
+                # A V1 max presentation retains native geometry (up to H3's
+                # cap); apply the match area cap, not the pass-1 canvas ratio.
                 resized = _h3_picture_presentation(
                     master, target_width, target_height, "match")
             else:
@@ -4897,6 +4992,7 @@ def _conditioning_from_reference_cache_target(
                 "H3 reference cache conditioning requires ComfyUI node_helpers.") from exc
         conditioning = node_helpers.conditioning_set_values(
             conditioning, {"minimax_refs": blocks})
+    note_converted_use(metadata, _output_root())
     return conditioning, {
         "policy": policy,
         "target_width": target_width,
@@ -4913,6 +5009,7 @@ def _conditioning_from_reference_cache(clip: Any,
                                        prompt_override: str | None = None,
                                        motion_ref_mode: str = "resize_video"
                                        ) -> Any:
+    metadata = _resolve_converted_reference_cache(metadata)
     presentation, blocks, _source_images = _reference_payload_from_cache(
         metadata)
     presentation, blocks = _h3_motion_reference_policy(
@@ -4937,6 +5034,7 @@ def _conditioning_from_reference_cache(clip: Any,
                 "H3 reference cache conditioning requires ComfyUI node_helpers.") from exc
         conditioning = node_helpers.conditioning_set_values(
             conditioning, {"minimax_refs": blocks})
+    note_converted_use(metadata, _output_root())
     return conditioning
 
 
@@ -9573,34 +9671,206 @@ def _patched_workflow(workflow: Any, plan: dict[str, Any],
     return document
 
 
-def _write_run_archives(plan: dict[str, Any], api_prompt: Any = None,
-                        extra_pnginfo: Any = None) -> dict[str, str]:
-    """Persist recovery documents and return output-relative paths.
-
-    `plan.json` is always written and represents the exact effective revision,
-    including review-gate prompt/seed changes. The frontend workflow and API
-    prompt are written when ComfyUI supplies their standard hidden metadata.
-    Existing workflow archives are retained if a non-Comfy caller later saves
-    another segment without hidden metadata.
-    """
+def _run_archive_documents(
+        plan: dict[str, Any], api_prompt: Any = None,
+        extra_pnginfo: Any = None) -> dict[str, Any]:
+    """Build one internally consistent recovery snapshot in memory."""
     paths = _run_archive_paths(plan)
     archived_plan = dict(plan)
+    archived_plan.pop("_project_ownership", None)
     archived_plan["format"] = "h3_chain_plan_archive_v1"
     archived_plan["editor_plan"] = _effective_editor_plan(plan)
-    _atomic_json(paths["plan"], archived_plan)
+    documents: dict[str, Any] = {"plan": archived_plan}
 
     patched_prompt, plan_node_ids = _matching_plan_node_ids(api_prompt, plan)
+    if patched_prompt is None and os.path.isfile(paths["api_prompt"]):
+        try:
+            patched_prompt, plan_node_ids = _matching_plan_node_ids(
+                _read_json(paths["api_prompt"]), plan)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            patched_prompt = None
     if patched_prompt is not None:
-        _atomic_json(paths["api_prompt"], patched_prompt)
+        documents["api_prompt"] = patched_prompt
 
     workflow = None
     if isinstance(extra_pnginfo, dict):
         workflow = extra_pnginfo.get("workflow")
+    if workflow is None and os.path.isfile(paths["workflow"]):
+        try:
+            workflow = _read_json(paths["workflow"])
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            workflow = None
     patched_workflow = _patched_workflow(workflow, plan, plan_node_ids)
     if patched_workflow is not None:
-        _atomic_json(paths["workflow"], patched_workflow)
+        documents["workflow"] = patched_workflow
+    return documents
 
-    return _available_run_archives(plan)
+
+def _run_archive_snapshot_paths(
+        plan: dict[str, Any], revision: str) -> dict[str, str]:
+    token = str(revision or "").strip().lower()
+    if re.fullmatch(r"[0-9a-f]{32}", token) is None:
+        raise ValueError("Recovery archive revision must be a revision id.")
+    root = os.path.join(_run_dir(plan), "recovery_archives", token)
+    return {
+        "plan": os.path.join(root, "plan.json"),
+        "workflow": os.path.join(root, "workflow.json"),
+        "api_prompt": os.path.join(root, "api_prompt.json"),
+    }
+
+
+def _promote_run_archive_snapshot(
+        plan: dict[str, Any], archives: dict[str, str]) -> dict[str, str]:
+    """Publish canonical recovery files from an immutable snapshot."""
+    canonical = _run_archive_paths(plan)
+    validated, _revision = _validated_run_archive_snapshot(plan, archives)
+    promoted = {}
+    for key, source in validated.items():
+        document = _read_json(source)
+        _atomic_json(canonical[key], document)
+        promoted[key] = _relative_output_path(canonical[key])
+    return promoted
+
+
+def _validated_run_archive_snapshot(
+        plan: dict[str, Any], archives: Any,
+        expected_revision: str | None = None
+) -> tuple[dict[str, str], str]:
+    """Validate that archive references form one in-run immutable snapshot."""
+    if not isinstance(archives, dict):
+        raise ValueError("Recovery archive references are not a JSON object.")
+    plan_value = archives.get("plan")
+    if not isinstance(plan_value, str) or not plan_value:
+        raise ValueError("Recovery archive snapshot has no Plan document.")
+    plan_source = _absolute_output_path(plan_value)
+    revision = os.path.basename(os.path.dirname(plan_source)).lower()
+    if re.fullmatch(r"[0-9a-f]{32}", revision) is None:
+        raise ValueError("Recovery archive snapshot has an invalid revision id.")
+    if expected_revision is not None and revision != str(
+            expected_revision or "").strip().lower():
+        raise ValueError("Recovery archive belongs to a different revision.")
+    expected = _run_archive_snapshot_paths(plan, revision)
+    validated = {}
+    for key in ("plan", "workflow", "api_prompt"):
+        value = archives.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value:
+            raise ValueError("Recovery archive %s path is invalid." % key)
+        source = _absolute_output_path(value)
+        if source != os.path.realpath(expected[key]):
+            raise ValueError(
+                "Recovery archive %s is outside revision %s." %
+                (key, revision[:8]))
+        if not os.path.isfile(source):
+            raise FileNotFoundError(
+                "Recovery archive %s is missing: %s" % (key, source))
+        validated[key] = source
+    if "plan" not in validated:
+        raise ValueError("Recovery archive snapshot has no Plan document.")
+    return validated, revision
+
+
+def _checkpoint_run_archives(
+        plan: dict[str, Any], metadata: dict[str, Any]) -> dict[str, str]:
+    """Return immutable recovery documents, or use fallback for legacy saves."""
+    archives = metadata.get("archives") if isinstance(metadata, dict) else None
+    if archives is None:
+        return {}
+    if (isinstance(archives, dict)
+            and not any(archives.get(key) for key in (
+                "plan", "workflow", "api_prompt"))):
+        # Some transitional builds serialized an empty placeholder. It carries
+        # no snapshot claim, so retain the legacy root-archive fallback.
+        return {}
+    if isinstance(archives, dict):
+        canonical = _run_archive_paths(plan)
+        references = {key: archives[key] for key in canonical
+                      if archives.get(key) is not None}
+        if references and all(
+                isinstance(value, str) and value and
+                _absolute_output_path(value) == canonical[key]
+                for key, value in references.items()):
+            # Pre-snapshot saves explicitly referenced these shared Run files.
+            # They are not an immutable revision: readers use the existing
+            # root fallback, while activation rebuilds from the restored Plan.
+            # Do not relax snapshot validation for mixed or foreign paths.
+            return {}
+    segment = metadata.get("segment")
+    revision = (str(segment.get("revision") or "").strip().lower()
+                if isinstance(segment, dict) else "")
+    adoption = metadata.get("adoption")
+    if (isinstance(segment, dict) and isinstance(adoption, dict)
+            and adoption.get("version") == 1
+            and adoption.get("shared_artifacts") is True):
+        # Attribution creates a new lineage id, not a new generation. Its
+        # recovery snapshot remains owned by the original saved take, just
+        # like its shared video/checkpoint files. Resolve that recorded
+        # origin for every recovery reader without copying archives or
+        # requiring the original revision sidecar to remain undeleted.
+        origin = str(adoption.get("source_revision") or "").strip().lower()
+        if (re.fullmatch(r"[0-9a-f]{32}", origin) is None
+                or origin != str(segment.get("adopted_from_revision") or "").lower()
+                or adoption.get("source_scene") != segment.get("index")):
+            raise ValueError("Attributed checkpoint recovery origin is inconsistent.")
+        revision = origin
+    validated, _token = _validated_run_archive_snapshot(
+        plan, archives, revision)
+    return {key: _relative_output_path(path)
+            for key, path in validated.items()}
+
+
+def _remove_run_archive_snapshot(
+        plan: dict[str, Any], revision: str) -> None:
+    paths = _run_archive_snapshot_paths(plan, revision)
+    root = os.path.dirname(paths["plan"])
+    if os.path.isdir(root):
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _write_run_archives(
+        plan: dict[str, Any], api_prompt: Any = None,
+        extra_pnginfo: Any = None, *, revision: str | None = None,
+        promote: bool = True) -> dict[str, str]:
+    """Persist an immutable recovery snapshot, then optionally promote it.
+
+    Scene publication passes its own revision and promotes only after its
+    canonical checkpoint pointer commits. Other callers receive a fresh
+    recovery revision. Canonical ``plan.json`` / workflow files remain for
+    older recovery tools, while every committed scene keeps exact snapshot
+    paths that are never overwritten.
+    """
+    token = str(revision or uuid.uuid4().hex).lower()
+    snapshot_paths = _run_archive_snapshot_paths(plan, token)
+    documents = _run_archive_documents(plan, api_prompt, extra_pnginfo)
+    # A caller must never replace a snapshot already owned by a saved take.
+    os.makedirs(os.path.dirname(snapshot_paths["plan"]), exist_ok=False)
+    try:
+        for key, document in documents.items():
+            _atomic_json(snapshot_paths[key], document)
+    except Exception:
+        _remove_run_archive_snapshot(plan, token)
+        raise
+    archives = {
+        key: _relative_output_path(snapshot_paths[key])
+        for key in documents
+    }
+    if promote:
+        with checkpoint_run_lock(_output_root(), plan["run_name"]):
+            _promote_run_archive_snapshot(plan, archives)
+    return archives
+
+
+def _promote_checkpoint_run_archives(
+        plan: dict[str, Any], metadata: dict[str, Any]) -> dict[str, str]:
+    """Promote the exact recovery snapshot stored with a checkpoint."""
+    archives = _checkpoint_run_archives(plan, metadata)
+    if archives:
+        with checkpoint_run_lock(_output_root(), plan["run_name"]):
+            return _promote_run_archive_snapshot(plan, archives)
+    # Legacy revisions predate immutable archive snapshots. Rebuild their
+    # canonical recovery documents from the restored effective Plan.
+    return _write_run_archives(plan)
 
 
 def _available_run_archives(plan: dict[str, Any]) -> dict[str, str]:
@@ -18026,6 +18296,8 @@ class MiniMaxH3ChainCheckpointManager:
         "scenes. Use branch locally pins this output in the workflow without "
         "changing the project's active branch. Selected chapter only excludes "
         "earlier chapters while keeping original scene numbers and timing. "
+        "Use DeRoPE branch locally substitutes verified recovered latents; "
+        "unsaved processing scenes use their selected originals. "
         "Connect to Checkpoint Upscale "
         "Adapter; no source Plan connection is required.",
     )
@@ -19496,9 +19768,9 @@ class MiniMaxH3ChainSegmentSave:
         os.makedirs(os.path.dirname(paths["blend_segment"]), exist_ok=True)
         os.makedirs(os.path.dirname(paths["checkpoint"]), exist_ok=True)
         alternate_take = _alternate_take_descriptor(plan)
-        archives = (_available_run_archives(plan)
-                    if alternate_take is not None else
-                    _write_run_archives(plan, prompt, extra_pnginfo))
+        transaction = uuid.uuid4().hex
+        archive_snapshot_created = False
+        archives = {}
         if (alternate_take is not None and
                 int(alternate_take["scene"]) != index):
             raise ValueError(
@@ -19532,7 +19804,6 @@ class MiniMaxH3ChainSegmentSave:
             # save behaves as a new immutable sibling, not a replacement.
             replacing_scene = False
 
-        transaction = uuid.uuid4().hex
         published_segment = _versioned_path(paths["segment"], transaction)
         published_blend = (
             _versioned_path(paths["blend_segment"], transaction)
@@ -19545,6 +19816,12 @@ class MiniMaxH3ChainSegmentSave:
         checkpoint_tmp = "%s.%s.tmp" % (published_checkpoint, uuid.uuid4().hex)
         committed = False
         try:
+            # Alternates need their own exact reference settings too, but
+            # never promote those settings over the active generation Run.
+            archives = _write_run_archives(
+                plan, prompt, extra_pnginfo,
+                revision=transaction, promote=False)
+            archive_snapshot_created = True
             source_dependency = state.get(
                 "current_source_reference_dependency")
             if (source_dependency is None
@@ -19909,22 +20186,38 @@ class MiniMaxH3ChainSegmentSave:
                 _atomic_json(published_metadata, metadata)
                 if alternate_take is None:
                     _atomic_json(paths["metadata"], metadata)
-                    editorial = _load_run_editorial(plan["run_name"])
-                    editorial, cleared_editorial = (
-                        _editorial_after_base_revision_change(
-                            editorial, index, str(shot["id"]), transaction))
-                    if cleared_editorial:
-                        normalized_editorial = _normalize_run_editorial(
-                            editorial, plan["run_name"])
-                        normalized_editorial["revision"] = uuid.uuid4().hex
-                        _atomic_json(
-                            _run_editorial_path(plan["run_name"]),
-                            normalized_editorial)
-                        _LOG.info(
-                            "H3 Chain cleared scene %d %s after accepting "
-                            "new base revision %s; alternate artifacts were "
-                            "retained.", index, " and ".join(
-                                cleared_editorial), transaction[:8])
+                    # The canonical pointer is the durable commit point.
+                    # Advisory recovery/editorial updates must never roll back
+                    # artifacts now referenced by that pointer.
+                    committed = True
+                    try:
+                        if archives:
+                            _promote_run_archive_snapshot(plan, archives)
+                    except (OSError, TypeError, ValueError) as exc:
+                        _LOG.warning(
+                            "H3 Chain committed clip %d but could not refresh "
+                            "legacy root recovery files: %s", index, exc)
+                    try:
+                        editorial = _load_run_editorial(plan["run_name"])
+                        editorial, cleared_editorial = (
+                            _editorial_after_base_revision_change(
+                                editorial, index, str(shot["id"]), transaction))
+                        if cleared_editorial:
+                            normalized_editorial = _normalize_run_editorial(
+                                editorial, plan["run_name"])
+                            normalized_editorial["revision"] = uuid.uuid4().hex
+                            _atomic_json(
+                                _run_editorial_path(plan["run_name"]),
+                                normalized_editorial)
+                            _LOG.info(
+                                "H3 Chain cleared scene %d %s after accepting "
+                                "new base revision %s; alternate artifacts were "
+                                "retained.", index, " and ".join(
+                                    cleared_editorial), transaction[:8])
+                    except (OSError, TypeError, ValueError) as exc:
+                        _LOG.warning(
+                            "H3 Chain committed clip %d but could not reconcile "
+                            "its editorial selection: %s", index, exc)
             committed = True
         finally:
             _safe_unlink(checkpoint_tmp)
@@ -19937,7 +20230,11 @@ class MiniMaxH3ChainSegmentSave:
                     _safe_unlink(published_audio)
                 _safe_unlink(published_prompt)
                 _safe_unlink(published_metadata)
+                if archive_snapshot_created:
+                    _remove_run_archive_snapshot(plan, transaction)
 
+        cache_cleanup = confirm_saved_use(
+            dynprompt, unique_id, published_metadata, _output_root(), _LOG)
         retained = (
             "; original generation checkpoint retained"
             if alternate_take is not None else
@@ -19953,6 +20250,8 @@ class MiniMaxH3ChainSegmentSave:
                   (save_kind, index, len(plan["shots"]), transaction,
                    published_segment, published_checkpoint, audio_status,
                    blend_status, retained))
+        if cache_cleanup:
+            status += "; retired %d verified legacy reference bundle(s)" % len(cache_cleanup)
         _LOG.info("H3 Chain %s", status)
         ui = {"text": [status]}
         if not _has_downstream_review_gate(dynprompt, unique_id):
@@ -20348,7 +20647,7 @@ def _select_review_candidate(
         _atomic_json(canonical, metadata)
         # Keep disk recovery aligned with the promoted take even if ComfyUI is
         # interrupted before the following scene reaches Segment Save.
-        _write_run_archives(selected_plan)
+        _promote_checkpoint_run_archives(selected_plan, metadata)
     accepted = dict(_public_segment(selected))
     accepted["_h3_review_decision"] = {
         "action": "candidate_selected",
@@ -21407,6 +21706,14 @@ def _persist_chapter_manifest_locked(manifest: dict[str, Any]) -> tuple[
         raise ValueError("H3 chapter delivery requires a JSON manifest.")
     snapshot_id = _chapter_manifest_digest(snapshot)
     path = _chapter_manifest_storage_path(snapshot, snapshot_id)
+    retired_path = os.path.join(
+        os.path.dirname(os.path.dirname(path)), "retired_manifests",
+        snapshot_id + ".json")
+    if os.path.lexists(retired_path):
+        raise ValueError(
+            "Chapter snapshot %s was retired for cleanup. It cannot be "
+            "republished from a stale selection; select the desired branch "
+            "and create an updated snapshot." % snapshot_id[:8])
     snapshot.update({
         "chapter_manifest_id": snapshot_id,
         "chapter_manifest_path": _relative_output_path(path),
@@ -22161,7 +22468,8 @@ class MiniMaxH3ChainChapterDelivery:
     CATEGORY = "conditioning/minimax/context_loop"
     DESCRIPTION = (
         "Turn Plan Studio chapter markers into immutable delivery units. Each "
-        "chapter keeps its exact checkpoint lineage and editorial state, and "
+        "snapshot includes the available scenes, even before the chapter is "
+        "finished, with their exact checkpoint lineage and editorial state, and "
         "routes every downstream MP4, PNG/WAV, or full-chain upscale export "
         "into a separate chapter folder. Disable it for a whole-Run final.")
 
@@ -22182,10 +22490,13 @@ class MiniMaxH3ChainChapterDelivery:
             manifest, int(chapter_number))
         chapter = chapter_manifest["chapter"]
         status = (
-            "sealed Chapter %d %r, scenes %d:%d, snapshot %s -> %s" %
+            "saved Chapter %d %r, scenes %d:%d, snapshot %s -> %s" %
             (int(chapter["number"]), str(chapter["title"]),
              int(chapter["start_scene"]), int(chapter["end_scene"]),
              str(chapter_manifest["chapter_manifest_id"])[:8], path))
+        if not chapter.get("complete", True):
+            status += "; partial chapter, planned through scene %d" % int(
+                chapter["planned_end_scene"])
         return (
             chapter_manifest,
             json.dumps(chapter_manifest, ensure_ascii=False, indent=2,
@@ -24126,6 +24437,209 @@ def _new_export_directory(manifest: dict[str, Any], export_name: str) -> str:
     raise RuntimeError("H3 PNG export could not allocate a unique output folder.")
 
 
+@contextmanager
+def _chapter_png_export_lock(manifest: dict[str, Any], export_name: str):
+    """Fence appenders without locking checkpoint saves or leaving stale leases."""
+    root = _chapter_delivery_root(manifest)
+    directory = os.path.realpath(os.path.join(root, ".export_locks"))
+    if os.path.commonpath([root, directory]) != root:
+        raise ValueError("H3 chapter export lock escapes its chapter directory.")
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(
+        directory, _safe_name(export_name, "png_sequence") + ".lock")
+    if os.path.islink(path):
+        raise ValueError("H3 chapter export lock must not be a symbolic link.")
+    with open(path, "a+b") as handle:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                handle.seek(0, os.SEEK_END)
+                if handle.tell() == 0:
+                    handle.write(b"\0")
+                    handle.flush()
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise ValueError(
+                "Another export is writing this Chapter/export_name. "
+                "Retry when it finishes or choose a different export_name.") from exc
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _png_export_file_record(path: str) -> dict[str, Any]:
+    stat = os.stat(path)
+    return {"file": os.path.basename(path), "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns, "sha256": _file_sha256(path)}
+
+
+def _png_export_file_unchanged(
+        directory: str, record: dict[str, Any], verification: str) -> bool:
+    filename = record.get("file")
+    if not isinstance(filename, str) or re.fullmatch(
+            r"frame_[0-9]{8,}\.png|audio\.wav", filename) is None:
+        return False
+    if re.fullmatch(r"[0-9a-f]{64}", str(record.get("sha256") or "")) is None:
+        return False
+    path = os.path.join(directory, filename)
+    if os.path.islink(path) or not os.path.isfile(path):
+        return False
+    stat = os.stat(path)
+    if stat.st_size <= 0 or stat.st_size != record.get("size"):
+        return False
+    # Timestamps are a cache hint, not content identity: network copies can
+    # change them without changing any bytes. A cache miss must verify the
+    # saved digest, while strict mode always hashes regardless of timestamps.
+    if verification == "cached" and stat.st_mtime_ns == record.get("mtime_ns"):
+        return True
+    return _file_sha256(path) == record.get("sha256")
+
+
+def _png_export_source_identity(segment: dict[str, Any]) -> dict[str, Any]:
+    path = _absolute_output_path(segment["checkpoint"])
+    stat = os.stat(path)
+    return {"segment": _json_document(segment),
+            "checkpoint_size": stat.st_size,
+            "checkpoint_mtime_ns": stat.st_mtime_ns,
+            "checkpoint_sha256": (segment.get("checkpoint_sha256") or
+                                  _file_sha256(path))}
+
+
+def _png_export_incremental_identity(
+        manifest, segments, editorial_segments, video_vae, audio_vae,
+        first_frame_number, compression, embed_workflow, png_bit_depth=8):
+    chapter = manifest.get("chapter") or {}
+    sources = {int(item["index"]): item for item in segments}
+    placements = {
+        str(item["scene_id"]): int(item["start_frame"])
+        for item in (manifest.get("editorial") or {}).get("placements", [])}
+    return {
+        "format": "h3_chapter_incremental_export_v1",
+        "settings": {
+            "run_name": manifest.get("run_name"),
+            "chapter": {key: chapter.get(key) for key in
+                        ("number", "id", "start_scene")},
+            "first_frame_number": int(first_frame_number),
+            "png_compression": compression,
+            "embed_workflow": bool(embed_workflow),
+            # Keep legacy 8-bit identities reusable; 16-bit is a distinct export.
+            **({"png_bit_depth": 16} if int(png_bit_depth) == 16 else {}),
+            # Use the original VAEs for incremental exports. Different weights
+            # of the same class require reuse_existing=false (as with other
+            # latent re-decode caches, a class signature is not a weights hash).
+            "video_vae": (_full_chain_vae_signature(video_vae)
+                          if video_vae is not None else None),
+            "audio_vae": (_full_chain_vae_signature(audio_vae)
+                          if audio_vae is not None else None),
+            "audio_sample_rate": (_png_export_audio_sample_rate(audio_vae)
+                                  if audio_vae is not None else None),
+            "continuation_mode": (manifest.get("compatibility") or {}).get(
+                "continuation_mode", "guide"),
+        },
+        "sources": [{
+            "picture": (_png_export_source_identity(item)
+                        if video_vae is not None else None),
+            "audio": (_png_export_source_identity(sources[int(item["index"])])
+                      if audio_vae is not None else None),
+            "frames": _editorial_segment_delivered_frames(item),
+            "index": int(item["index"]),
+            "placement": placements.get(str(item.get("id") or "")),
+        } for item in editorial_segments],
+    }
+
+
+def _find_incremental_png_export(manifest, export_name, identity, verification):
+    """Reuse only a successful, unchanged prefix; never repair files in place."""
+    chapter_root = _chapter_delivery_root(manifest)
+    root = os.path.realpath(os.path.join(chapter_root, "frames"))
+    if os.path.commonpath([chapter_root, root]) != chapter_root:
+        raise ValueError("H3 chapter frames directory escapes its chapter.")
+    if not os.path.isdir(root):
+        return None
+    name = _safe_name(export_name, "png_sequence")
+    pattern = re.compile(re.escape(name) + r"(?:_([0-9]{4}))?")
+    candidates = []
+    for entry in os.scandir(root):
+        match = pattern.fullmatch(entry.name)
+        if match and not entry.is_symlink() and entry.is_dir():
+            candidates.append((int(match.group(1) or 1), entry.path))
+    for _suffix, directory in sorted(candidates, reverse=True):
+        try:
+            sidecar = os.path.join(directory, "export.json")
+            history = os.path.realpath(os.path.join(directory, "export.history"))
+            if (os.path.islink(sidecar) or
+                    os.path.commonpath([directory, history]) != directory or
+                    os.path.lexists(os.path.join(directory, "export.partial.json"))):
+                continue
+            record = _read_json(sidecar)
+            prior = record.get("incremental") or {}
+            sources = prior.get("sources") or []
+            clips = record.get("clips") or []
+            if (record.get("format") != "h3_chain_png_export_v1" or
+                    record.get("complete") is not True or
+                    prior.get("format") != identity["format"] or
+                    prior.get("settings") != identity["settings"] or
+                    not sources or len(sources) != len(clips) or
+                    sources != identity["sources"][:len(sources)]):
+                continue
+            frames = sum(int(item["frames"]) for item in sources)
+            video_enabled = identity["settings"]["video_vae"] is not None
+            files = record.get("frame_files") or []
+            first = identity["settings"]["first_frame_number"]
+            expected_names = (["frame_%08d.png" % index
+                               for index in range(first, first + frames)]
+                              if video_enabled else [])
+            if (record.get("frame_count") != (frames if video_enabled else 0) or
+                    record.get("timeline_frame_count") != frames or
+                    record.get("first_frame_number") != first or
+                    [item["file"] for item in files] != expected_names or
+                    {entry.name for entry in os.scandir(directory)
+                     if entry.name.startswith("frame_") and
+                     entry.name.endswith(".png")} != set(expected_names) or
+                    not all(_png_export_file_unchanged(directory, item, verification)
+                            for item in files)):
+                continue
+            cursor = first
+            valid_clips = True
+            for clip, source in zip(clips, sources):
+                count = int(source["frames"])
+                if (clip.get("index") != source["index"] or
+                        clip.get("delivered_frames") != count or
+                        (video_enabled and (clip.get("first_frame_number") != cursor or
+                         clip.get("last_frame_number") != cursor + count - 1))):
+                    valid_clips = False
+                    break
+                cursor += count
+            if not valid_clips:
+                continue
+            if identity["settings"]["audio_vae"] is not None:
+                audio = record.get("audio") or {}
+                if (audio.get("file") != "audio.wav" or
+                        not _png_export_file_unchanged(directory, audio, verification)):
+                    continue
+            return directory, record
+        except (OSError, TypeError, ValueError, KeyError, AttributeError):
+            # Legacy, incomplete, edited, or damaged exports remain untouched.
+            continue
+    return None
+
+
+def _write_incremental_png(path, pixels, compression, metadata):
+    if os.path.lexists(path):
+        raise ValueError("H3 incremental export refuses to overwrite %s." % path)
+    _write_png(path, pixels, compression, metadata)
+    return _png_export_file_record(path)
+
+
 def _png_export_uint8(images: Any) -> Any:
     if torch is None or np is None:
         raise RuntimeError("H3 PNG export requires torch and NumPy.")
@@ -24143,9 +24657,9 @@ def _write_png(path: str, pixels: Any, compression: int,
     if Image is None or PngImagePlugin is None or np is None:
         raise RuntimeError("H3 PNG export requires Pillow and NumPy.")
     if (not isinstance(pixels, np.ndarray) or pixels.ndim != 3
-            or pixels.shape[-1] < 3 or pixels.dtype != np.uint8):
+            or pixels.shape[-1] < 3 or pixels.dtype not in (np.uint8, np.uint16)):
         raise ValueError(
-            "H3 PNG export expected one uint8 [height,width,channels] image; "
+            "H3 PNG export expected one uint8/uint16 [height,width,channels] image; "
             "got %r/%r." % (getattr(pixels, "shape", None),
                              getattr(pixels, "dtype", None)))
     pnginfo = PngImagePlugin.PngInfo()
@@ -24154,9 +24668,13 @@ def _write_png(path: str, pixels: Any, compression: int,
             pnginfo.add_text(str(key), str(value))
     temporary = "%s.%s.tmp" % (path, uuid.uuid4().hex)
     try:
-        Image.fromarray(pixels).save(
-            temporary, format="PNG", compress_level=int(compression),
-            pnginfo=pnginfo)
+        if pixels.dtype == np.uint16:
+            from .png_video_export import write_png16
+            write_png16(temporary, pixels, compression, metadata)
+        else:
+            Image.fromarray(pixels).save(
+                temporary, format="PNG", compress_level=int(compression),
+                pnginfo=pnginfo)
         os.replace(temporary, path)
     finally:
         _safe_unlink(temporary)
@@ -24305,16 +24823,13 @@ class MiniMaxH3ChainExportPNG:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "manifest": (MANIFEST_TYPE, {
-                    "tooltip": "Completed or partial manifest from Loop End or "
-                               "Manifest Load. Checkpoint latents are decoded "
-                               "scene by scene; the H.264 segments are not used."}),
                 "export_name": ("STRING", {
                     "default": "png_sequence",
                     "tooltip": "Folder name under the Run frames folder, or "
-                               "the selected Chapter frames folder. An "
-                               "existing folder is never overwritten; a "
-                               "numbered sibling is created automatically."}),
+                               "the selected Chapter frames folder. Chapter "
+                               "exports reuse unchanged scenes and append new "
+                               "ones. Changed content creates a numbered "
+                               "sibling, preserving the earlier export."}),
                 "first_frame_number": ("INT", {
                     "default": 1, "min": 0, "max": 999999999,
                     "tooltip": "Number used by the first exported file. Frames "
@@ -24333,6 +24848,9 @@ class MiniMaxH3ChainExportPNG:
                                "first frame of every scene."}),
             },
             "optional": {
+                "manifest": (MANIFEST_TYPE, {
+                    "tooltip": "Latent-export mode: completed or partial manifest from Loop End/Manifest Load. "
+                               "Leave disconnected in VIDEO passthrough mode; connect video and state inside the scene loop instead."}),
                 "video_vae": ("VAE", {
                     "tooltip": "Connect the original MiniMax H3 video VAE to "
                                "export PNG frames. Leave it disconnected for "
@@ -24350,22 +24868,46 @@ class MiniMaxH3ChainExportPNG:
                     "tooltip": "Cached verifies each immutable checkpoint with "
                                "SHA-256 once, then trusts matching size and "
                                "modification time on later exports. Strict "
-                               "re-hashes every checkpoint on every export."}),
+                               "re-hashes every checkpoint on every export. In VIDEO mode this verifies existing PNGs: "
+                               "cached checks size/mtime, strict re-hashes; the incoming VIDEO is always hashed."}),
+                "reuse_existing": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "For Chapter manifests, keep verified unchanged "
+                               "PNGs and append newly generated scenes. Changed "
+                               "takes, trims or settings create a new folder. "
+                               "VIDEO mode reuses exact saved scenes in the selected folder and appends the next scene; "
+                               "different takes/settings require a new folder. Turn off after changing VAE weights or decode "
+                               "settings, or to force a fresh export. Whole-Run "
+                               "exports always create a new folder."}),
+                "video": ("VIDEO", {
+                    "tooltip": "Pixel-export mode: final file-backed RAW VIDEO before MP4 compression. "
+                               "Writes one scene at a time and passes the same VIDEO through to Segment Save and Loop End. No VAE needed."}),
+                "state": ("H3_CHAIN_UPSCALE_STATE", {
+                    "tooltip": "Current pixel-upscale scene state. Required with VIDEO for scene identity, RAW overlap trimming and sequence numbering."}),
+                "output_folder": ("STRING", {
+                    "default": "", "tooltip": "VIDEO mode: chosen subfolder inside ComfyUI output (relative or absolute). "
+                               "Empty uses this upscale profile's frames/export_name folder. Different takes/settings never overwrite existing PNGs."}),
+                "png_bit_depth": (["8", "16"], {
+                    "default": "8", "tooltip": "8-bit RGB (existing default) or 16-bit RGB. "
+                               "16-bit preserves the RGB16 file-backed VIDEO precision and uses more disk space. Applies to both video and latent export."}),
             },
         }
 
-    RETURN_TYPES = ("STRING", "INT", "STRING", "STRING")
-    RETURN_NAMES = ("output_directory", "frame_count", "status", "audio_path")
+    RETURN_TYPES = ("STRING", "INT", "STRING", "STRING", "VIDEO")
+    RETURN_NAMES = ("output_directory", "frame_count", "status", "audio_path", "video")
     OUTPUT_TOOLTIPS = (
         "Absolute folder containing the selected deliverables and export.json.",
-        "Total PNG frames written; zero in audio-only mode.",
+        "Total PNG frames available, including reused frames; zero in "
+        "audio-only mode.",
         "Export folder, generated deliverables, scene count, and duration.",
         "Absolute audio.wav path when audio_vae is connected; blank otherwise.",
+        "Unchanged VIDEO after this scene's PNGs are saved. Connect to Segment Save and Loop End. None in latent-export mode.",
     )
     FUNCTION = "export"
     OUTPUT_NODE = True
     CATEGORY = "conditioning/minimax/context_loop"
-    DESCRIPTION = ("Re-decode saved H3 video and/or audio checkpoints, remove "
+    DESCRIPTION = ("Save file-backed VIDEO scene by scene inside a pixel upscale loop, "
+                   "or re-decode saved H3 video and/or audio checkpoints. Remove "
                    "repeated context overlap, and write a continuous lossless "
                    "PNG sequence, synchronized PCM WAV, or both. Either VAE can "
                    "be connected independently.")
@@ -24374,10 +24916,39 @@ class MiniMaxH3ChainExportPNG:
     def IS_CHANGED(cls, *args, **kwargs):
         return float("NaN")
 
-    def export(self, manifest, video_vae=None, export_name="png_sequence",
+    def export(self, manifest=None, video_vae=None, export_name="png_sequence",
                first_frame_number=1, png_compression=1, embed_workflow=True,
                save_workers=0, checkpoint_verification="cached",
-               audio_vae=None):
+               audio_vae=None, reuse_existing=True, video=None, state=None,
+               output_folder="", png_bit_depth="8"):
+        from .png_video_export import bit_depth, export_video
+        bits = bit_depth(png_bit_depth)
+        if video is not None:
+            if manifest is not None or video_vae is not None or audio_vae is not None:
+                raise ValueError("VIDEO passthrough uses video + state inside the scene loop. Disconnect manifest and VAEs; the segment saver preserves audio.")
+            return export_video(
+                sys.modules[__name__], video, state, export_name, output_folder,
+                first_frame_number, png_compression, bits, embed_workflow,
+                save_workers, checkpoint_verification, reuse_existing)
+        if state is not None or output_folder:
+            raise ValueError("state/output_folder require the VIDEO passthrough input. For latent export connect manifest + VAE.")
+        if manifest is None:
+            raise ValueError("Connect manifest + VAE for latent export, or VIDEO + state inside the pixel upscale scene loop.")
+        incremental = (bool(reuse_existing) and isinstance(manifest, dict)
+                       and manifest.get("format") == CHAPTER_MANIFEST_FORMAT)
+        guard = (_chapter_png_export_lock(manifest, export_name)
+                 if incremental else nullcontext())
+        with guard:
+            result = self._export(
+                manifest, video_vae, export_name, first_frame_number,
+                png_compression, embed_workflow, save_workers,
+                checkpoint_verification, audio_vae, incremental, bits)
+            result["result"] = (*result["result"], None)
+            return result
+
+    def _export(self, manifest, video_vae, export_name, first_frame_number,
+                png_compression, embed_workflow, save_workers,
+                checkpoint_verification, audio_vae, incremental, png_bit_depth=8):
         if _st_load is None or torch is None or np is None:
             raise RuntimeError(
                 "H3 PNG/WAV export requires safetensors, torch, and NumPy.")
@@ -24421,13 +24992,26 @@ class MiniMaxH3ChainExportPNG:
             PNG_EXPORT_MAX_CHUNK_FRAMES,
             max(PNG_EXPORT_MIN_CHUNK_FRAMES, workers * 4))
         cache_path, hash_cache = _load_png_export_hash_cache(manifest)
-        output_dir = _new_export_directory(manifest, export_name)
+        identity = (_png_export_incremental_identity(
+            manifest, segments, editorial_segments, video_vae, audio_vae,
+            first_frame_number, compression, embed_workflow, png_bit_depth) if incremental else None)
+        previous_export = (_find_incremental_png_export(
+            manifest, export_name, identity, verification) if incremental else None)
+        if previous_export is None:
+            output_dir = _new_export_directory(manifest, export_name)
+            previous = {}
+        else:
+            output_dir, previous = previous_export
+        reused_clips = len(previous.get("clips") or [])
+        reused_frames = int(previous.get("frame_count", 0))
+        audio_reused = (audio_enabled and reused_clips == len(editorial_segments))
         partial_path = os.path.join(output_dir, "export.partial.json")
         final_path = os.path.join(output_dir, "export.json")
         frame_number = int(first_frame_number)
         first_number = frame_number
         written = 0
         clip_records = []
+        frame_files = list(previous.get("frame_files") or [])
         clip_timings = []
         audio_path = ""
         audio_record = None
@@ -24451,6 +25035,7 @@ class MiniMaxH3ChainExportPNG:
                     "chapter_manifest_path"),
                 "first_frame_number": first_number,
                 "frame_count": written,
+                "reused_frame_count": reused_frames,
                 "phase": phase,
                 "current_clip": current_clip,
                 "current_clip_frames": int(current_clip_frames),
@@ -24458,11 +25043,13 @@ class MiniMaxH3ChainExportPNG:
                 "timings": list(clip_timings),
                 "settings": {
                     "png_compression": compression,
+                    "png_bit_depth": png_bit_depth,
                     "save_workers": workers,
                     "checkpoint_verification": verification,
                     "conversion_chunk_frames": chunk_frames,
                     "export_video": video_enabled,
                     "export_audio": audio_enabled,
+                    "reuse_existing": incremental,
                 },
                 "audio": audio_record,
                 "archives": manifest.get("archives", {}),
@@ -24475,6 +25062,12 @@ class MiniMaxH3ChainExportPNG:
             "verification=%s, output=%s",
             len(editorial_segments), total_frames, video_enabled,
             audio_enabled, compression, workers, verification, output_dir)
+        if previous:
+            _LOG.info(
+                "H3 chapter export reusing %d unchanged scenes / %d PNGs; "
+                "%d new scenes to export. Original PNG metadata is retained; "
+                "export.json records the current chapter snapshot.",
+                reused_clips, reused_frames, len(editorial_segments) - reused_clips)
         save_partial("starting")
 
         with concurrent.futures.ThreadPoolExecutor(
@@ -24513,6 +25106,18 @@ class MiniMaxH3ChainExportPNG:
                 _LOG.info(
                     "H3 PNG export scene %d: %s in %.2fs",
                     index, verification_result, verification_seconds)
+
+                if clip_position <= reused_clips:
+                    clip_records.append(dict(previous["clips"][clip_position - 1]))
+                    clip_timings.append({"index": index, "reused": True,
+                                         "verification": verification_result})
+                    written += delivered_frames
+                    frame_number += delivered_frames
+                    progress_done += 2 * delivered_frames
+                    _png_export_update_progress(
+                        progress_bar, progress_done, progress_total)
+                    save_partial("reusing unchanged scene", index, delivered_frames)
+                    continue
 
                 save_partial("loading checkpoint", index)
                 phase_started = time.perf_counter()
@@ -24585,7 +25190,11 @@ class MiniMaxH3ChainExportPNG:
                         delivered_frames, chunk_start + chunk_frames)
                     chunk_count = chunk_end - chunk_start
                     phase_started = time.perf_counter()
-                    pixels = _png_export_uint8(images[chunk_start:chunk_end])
+                    if png_bit_depth == 16:
+                        pixels = ((images[chunk_start:chunk_end, ..., :3].to(dtype=torch.float32).clamp(0, 1) * 65535).round()
+                                  .to(device="cpu", dtype=torch.uint16).contiguous().numpy())
+                    else:
+                        pixels = _png_export_uint8(images[chunk_start:chunk_end])
                     conversion_seconds += time.perf_counter() - phase_started
                     phase_started = time.perf_counter()
                     futures = []
@@ -24609,12 +25218,15 @@ class MiniMaxH3ChainExportPNG:
                             png_metadata.update(archive_metadata)
                             png_metadata["h3_manifest"] = manifest_metadata
                         futures.append(executor.submit(
-                            _write_png, os.path.join(output_dir, filename),
+                            _write_incremental_png if incremental else _write_png,
+                            os.path.join(output_dir, filename),
                             pixels_frame, compression, png_metadata))
 
                     completed = 0
                     for future in concurrent.futures.as_completed(futures):
-                        future.result()
+                        file_record = future.result()
+                        if incremental:
+                            frame_files.append(file_record)
                         completed += 1
                         _png_export_update_progress(
                             progress_bar,
@@ -24663,7 +25275,20 @@ class MiniMaxH3ChainExportPNG:
                     delivered_frames / max(save_seconds, 1e-9))
                 del images, video, tensors
 
-        if audio_enabled:
+        if audio_reused:
+            # Re-check original audio checkpoints even when no decode is needed.
+            # Alternates may select different picture checkpoints above.
+            for segment in segments:
+                _png_export_check_interrupted()
+                _result, changed = _verify_png_export_checkpoint(
+                    _absolute_output_path(segment["checkpoint"]),
+                    segment.get("checkpoint_sha256", ""), verification, hash_cache)
+                if changed:
+                    _atomic_json(cache_path, hash_cache)
+            audio_path = os.path.join(output_dir, "audio.wav")
+            audio_record = dict(previous["audio"])
+            _LOG.info("H3 WAV export reusing unchanged soundtrack: %s", audio_path)
+        elif audio_enabled:
             sample_rate = _png_export_audio_sample_rate(audio_vae)
             audio_frames_by_index = {
                 int(segment.get("index", offset)):
@@ -24759,6 +25384,8 @@ class MiniMaxH3ChainExportPNG:
                 "elapsed_seconds": round(
                     time.perf_counter() - audio_started, 3),
             }
+            if incremental:
+                audio_record.update(_png_export_file_record(audio_path))
             save_partial("audio complete")
             _LOG.info(
                 "H3 WAV export complete: %d samples at %d Hz (%.3fs) -> %s",
@@ -24804,6 +25431,9 @@ class MiniMaxH3ChainExportPNG:
             "last_frame_number": (
                 frame_number - 1 if video_enabled else None),
             "frame_count": written,
+            "new_frame_count": written - reused_frames,
+            "reused_frame_count": reused_frames,
+            "reused_clip_count": reused_clips,
             "timeline_frame_count": total_frames,
             "clips": clip_records,
             "timings": clip_timings,
@@ -24811,14 +25441,34 @@ class MiniMaxH3ChainExportPNG:
             "elapsed_seconds": round(elapsed, 3),
             "settings": {
                 "png_compression": compression,
+                "png_bit_depth": png_bit_depth,
                 "save_workers": workers,
                 "checkpoint_verification": verification,
                 "conversion_chunk_frames": chunk_frames,
                 "export_video": video_enabled,
                 "export_audio": audio_enabled,
+                "reuse_existing": incremental,
             },
             "archives": manifest.get("archives", {}),
         }
+        if isinstance(manifest.get("chapter"), dict):
+            export_record["chapter_complete"] = manifest["chapter"].get(
+                "complete", True)
+        if incremental:
+            # The immutable chapter snapshot remains the recovery authority.
+            # Updating this sidecar must not rewrite metadata in reused PNGs.
+            export_record["incremental"] = identity
+            export_record["frame_files"] = sorted(
+                frame_files, key=lambda item: int(item["file"][6:-4]))
+            if previous:
+                history_root = os.path.realpath(os.path.join(
+                    output_dir, "export.history"))
+                if os.path.commonpath([output_dir, history_root]) != output_dir:
+                    raise ValueError("H3 export history escapes its export directory.")
+                history_path = os.path.join(
+                    history_root, _fingerprint(previous) + ".json")
+                if not os.path.isfile(history_path):
+                    _atomic_json(history_path, previous)
         _atomic_json(final_path, export_record)
         _safe_unlink(partial_path)
         if video_enabled and audio_enabled:
@@ -24839,6 +25489,10 @@ class MiniMaxH3ChainExportPNG:
                 "frames (%.3fs) in %.1fs -> %s" %
                 (len(editorial_segments), total_frames,
                  total_frames / float(FPS), elapsed, audio_path))
+        if previous:
+            status += "; reused %d PNGs, wrote %d new PNGs%s" % (
+                reused_frames, written - reused_frames,
+                "; WAV reused" if audio_reused else "")
         _LOG.info("H3 Chain %s", status)
         return {"ui": {"text": [status]},
                 "result": (output_dir, written, status, audio_path)}
@@ -26146,7 +26800,9 @@ async def _submit_candidate_batch_command(request):
         # The activate-only checkpoint endpoint has already committed the
         # selected immutable lineage. Align run recovery metadata now that
         # targeted cancellation is confirmed, then prune only unkept takes.
-        _write_run_archives(selected_plan)
+        selected_metadata, _ = _load_checkpoint_revision(
+            str(selected_plan["run_name"]), scene, requested_revision)
+        _promote_checkpoint_run_archives(selected_plan, selected_metadata)
         cleanup = _prune_review_candidates(
             selected_plan, scene, candidates,
             list(command.get("kept_revisions") or ()))
@@ -26597,7 +27253,14 @@ def _checkpoint_selection_manifest(value: Any) -> dict[str, Any] | None:
         raise ValueError(
             "Checkpoint Manager has no selected checkpoint lineage.")
 
-    plan_path = _run_archive_paths({"run_name": run_name})["plan"]
+    tip = lineage[-1]
+    if not isinstance(tip, dict):
+        raise ValueError("Checkpoint Manager lineage tip is invalid.")
+    tip_metadata, _ = _load_checkpoint_revision(
+        run_name, tip.get("scene"), tip.get("revision"), verify_artifacts=False)
+    exact_archives = _checkpoint_run_archives({"run_name": run_name}, tip_metadata)
+    plan_path = (_absolute_output_path(exact_archives["plan"]) if exact_archives
+                 else _run_archive_paths({"run_name": run_name})["plan"])
     if not os.path.isfile(plan_path):
         raise FileNotFoundError(
             "Selected H3 run has no archived recovery Plan: %s" % plan_path)
@@ -26753,6 +27416,12 @@ def _checkpoint_selection_manifest(value: Any) -> dict[str, Any] | None:
                 if local_descriptor is None:
                     raise ValueError(
                         "adopted H3 reference cache has no valid descriptor")
+                if matches_legacy(local_cache, descriptor):
+                    # Conversion changes storage, not the selected generation.
+                    # Preserve its descriptor and hence the full source-manifest
+                    # hash used to resume previously saved upscale profiles.
+                    local_descriptor = descriptor
+                    adopted = False
                 metadata = dict(metadata)
                 metadata["segment"] = dict(segment)
                 metadata["segment"]["reference_cache"] = local_descriptor
@@ -26796,7 +27465,7 @@ def _checkpoint_selection_manifest(value: Any) -> dict[str, Any] | None:
         "duration_seconds": total_frames / float(FPS),
         "segments": segments,
     }
-    archives = _available_run_archives({"run_name": run_name})
+    archives = exact_archives or _available_run_archives({"run_name": run_name})
     if archives:
         manifest["archives"] = archives
     if isinstance(archived_plan.get("prelude"), dict):
@@ -26825,6 +27494,15 @@ def _checkpoint_selection_manifest(value: Any) -> dict[str, Any] | None:
             manifest, int(selected_chapter["number"]), persist=False)
     else:
         _validate_manifest(manifest)
+    if selection.get("processing_source") is not None:
+        from . import upscale_nodes
+        from .deferred_checkpoint_source import derope_source_manifest
+        for segment in manifest["segments"]:
+            original_metadata = loaded[int(segment["index"]) - 1]["segment"]
+            if original_metadata.get("adopted_from_revision"):
+                segment["adopted_from_revision"] = original_metadata["adopted_from_revision"]
+        manifest = derope_source_manifest(
+            manifest, selection["processing_source"], sys.modules[__name__], upscale_nodes)
     return manifest
 
 
@@ -27183,6 +27861,60 @@ async def _attribute_checkpoint_revision(request):
     return web.json_response(payload)
 
 
+async def _processing_checkpoint_deletion(request):
+    from .processing_checkpoint_delete import ProcessingCheckpointManager
+
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("Processing deletion requires a JSON object.")
+        run_name = _strict_run_name(body.get("run_name", ""))
+        manager = ProcessingCheckpointManager(_output_root())
+        if request.path.endswith("/delete-preview"):
+            payload = await asyncio.to_thread(
+                manager.deletion_preview, run_name, body.get("metadata_path"))
+        else:
+            def delete_locked():
+                with checkpoint_run_lock(_output_root(), run_name):
+                    return manager.delete(run_name, body.get("metadata_path"), body.get("snapshot"))
+
+            payload = await asyncio.to_thread(delete_locked)
+    except CheckpointDeleteBlocked as exc:
+        return web.json_response({"error": str(exc), "preview": exc.preview}, status=409)
+    except FileNotFoundError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    except (OSError, TypeError, ValueError, KeyError) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(payload)
+
+
+async def _chapter_snapshot_retirement(request):
+    from .chapter_snapshot_retirement import ChapterSnapshotManager
+
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("Snapshot retirement requires a JSON object.")
+        run_name = _strict_run_name(body.get("run_name", ""))
+        manager = ChapterSnapshotManager(_output_root())
+        if request.path.endswith("/retire-preview"):
+            payload = await asyncio.to_thread(
+                manager.retirement_preview, run_name, body.get("path"))
+        else:
+            def retire_locked():
+                with checkpoint_run_lock(_output_root(), run_name):
+                    return manager.retire(run_name, body.get("path"), body.get("snapshot"))
+
+            payload = await asyncio.to_thread(retire_locked)
+    except CheckpointDeleteBlocked as exc:
+        return web.json_response({"error": str(exc), "preview": exc.preview}, status=409)
+    except FileNotFoundError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    except (OSError, TypeError, ValueError, KeyError) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(payload)
+
+
 async def _delete_checkpoint_revision(request):
     try:
         body = await request.json()
@@ -27441,6 +28173,10 @@ def _saved_checkpoint_listing(
         "graph_hash": graph["graph_hash"],
         "summary": graph["summary"],
     })
+    from .checkpoint_variants import saved_checkpoint_variants
+    variants = saved_checkpoint_variants(_output_root(), run_name, graph["revisions"])
+    payload["processing_variants"] = variants["variants"]
+    payload["processing_variant_warnings"] = variants["warnings"]
     return payload
 
 
@@ -28862,6 +29598,18 @@ if (PromptServer is not None and web is not None and
     PromptServer.instance.routes.post(
         "/minimax_h3_context_loop/checkpoint-revisions/delete")(
             _delete_checkpoint_revision)
+    PromptServer.instance.routes.post(
+        "/minimax_h3_context_loop/chapter-snapshots/retire-preview")(
+            _chapter_snapshot_retirement)
+    PromptServer.instance.routes.post(
+        "/minimax_h3_context_loop/chapter-snapshots/retire")(
+            _chapter_snapshot_retirement)
+    PromptServer.instance.routes.post(
+        "/minimax_h3_context_loop/processing-checkpoints/delete-preview")(
+            _processing_checkpoint_deletion)
+    PromptServer.instance.routes.post(
+        "/minimax_h3_context_loop/processing-checkpoints/delete")(
+            _processing_checkpoint_deletion)
     PromptServer.instance.routes.post(
         "/minimax_h3_context_loop/open-run-folder")(_open_run_folder)
     PromptServer.instance.routes.post(

@@ -70,6 +70,11 @@ const source = fs.readFileSync(new URL("../web/h3_chain_checkpoint_manager.js", 
 let currentGraph = structuredClone(payload), runs = ["demo", "other"], failRequests = false;
 let confirms = true, mutations = 0, dirty = 0;
 let attachResponse = null;
+let processingDeletion = false, deleteConflict = false, delayedProcessingPreview = null;
+let retainedPixelTakes = [];
+let snapshotRetirement = false, snapshotRetired = false, retirementError = 0, delayedRetirementPreview = null;
+const snapshotAddress = `h3_chains/demo/chapters/01_one/manifests/${a}.json`;
+const confirmations = [];
 let extension;
 const requests = [];
 const context = vm.createContext({
@@ -82,6 +87,49 @@ const context = vm.createContext({
         let data;
         if (path.endsWith("/runs")) data = {runs:runs.map(run_name => ({run_name, checkpoint_count:3}))};
         else if (path.includes("/checkpoints?")) data = structuredClone(currentGraph);
+        else if (path.endsWith("/processing-checkpoints/delete-preview") && processingDeletion) {
+            const body = JSON.parse(options.body);
+            data = {allowed:true, metadata_path:body.metadata_path, snapshot:"preview-token",
+                owned_file_count:6, reclaimed_bytes:1024, files:[], not_deleted:["Originals and references"],
+                retained_independent_takes:structuredClone(retainedPixelTakes)};
+            if (delayedProcessingPreview) {
+                const wait = delayedProcessingPreview; delayedProcessingPreview = null;
+                await wait;
+            }
+        }
+        else if (path.endsWith("/processing-checkpoints/delete") && processingDeletion) {
+            mutations++;
+            const body = JSON.parse(options.body);
+            assert.equal(body.snapshot, "preview-token");
+            assert.ok(currentGraph.processing_variants.some(item => item.key === body.metadata_path));
+            if (deleteConflict) return {ok:false, status:409, json:async () => ({error:"Preview changed; refresh", preview:{allowed:false}})};
+            currentGraph.processing_variants = currentGraph.processing_variants.filter(item => item.key !== body.metadata_path);
+            data = {message:"Deleted processed version; originals unchanged.", reclaimed_bytes:1024};
+        }
+        else if (path.endsWith("/chapter-snapshots/retire-preview") && snapshotRetirement) {
+            assert.equal(JSON.parse(options.body).path, snapshotAddress);
+            data = {allowed:true, path:snapshotAddress, snapshot:"retirement-token", chapter_number:1,
+                chapter_manifest_id:a, retired_path:snapshotAddress.replace("/manifests/", "/retired_manifests/"),
+                scenes:[{scene:2, revision:c, active:false}], message:"No clips are deleted."};
+            if (delayedRetirementPreview) {
+                const wait = delayedRetirementPreview; delayedRetirementPreview = null;
+                await wait;
+            }
+        }
+        else if (path.endsWith("/chapter-snapshots/retire") && snapshotRetirement) {
+            mutations++;
+            const body = JSON.parse(options.body);
+            assert.equal(body.path, snapshotAddress);
+            assert.equal(body.snapshot, "retirement-token");
+            if (retirementError) return {ok:false, status:retirementError,
+                json:async () => ({error:retirementError === 423 ? "Project is read only" : "Retirement preview changed"})};
+            snapshotRetired = true;
+            data = {message:"Snapshot retired; no clips deleted."};
+        }
+        else if (path.endsWith("/delete-preview") && snapshotRetirement) {
+            data = {allowed:snapshotRetired, blockers:snapshotRetired ? [] : ["Snapshot pins this take"], files:[],
+                chapter_references:snapshotRetired ? [] : [{number:1, snapshot:a, path:snapshotAddress}]};
+        }
         else if (path.endsWith("/delete-preview")) data = {allowed:false, blockers:["test"]};
         else if (path.endsWith("/attribute") && attachResponse) {
             mutations++;
@@ -98,9 +146,9 @@ const context = vm.createContext({
         else { mutations++; throw new Error(`Unexpected request ${path}`); }
         return {ok:true, json:async () => data};
     }},
-    window:{setTimeout:callback => callback(), confirm:() => confirms},
+    window:{setTimeout:callback => callback(), confirm:message => { confirmations.push(message); return confirms; }},
     projectMutationOptions:(_node, _run, options) => {
-        if (attachResponse) return options;
+        if (attachResponse || processingDeletion || snapshotRetirement) return options;
         mutations++; throw new Error("Local output attempted project mutation");
     },
     promptCompanionSync:{},
@@ -143,8 +191,18 @@ assert.equal(mutations, 0);
 const first = makeNode(), second = makeNode();
 await settle();
 assert.equal(JSON.parse(value(first)).lineage.at(-1).revision, d, "legacy default still follows selection");
+const wholeActive = value(first);
+select(first, 2, b); await settle();
+assert.equal(value(first), wholeActive, "previewing an earlier clip cannot truncate output");
+select(first, 1, a); await settle();
+assert.equal(value(first), wholeActive, "even a shared ancestor is preview-only");
+byText(first, "Use branch locally").click();
+assert.equal(JSON.parse(value(first)).lineage.at(-1).revision, d,
+    "Use branch locally chooses the clicked row's full branch, not the previewed ancestor");
+byText(first, "Follow branch selection").click();
 select(first, 2, c);
 await settle();
+assert.equal(value(first), wholeActive, "previewing a different branch alone does not change output");
 byText(first, "Use branch locally").click();
 const pin = value(first), otherBefore = value(second);
 assert.equal(pin, local);
@@ -214,7 +272,7 @@ assert.equal(JSON.parse(value(first)).run_name, "other");
 select(second, 2, c); await settle();
 byText(second, "Use branch locally").click();
 select(second, 3, d); await settle();
-byText(second, "Follow browsing").click();
+byText(second, "Follow branch selection").click();
 assert.equal(core.checkpointLocalSelection(value(second)), null);
 assert.equal(JSON.parse(value(second)).lineage.at(-1).revision, d);
 assert.equal(mutations, 0, "local use, release, browsing and reload never call project mutation APIs");
@@ -298,3 +356,241 @@ assert.equal(attachedOutput.scope_start_scene, 2);
 assert.equal(attachedOutput.lineage.at(-1).revision, attachResponse.revision);
 assert.equal(mutations, 1, "only explicit attachment writes; no automatic project activation");
 console.log("Checkpoint attachment: candidate -> alias -> chapter-only API output passes");
+
+// Processing tabs mount the real extension. Merely inspecting a derivative
+// must not retarget the execution widget, activate a branch, or delete a base.
+currentGraph = structuredClone(payload);
+currentGraph.processing_variants = [
+    {key:"demo/motion/one", scene:2, revision:"1".repeat(32), stage:"derope", profile:"motion",
+        profile_path:"demo/upscaled/motion", originals:[{scene:2, revision:b}], ready:true,
+        width:960, height:544, raw_frames:175, delivered_frames:175, latent_saved:false, context_steps:12,
+        video:{filename:"motion.mp4"}, audio:{filename:"motion.wav"}},
+    {key:"demo/motion/two", scene:2, revision:"2".repeat(32), stage:"derope", profile:"motion2",
+        profile_path:"demo/upscaled/motion2", originals:[{scene:2, revision:b}], ready:true,
+        checkpoint_sha256:"2".repeat(64), processing_branch:{path:"demo/motion/two", kind:"metadata",
+            lineage:[{scene:2, revision:"2".repeat(32), metadata_path:"demo/motion/two", checkpoint_sha256:"2".repeat(64)}]},
+        width:960, height:544, raw_frames:175, delivered_frames:175, latent_saved:true, latent_layout:"joint_av",
+        video:{filename:"motion2.mp4"}},
+    {key:"demo/hq/one", scene:2, revision:"3".repeat(32), stage:"latent_upscale", profile:"hq",
+        profile_path:"demo/upscaled/hq", originals:[{scene:2, revision:b}], ready:true,
+        width:1920, height:1088, latent_saved:true, latent_layout:"single", video:{filename:"hq.mp4"}},
+    {key:"demo/pixel/orphan", scene:2, revision:"4".repeat(32), stage:"pixel_upscale", profile:"pixel",
+        profile_path:"demo/upscaled/pixel", originals:[], ready:false, latent_saved:false,
+        source_status:"original unavailable or source mismatch", video:{filename:"orphan.mp4"}},
+];
+const variants = makeNode();
+await settle();
+select(variants, 2, b);
+await settle();
+const originalOutput = value(variants), mutationsBefore = mutations;
+byText(variants, "DeRoPE · 2").click();
+assert.equal(byClass(variants, "h3cm-stage-tab")["role"], "tab");
+assert.equal(value(variants), originalOutput);
+assert.equal(byClass(variants, "h3cm-preview").dataset.source, "/view?filename=motion.mp4&subfolder=&type=output");
+assert.ok(elements(variants).some(item => /Continuation tail only/.test(item.textContent)));
+byText(variants, "Use DeRoPE branch locally").click();
+assert.equal(value(variants), originalOutput, "an unusable processing branch never changes output");
+assert.match(byClass(variants, "h3cm-status").textContent, /unambiguous saved branch/);
+assert.ok(byText(variants, "Make branch active (project)").disabled);
+assert.ok(byText(variants, "Delete processed version").disabled);
+select(variants, 2, "2".repeat(32));
+assert.equal(value(variants), originalOutput);
+assert.equal(byClass(variants, "h3cm-audio").hidden, true, "no stale sidecar from another take");
+assert.ok(elements(variants).some(item => /Full latent saved \(joint_av\)/.test(item.textContent)));
+const savedVariantProperties = structuredClone(variants.properties);
+const processingPin = makeNode(originalOutput, savedVariantProperties);
+await settle();
+select(processingPin, 2, "2".repeat(32));
+byText(processingPin, "Use DeRoPE branch locally").click();
+const pinnedProcessing = JSON.parse(value(processingPin));
+assert.equal(pinnedProcessing.processing_source.stage, "derope");
+assert.equal(pinnedProcessing.output_mode, "workflow_local");
+assert.equal(pinnedProcessing.lineage.at(-1).scene, 3, "processing preview does not trim the original branch");
+assert.deepEqual(pinnedProcessing.processing_source.branch.lineage.map(item => item.scene), [2], "absent processing scenes remain original fallbacks");
+const restoredPin = makeNode(value(processingPin), structuredClone(processingPin.properties));
+await settle();
+assert.deepEqual(JSON.parse(value(restoredPin)), pinnedProcessing);
+byText(restoredPin, "Original · 4").click();
+assert.deepEqual(JSON.parse(value(restoredPin)), pinnedProcessing, "tab switch cannot reset DeRoPE output");
+byText(restoredPin, "Use branch locally").click();
+assert.equal(JSON.parse(value(restoredPin)).processing_source, undefined, "explicit Original selection resets source stage");
+const reopenedVariant = makeNode(originalOutput, savedVariantProperties);
+await settle();
+assert.equal(byClass(reopenedVariant, "h3cm-preview").dataset.source, "/view?filename=motion2.mp4&subfolder=&type=output");
+assert.equal(reopenedVariant.properties.h3_checkpoint_manager_scene, 2,
+    "restoring a processing view must not promote its source selection to the deepest original tip");
+assert.equal(value(reopenedVariant), originalOutput, "reopening a processing tab never rewrites original output");
+byText(variants, "S1 · not saved").click();
+assert.equal(byClass(variants, "h3cm-preview").src, undefined, "missing stage does not impersonate original preview");
+assert.equal(value(variants), originalOutput, "even browsing another scene in a derivative tab leaves output unchanged");
+byText(variants, "Latent Upscale · 1").click();
+select(variants, 2, "3".repeat(32));
+assert.equal(value(variants), originalOutput);
+assert.match(byClass(variants, "h3cm-preview").src, /hq.mp4/);
+byText(variants, "Pixel Upscale · 1").click();
+select(variants, 2, "4".repeat(32));
+assert.ok(elements(variants).some(item => item.textContent === "original unavailable or source mismatch"));
+assert.equal(value(variants), originalOutput);
+byText(reopenedVariant, "Original · 4").click();
+assert.equal(value(reopenedVariant), originalOutput);
+assert.equal(mutations, mutationsBefore, "no processing-tab operation mutates the project");
+byText(reopenedVariant, "DeRoPE · 2").click();
+currentGraph.processing_variants = currentGraph.processing_variants.filter(item => item.key !== "demo/motion/two");
+reopenedVariant._h3CheckpointManagerRefresh();
+await settle();
+assert.equal(byClass(reopenedVariant, "h3cm-preview").src, undefined,
+    "a removed explicitly browsed take does not become another saved take on refresh");
+assert.match(byClass(reopenedVariant, "h3cm-prompt").textContent, /previously browsed processing take is unavailable/);
+assert.equal(value(reopenedVariant), originalOutput);
+console.log("Checkpoint processing tabs: retained takes, previews, missing versions, saved view, and output isolation pass");
+
+// Processing deletion uses its own endpoint, confirmation and immutable path.
+processingDeletion = true;
+const deleting = makeNode(); await settle();
+select(deleting, 2, b); await settle();
+byText(deleting, "Latent Upscale · 1").click(); await settle();
+select(deleting, 2, "3".repeat(32)); await settle();
+const outputBeforeDelete = value(deleting), originalsBeforeDelete = JSON.stringify(currentGraph.revisions);
+assert.equal(byText(deleting, "Delete processed version").disabled, false);
+const beforeCancel = mutations;
+confirms = false;
+byText(deleting, "Delete processed version").click(); await settle();
+assert.equal(mutations, beforeCancel, "cancel does not send a deletion request");
+confirms = true; deleteConflict = true;
+byText(deleting, "Delete processed version").click(); await settle();
+assert.match(byClass(deleting, "h3cm-status").textContent, /Preview changed/);
+assert.equal(byText(deleting, "Delete processed version").disabled, true);
+assert.ok(currentGraph.processing_variants.some(v => v.key === "demo/hq/one"));
+deleteConflict = false;
+select(deleting, 2, "3".repeat(32)); await settle();
+byText(deleting, "Delete processed version").click(); await settle();
+assert.ok(!currentGraph.processing_variants.some(v => v.key === "demo/hq/one"));
+assert.equal(JSON.stringify(currentGraph.revisions), originalsBeforeDelete);
+assert.equal(value(deleting), outputBeforeDelete);
+assert.equal(byClass(deleting, "h3cm-preview").src, undefined);
+assert.equal(byText(deleting, "Delete processed version").disabled, true);
+assert.match(byClass(deleting, "h3cm-status").textContent, /Reclaimed/);
+// Orphaned versions must also be deletable (no original selection exists).
+byText(deleting, "Pixel Upscale · 1").click(); await settle();
+select(deleting, 2, "4".repeat(32)); await settle();
+assert.equal(byText(deleting, "Delete processed version").disabled, false);
+byText(deleting, "Delete processed version").click(); await settle();
+assert.ok(!currentGraph.processing_variants.some(v => v.key === "demo/pixel/orphan"));
+// Sequence-order history must not force the user to delete independent later clips.
+const independentPixel = (scene, digit) => ({key:`demo/pixel/${scene}`, scene,
+    revision:digit.repeat(32), stage:"pixel_upscale", profile:"pixel",
+    profile_path:"demo/upscaled/pixel", originals:[{scene, revision:scene === 2 ? b : c}],
+    ready:true, latent_saved:false, context_steps:0, video:{filename:`pixel-${scene}.mp4`}});
+currentGraph.processing_variants.push(independentPixel(2, "5"), independentPixel(3, "6"));
+const laterPixelBeforeDelete = JSON.stringify(currentGraph.processing_variants.at(-1));
+retainedPixelTakes = [{scene:3, revision:"6".repeat(32), metadata_path:"demo/pixel/3"}];
+deleting._h3CheckpointManagerRefresh(); await settle();
+select(deleting, 2, "5".repeat(32)); await settle();
+assert.ok(elements(deleting).some(item => /Independent pixel takes kept: Scene 3 · 66666666/.test(item.textContent)));
+byText(deleting, "Delete processed version").click(); await settle();
+assert.match(confirmations.at(-1), /Later independent pixel clips are kept/);
+assert.ok(!currentGraph.processing_variants.some(v => v.key === "demo/pixel/2"));
+assert.equal(JSON.stringify(currentGraph.processing_variants.find(v => v.key === "demo/pixel/3")), laterPixelBeforeDelete);
+assert.equal(JSON.stringify(currentGraph.revisions), originalsBeforeDelete);
+assert.equal(value(deleting), outputBeforeDelete);
+retainedPixelTakes = [];
+// A slow processing preview arriving after switching tabs cannot enable original deletion.
+let releasePreview;
+delayedProcessingPreview = new Promise(resolve => { releasePreview = resolve; });
+byText(deleting, "DeRoPE · 1").click(); await settle();
+byText(deleting, "Original · 4").click(); await settle();
+releasePreview(); await settle();
+assert.ok(byText(deleting, "Delete selected revision").disabled);
+assert.equal(value(deleting), outputBeforeDelete);
+processingDeletion = false;
+console.log("Processing deletion UI: preview, cancel, conflict, success, orphan/independent pixel cleanup, stale response and original/output isolation pass");
+
+// Retirement is separate from media deletion and preserves the output selection.
+currentGraph = structuredClone(payload);
+snapshotRetirement = true;
+const retiring = makeNode(local); await settle();
+select(retiring, 2, c); await settle();
+const retireLabel = "Retire Chapter 1 snapshot aaaaaaaa…";
+const retirementPin = value(retiring), retirementGraph = JSON.stringify(currentGraph);
+assert.equal(byText(retiring, "Delete selected revision").disabled, true);
+const beforeRetirementCancel = mutations;
+confirms = false;
+byText(retiring, retireLabel).click(); await settle();
+assert.equal(mutations, beforeRetirementCancel);
+assert.equal(snapshotRetired, false);
+assert.match(confirmations.at(-1), /Scene 2 · cccccccc/);
+assert.match(confirmations.at(-1), /Deleting its inputs later makes full recovery unavailable/);
+assert.match(byClass(retiring, "h3cm-status").textContent, /cancelled/);
+confirms = true;
+for (const code of [423, 409]) {
+    retirementError = code;
+    byText(retiring, retireLabel).click(); await settle();
+    assert.equal(snapshotRetired, false);
+    assert.equal(byText(retiring, "Delete selected revision").disabled, true);
+    assert.match(byClass(retiring, "h3cm-status").textContent, code === 423 ? /read only/ : /preview changed/);
+}
+retirementError = 0;
+let releaseRetirement;
+delayedRetirementPreview = new Promise(resolve => { releaseRetirement = resolve; });
+const beforeSlowRetirement = mutations, beforeSlowConfirmation = confirmations.length;
+byText(retiring, retireLabel).click(); await settle();
+select(retiring, 3, d); await settle();
+releaseRetirement(); await settle();
+assert.equal(mutations, beforeSlowRetirement, "slow retirement preview cannot apply to another selection");
+assert.equal(confirmations.length, beforeSlowConfirmation);
+select(retiring, 2, c); await settle();
+byText(retiring, retireLabel).click(); await settle();
+assert.equal(snapshotRetired, true);
+assert.equal(byText(retiring, retireLabel), undefined);
+assert.equal(byText(retiring, "Delete selected revision").disabled, false);
+assert.equal(JSON.stringify(currentGraph), retirementGraph, "retirement never deletes clips or changes active pointers");
+assert.equal(value(retiring), retirementPin, "retirement never moves a workflow-local pin");
+assert.match(byClass(retiring, "h3cm-status").textContent, /Snapshot retired/);
+snapshotRetirement = false;
+console.log("Chapter retirement UI: preview, cancel, ownership, conflict, stale response and output/media isolation pass");
+
+// Reproduce the reported Chapter 2 pin at scene 8, shared with another branch.
+currentGraph = structuredClone(payload);
+currentGraph.revisions.forEach(item => {
+    item.scene += 7;
+    if (item.parent) item.parent.scene += 7;
+});
+currentGraph.scenes = [8, 9, 10].map(scene => ({scene}));
+currentGraph.branches.forEach(branch => branch.path.forEach(item => item.scene += 7));
+// Earlier chapters are immutable timing metadata in a chapter-only selection.
+const previous = Array.from({length:7}, (_, index) => ({
+    scene:index + 1, revision:String(index + 1).repeat(32), active:true, ready:false,
+}));
+currentGraph.revisions.unshift(...previous);
+currentGraph.editorial = {chapters:[{id:"two", title:"Chapter 2", start_scene:8}]};
+const partialPin = core.checkpointLocalSelectionJson(currentGraph, "demo",
+    currentGraph.revisions[7], {start:8, end:10}, "chapter");
+const repair = makeNode(partialPin);
+await settle();
+assert.equal(value(repair), partialPin, "never guess which descendant of an old shared pin was intended");
+assert.match(byClass(repair, "h3cm-output-summary").textContent, /old partial selection/);
+const activeHeading = elements(repair).find(item => item.className.includes("h3cm-branch-head")
+    && item.children.some(child => child.textContent === "Project active branch"));
+activeHeading.click(); await settle();
+select(repair, 8, a); await settle();
+byText(repair, "Use branch locally").click();
+const fullPin = value(repair);
+assert.deepEqual(JSON.parse(fullPin).lineage.slice(-3).map(item => item.scene), [8, 9, 10]);
+assert.equal(JSON.parse(fullPin).lineage.at(-1).revision, d);
+assert.equal(JSON.parse(fullPin).scope_start_scene, 8);
+assert.equal(JSON.parse(fullPin).output_scope, "chapter");
+select(repair, 9, b); await settle();
+assert.equal(value(repair), fullPin);
+repair._h3CheckpointManagerRefresh(); await settle();
+assert.equal(value(repair), fullPin, "full branch remains selected through previews and refresh");
+assert.equal(core.checkpointOutputBranchTip(currentGraph, currentGraph.revisions[7], {start:8, end:10}), null,
+    "a shared ancestor alone cannot decide between two descendant branches");
+// Selecting a branch header explicitly also chooses full output in follow mode.
+const following = makeNode(); await settle();
+const alternateHeading = elements(following).find(item => item.className.includes("h3cm-branch-head")
+    && item.children.some(child => child.textContent === "Branch cccccccc"));
+alternateHeading.click(); await settle();
+assert.equal(JSON.parse(value(following)).lineage.at(-1).revision, c);
+select(following, 8, a); await settle();
+assert.equal(JSON.parse(value(following)).lineage.at(-1).revision, c);
+console.log("Checkpoint branch range: previews never trim output; explicit full-branch selection repairs legacy scene-8 pins");

@@ -3,7 +3,63 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
-## Unreleased
+## v0.6.4 — Preserve reference sizing during recovery
+
+- Recover saved Match/Max sizing through static input links and modern Tagged
+  Scene Options, including when the reference tensors have been lost.
+- Apply upscale sizing overrides to cached and reconstructed references, not
+  only connected Tagged overrides. Match-to-Max changes re-encode original
+  picture masters; legacy caches recover those masters from saved media.
+- Preserve source caches and unrelated reference roles; report the actual
+  effective policy and rebuild count. Added CPU policy/geometry regressions.
+
+## v0.6.3 — Cancellation-safe processing saves
+
+- DeRoPE/upscale publication retains media after uncertain checkpoint commits;
+  a failed manifest refresh no longer deletes a successfully saved scene.
+- VIDEO PNG exports journal staged publication and recover interrupted frame
+  copies or index commits on retry. Earlier scenes remain untouched; conflicting
+  incomplete files are preserved in the recovery staging folder.
+- Recreated VIDEO containers reuse existing PNGs when their delivered pixels
+  match at the selected precision, including legacy exports. Changed renders,
+  branches, and edited committed PNGs are still protected from silent adoption.
+- Added CPU cancellation/fault-injection and real process-exit regression tests.
+  See [processing cancellation and resume](docs/processing-resume.md).
+
+## v0.6.2 — Upscale reference recovery and durable exports
+
+- Backported reference-cache deduplication, legacy conversion, reconstruction,
+  and upscale saving fixes from nightly without adding workflow-ownership
+  locking or unrelated nightly review features.
+- Missing cache manifests or tensors can be rebuilt from verified saved media
+  and reference identities, including semantic anchors, saved presentation
+  settings, and timed references when their immutable timing snapshot exists.
+  Recovery never executes an archived workflow, resolves an old tag against
+  today's replacement asset, or silently drops references to text-only.
+- New caches store content-addressed per-reference safetensors. Existing bundles
+  remain readable; `tools/convert_reference_caches.py` provides dry-run/apply
+  conversion. Legacy bundles are removed only after their converted tensors
+  have been verified and used by a successfully saved render.
+- Each new generation or alternate take keeps an immutable Plan/API/workflow
+  recovery snapshot. Failed scene publication removes only its uncommitted
+  artifacts; failed advisory root/editorial refreshes retain the committed take.
+  Historical and attributed checkpoint selections use their own recovery Plan,
+  with root-archive compatibility for older saves.
+- Added Original/DeRoPE/Latent Upscale/Pixel Upscale checkpoint views, saved
+  DeRoPE source selection with original fallback, explicit processing ranges,
+  and final-cut alternate selection across full-sequence deferred upscales.
+- Added preview-confirmed processed-take deletion and chapter-snapshot retirement.
+  Later independent pixel takes remain intact; actual source/context dependencies,
+  original checkpoints, shared references, and unrelated exports stay protected.
+- PNG export now accepts file-backed VIDEO plus upscale state, publishes one
+  scene at a time, and passes the same VIDEO downstream only after publication.
+  Existing output slots remain unchanged; VIDEO is appended. Users choose 8- or
+  16-bit RGB PNGs. Frames are decoded incrementally with bounded worker queues;
+  no full-chain pixel batch or VAE is required in VIDEO mode.
+- PNG publication falls back to exclusive buffered copies when network storage
+  denies hard links. Timestamp drift triggers content-hash verification instead
+  of rejection. Changed/missing PNG contents still prevent reuse without overwriting
+  the user's files; timestamp tolerance is not permission to adopt edited frames.
 
 - Grouped full-mix/vocal/instrumental sources in the Carousel and a reusable
   Audio Tracks node. Full mixes are never doubled with stems; stems-only mixes
@@ -13,6 +69,13 @@ this file records the detailed changes.
   the established source-target/reference/carry fields. Grouped lip-sync uses
   vocals only; delivery remains the full mix. Existing single-track workflows
   are unchanged. Missing vocals and mismatched stem durations fail clearly.
+- Chapter PNG/WAV exports can reuse verified unchanged PNGs and append newly
+  generated scenes in the same folder. Identical exports skip VAE decoding;
+  growing soundtracks are rebuilt atomically to preserve audio joins. Changed
+  takes, trims, placements, settings, damaged/missing files, and interrupted or
+  unverifiable legacy exports use a new folder without replacing prior frames.
+  A fresh-export switch, per-export process lock, file integrity records, and
+  export-index history preserve explicit recovery and whole-Run behaviour.
 
 ## v0.6.2 — Maintained workflow and release packaging
 

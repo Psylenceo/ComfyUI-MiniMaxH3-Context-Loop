@@ -56,7 +56,107 @@ class Clip:
         return [[torch.zeros(1, 1, 4), {"tokens": tokens}]]
 
 
-def assert_loop_releases_pixels(package, chain, upscale, manifest, ram_cache=False):
+def assert_extended_selection_resume(chain, upscale, chapter_source, frames):
+    """Save only scene 8, extend to 8..10, resume 9 without redoing 8."""
+    adapter = upscale.MiniMaxH3ChainUpscaleAdapter()
+    short = copy.deepcopy(chapter_source)
+    short.update(scene_end=8, clip_count=1, segments=short["segments"][:1])
+    short["chapter"]["end_scene"] = 8
+    short["total_delivered_frames"] = short["segments"][0]["delivered_frames"]
+    short["duration_seconds"] = short["total_delivered_frames"] / 24
+    _, state, _, _ = adapter.adapt(short, "extended-prefix", "pixel", "{}", 1, 0, False, 18)
+    saved = upscale.MiniMaxH3ChainUpscaleSegmentSave().save(state, frames)["result"][0]
+    metadata_path = chain._absolute_output_path(saved["metadata"])
+    metadata = chain._read_json(metadata_path)
+    assert metadata["source_scene_contract"]
+    artifacts = {Path(chain._absolute_output_path(saved[key])) for key in (
+        "checkpoint", "segment", "revision_metadata")}
+    original = {path:path.read_bytes() for path in artifacts}
+
+    def resume(source=chapter_source, backend="pixel", recipe="{}", crf=18):
+        return adapter.adapt(source, "extended-prefix", backend, recipe, 9, 0, False, crf)[1]
+
+    extended = resume()
+    assert extended["index"] == 9 and extended["end_clip"] == 10
+    assert extended["source_manifest_hash"] != state["source_manifest_hash"]
+    assert extended["segments"][0]["revision"] == saved["revision"]
+    assert all(path.read_bytes() == data for path, data in original.items())
+    # Only completed sources matter; later scenes can be added/replaced.
+    future_changed = copy.deepcopy(chapter_source)
+    future_changed["segments"][2]["revision"] = "f" * 32
+    assert resume(future_changed)["segments"][0]["revision"] == saved["revision"]
+    for key, changed in (("revision", "f" * 32), ("checkpoint_sha256", "f" * 64),
+                         ("segment_sha256", "f" * 64), ("prompt", "Changed prompt"),
+                         ("seed", 123456), ("raw_frames", 22),
+                         ("delivered_frames", 4), ("context_length", 17)):
+        source = copy.deepcopy(chapter_source["segments"][0])
+        source[key] = changed
+        fails(lambda: upscale._verify_upscale_source(metadata, source, 8), "source")
+    fails(lambda: resume(backend="h3_latent"), "different profile settings")
+    fails(lambda: resume(recipe='{"denoise":0.5}'), "different profile settings")
+    fails(lambda: resume(crf=20), "different profile settings")
+
+    # Existing saves have no per-scene contract; the retained source hashes,
+    # frame clock, prompt, seed and steps are sufficient for this migration.
+    legacy = copy.deepcopy(metadata)
+    legacy.pop("source_scene_contract")
+    chain._atomic_json(metadata_path, legacy)
+    assert resume()["segments"][0]["revision"] == saved["revision"]
+    changed = copy.deepcopy(chapter_source)
+    changed["segments"][0]["revision"] = "f" * 32
+    fails(lambda: resume(changed), "different source revision")
+    for key, value in (("run_name", "other"), ("profile", "other")):
+        chain._atomic_json(metadata_path, {**legacy, key:value})
+        fails(resume, "different run or profile")
+    chain._atomic_json(metadata_path, legacy)
+    # Existing artifact integrity checks still run, even on an extended range.
+    damaged = copy.deepcopy(legacy)
+    damaged["segment"]["checkpoint_sha256"] = "f" * 64
+    chain._atomic_json(metadata_path, damaged)
+    fails(resume, "checkpoint")
+    chain._atomic_json(metadata_path, legacy)
+    assert all(path.read_bytes() == data for path, data in original.items())
+
+
+def assert_independent_pixel_cleanup(chain, upscale, state, manifest, frames):
+    """Real saver metadata, safe deletion, and gap repair without changing S10."""
+    processing = importlib.import_module(upscale.__package__ + ".processing_checkpoint_delete")
+    manager = processing.ProcessingCheckpointManager(chain._output_root())
+    first, middle, last = manifest["segments"]
+    preview = manager.deletion_preview(state["run_name"], middle["revision_metadata"])
+    assert preview["allowed"], preview["dependents"]
+    assert preview["retained_independent_takes"][0]["revision"] == last["revision"]
+    last_files = {Path(chain._absolute_output_path(last[key])) for key in
+                  ("segment", "checkpoint", "generated_audio", "prompt_file", "metadata", "revision_metadata")}
+    last_bytes = {path:path.read_bytes() for path in last_files}
+    manager.delete(state["run_name"], middle["revision_metadata"], preview["snapshot"])
+    upscale._verify_upscale_segment(last, last["index"])
+    assert all(path.read_bytes() == value for path, value in last_bytes.items())
+    # The already-running saver still carries the deleted scene in its
+    # prefix. Its transaction must fail without touching the retained S10.
+    saver = upscale.MiniMaxH3ChainUpscaleSegmentSave()
+    fails(lambda: saver.save(state, frames), "deleted")
+    assert all(path.read_bytes() == value for path, value in last_bytes.items())
+    try:
+        upscale._load_upscale_prefix(state, last["index"])
+    except FileNotFoundError as exc:
+        assert "scene 9 metadata is missing" in str(exc)
+    else:
+        raise AssertionError("a missing middle scene must not be silently skipped")
+    adapter = upscale.MiniMaxH3ChainUpscaleAdapter()
+    _, repair, _, _ = adapter.adapt(
+        state["source_manifest"], state["profile"], "pixel", "{}", middle["index"], middle["index"], False, 18)
+    assert repair["segments"][0]["revision"] == first["revision"]
+    rebuilt = saver.save(repair, frames)["result"][0]
+    assert rebuilt["revision"] != middle["revision"]
+    assert all(path.read_bytes() == value for path, value in last_bytes.items())
+    kept_sequence = upscale._load_upscale_prefix(repair, last["index"] + 1)
+    assert [s["revision"] for s in kept_sequence] == [first["revision"], rebuilt["revision"], last["revision"]]
+    validated = upscale._upscale_manifest(repair, kept_sequence, complete=True)
+    upscale._validate_upscale_manifest(validated)
+
+
+def assert_loop_releases_pixels(package, chain, upscale, manifest, ram_cache=False, png_export=False):
     """Run the real recursive Comfy executor, without models or a live server.
 
     NullCache deliberately evicts ordinary node outputs. Pending subgraph
@@ -93,7 +193,7 @@ def assert_loop_releases_pixels(package, chain, upscale, manifest, ram_cache=Fal
         @classmethod
         def INPUT_TYPES(cls):
             return {"required": {"state": (upscale.UPSCALE_STATE_TYPE,)}}
-        RETURN_TYPES = (upscale.UPSCALE_STATE_TYPE, "IMAGE")
+        RETURN_TYPES = (upscale.UPSCALE_STATE_TYPE, "IMAGE", "VIDEO")
         FUNCTION = "make"
 
         def make(self, state):
@@ -106,7 +206,37 @@ def assert_loop_releases_pixels(package, chain, upscale, manifest, ram_cache=Fal
             images = torch.full((source["raw_frames"], 64, 96, 3), scene / 10)
             old_frames.append(weakref.ref(images))
             rendered.append(scene)
-            return state, images
+            video = None
+            if png_export:
+                import av
+                from comfy_api.latest import InputImpl
+                path = Path(chain._output_root()) / ("memory_scene_%d.mkv" % scene)
+                with av.open(str(path), "w") as container:
+                    stream = container.add_stream("ffv1", rate=24)
+                    stream.width, stream.height, stream.pix_fmt = 96, 64, "bgr0"
+                    for number, image in enumerate(images):
+                        frame = av.VideoFrame.from_ndarray((image * 255).round().byte().numpy(), format="rgb24")
+                        frame.pts = number
+                        container.mux(stream.encode(frame))
+                    container.mux(stream.encode())
+                video = InputImpl.VideoFromFile(str(path))
+            return state, images, video
+
+    class AfterPNG:
+        @classmethod
+        def INPUT_TYPES(cls):
+            return {"required": {"video": ("VIDEO",), "images": ("IMAGE",), "folder": ("STRING",)}}
+        RETURN_TYPES = ("IMAGE",)
+        FUNCTION = "ready"
+
+        def ready(self, video, images, folder):
+            # This dependency gate models the native VIDEO saver/loop boundary.
+            # PNG publication must have finished before either may advance.
+            record = json.loads((Path(folder) / "export.json").read_text())
+            assert record["last_scene"] == rendered[-1]
+            assert len(record["clips"]) == len(rendered)
+            assert video is not None
+            return (images,)
 
     class Result:
         @classmethod
@@ -125,7 +255,7 @@ def assert_loop_releases_pixels(package, chain, upscale, manifest, ram_cache=Fal
 
     prompt = {
         "adapter": {"class_type": "MiniMaxH3ChainUpscaleAdapter", "inputs": {
-            "source_manifest": manifest, "profile": "memory-test-" + str(ram_cache), "backend": "pixel",
+            "source_manifest": manifest, "profile": "memory-test-" + str(ram_cache) + ("-png" if png_export else ""), "backend": "pixel",
             "recipe_json": "{}", "start_clip": 1, "end_clip": 0,
             "save_latent": False, "segment_crf": 18}},
         "pixels": {"class_type": "MemoryTestPixels", "inputs": {"state": ["adapter", 1]}},
@@ -137,6 +267,15 @@ def assert_loop_releases_pixels(package, chain, upscale, manifest, ram_cache=Fal
         "result": {"class_type": "MemoryTestResult", "inputs": {
             "manifest": ["end", 0], "tail": ["end", 2]}},
     }
+    if png_export:
+        prompt["png"] = {"class_type": "MiniMaxH3ChainExportPNG", "inputs": {
+            "video": ["pixels", 2], "state": ["pixels", 0], "export_name": "loop-sequence",
+            "first_frame_number": 1, "png_compression": 1, "embed_workflow": False,
+            "png_bit_depth": "16", "save_workers": 2}}
+        prompt["after_png"] = {"class_type": "MemoryTestAfterPNG", "inputs": {
+            "video": ["png", 4], "folder": ["png", 0], "images": ["pixels", 1]}}
+        prompt["save"]["inputs"]["images"] = ["after_png", 0]
+        prompt["end"]["inputs"]["images"] = ["after_png", 0]
     server = SimpleNamespace(client_id=None, last_node_id=None,
                              send_sync=lambda *a, **k: None)
     executor = execution.PromptExecutor(server, execution.CacheType.RAM_PRESSURE if ram_cache else execution.CacheType.NONE,
@@ -149,6 +288,7 @@ def assert_loop_releases_pixels(package, chain, upscale, manifest, ram_cache=Fal
 
     with patch.dict(nodes.NODE_CLASS_MAPPINGS, {
             **package.NODE_CLASS_MAPPINGS, "MemoryTestPixels": Pixels,
+            "MemoryTestAfterPNG": AfterPNG,
             "MemoryTestResult": Result,
             "MiniMaxH3ChainUpscaleSegmentSave": (
                 upscale.MiniMaxH3ChainUpscaleSegmentSave if ram_cache else SaveForTest)}):
@@ -158,6 +298,70 @@ def assert_loop_releases_pixels(package, chain, upscale, manifest, ram_cache=Fal
     evict_finished_images()
     gc.collect()
     assert all(ref() is None for ref in old_frames)
+
+
+def assert_attributed_branch_upscales(chain, upscale):
+    """Real save -> attach -> select -> cached conditioning -> HQ save/resume."""
+    with tempfile.TemporaryDirectory() as temporary:
+        folder_paths.output_directory = temporary
+        plan = chain.MiniMaxH3ChainPlan().build(
+            json.dumps({"shots": [{"id": f"attached_{i}", "prompt": "A quiet room.",
+                                    "length": 5, "steps": 2, "seed": str(i),
+                                    "context_length": 0, "audio_context_length": 0}
+                                   for i in (1, 2)]}),
+            "attached_pixel", "attached-pixel-cache", 32, 32, 1,
+            "video", "head", "disabled", "generated_audio", 1,
+            5 / 24, 2, 7, 18, 0, "guide")[0]
+        plan = chain._plan_with_source_audio(chain._plan_with_external_context(plan, None), None)
+        latent = {"samples": [torch.full((1, 24, 2, 2, 2), 0.75),
+                               torch.full((1, 32, 2, 9), 0.75)]}
+        audio = {"waveform": torch.full((1, 2, round(5 / 24 * 8000)), 0.25),
+                 "sample_rate": 8000}
+        sources = []
+        # Save an original branch, then a new scene-1 tip to receive scene 2.
+        for index in (1, 2, 1):
+            sources.append(chain.MiniMaxH3ChainSegmentSave().save(
+                chain._initial_state(plan, index), torch.zeros(5, 32, 32, 3),
+                latent, audio, denoised_latent=latent)["result"][0])
+        candidate, parent = sources[1:]
+        for index, source in ((1, parent), (2, candidate)):
+            chain._cache_reference_scene(
+                fingerprint="attached-pixel-cache", scene=index, scene_count=2,
+                prompt=source["prompt"], compiled_prompt="<Picture 1> in a quiet room.",
+                width=32, height=32, length=5, ref_image_size="match",
+                vae=VideoVAE(), audio_vae=None, pictures=[torch.ones(1, 32, 32, 3)],
+                videos=[], audios=[])
+        attached = chain.CheckpointGraphManager(temporary).attribute(
+            plan["run_name"], 1, parent["revision"], 2, candidate["revision"])
+        assert attached["created"]
+        before = {p: p.read_bytes() for p in Path(temporary).rglob("*") if p.is_file()}
+        manifest = chain.MiniMaxH3ChainCheckpointManager().passthrough({
+            "run_name": plan["run_name"], "output_mode": "workflow_local",
+            "lineage": [{"scene": 1, "revision": parent["revision"]},
+                        {"scene": 2, "revision": attached["revision"]}]})[0]
+        assert candidate["revision"] in manifest["archives"]["plan"]
+        assert manifest["segments"][1]["checkpoint"] == candidate["checkpoint"]
+        adapter = upscale.MiniMaxH3ChainUpscaleAdapter()
+        for index in (1, 2):
+            # Resuming the second scene verifies the HQ prefix too.
+            flow, state, _, _ = adapter.adapt(
+                manifest, "attached", "pixel", "{}", index, index, False, 18)
+            assert len(state["segments"]) == index - 1
+            current = upscale.MiniMaxH3ChainUpscalePixelCurrent().current(state, VideoVAE())
+            target = current[1].repeat_interleave(2, 1).repeat_interleave(2, 2)
+            conditioned = upscale.MiniMaxH3ChainUpscalePixelConditioning().condition(
+                state, Clip(), target, VideoVAE(), missing_cache="error")
+            assert conditioned[5] is True, "attached take must retain its source reference cache"
+            saved = upscale.MiniMaxH3ChainUpscaleSegmentSave().save(state, target)["result"][0]
+            assert saved["source_revision"] == (parent["revision"] if index == 1 else attached["revision"])
+            result = upscale.MiniMaxH3ChainUpscaleLoopEnd().end(flow, state, target, saved)[0]
+        upscale._validate_upscale_manifest(result)
+        assert len(result["segments"]) == 2
+        assembled = chain.MiniMaxH3ChainAssemble().assemble(
+            result, "plan", "attached_final", 128, False, "")["result"][0]
+        assert Path(assembled).is_file()
+        assert all(p.read_bytes() == content for p, content in before.items()), \
+            "upscaling must not rewrite either branch, its recovery snapshots or caches"
 
 
 def main():
@@ -206,6 +410,7 @@ def main():
         manifest = pinned
         assert_loop_releases_pixels(package, chain, upscale, manifest)
         assert_loop_releases_pixels(package, chain, upscale, manifest, ram_cache=True)
+        assert_loop_releases_pixels(package, chain, upscale, manifest, ram_cache=True, png_export=True)
         # Chapter output can combine takes with different catalog histories.
         # Cache lookup must use the current take, including an empty legacy
         # fingerprint, not the first chapter scene's catalog.
@@ -430,6 +635,7 @@ def main():
             "scene_order":[{"scene":i,"scene_id":f"chapter_scene_{i}"} for i in (8, 9, 10)],
             "chapters":[{"id":"two","start_scene_id":"chapter_scene_8"}],
         }, manifest["run_name"])
+        assert_extended_selection_resume(chain, upscale, chapter_source, target)
         before_chapter = {p:p.read_bytes() for p in Path(temporary).rglob("*") if p.is_file()}
         _, scoped_state, _, _ = adapter.adapt(chapter_source, "pixel", "pixel", "{}", 1, 0, False, 18)
         assert scoped_state["index"] == 8 and scoped_state["end_clip"] == 10
@@ -494,7 +700,9 @@ def main():
         assert int(video["nb_frames"]) == chapter_source["total_delivered_frames"]
         assert (video["width"], video["height"]) == (96, 64)
         assert all(path.read_bytes() == content for path, content in before_chapter.items())
-    print("Pixel upscale: exact/nonuniform target geometry, cache/override/max/keyframes/audio, RAW trim, Drift-Control isolation, save/resume/assembly and immutable source pass")
+        assert_independent_pixel_cleanup(chain, upscale, scoped_state, chapter_final, hq)
+    assert_attributed_branch_upscales(chain, upscale)
+    print("Pixel upscale: geometry, conditioning, RAW trim, Drift-Control isolation, attributed save/resume/assembly, independent cleanup/gap repair and immutable source pass")
 
 
 if __name__ == "__main__":
