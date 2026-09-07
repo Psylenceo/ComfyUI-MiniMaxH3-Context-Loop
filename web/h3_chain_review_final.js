@@ -27,6 +27,7 @@ import {
 const NODE_NAME = "MiniMaxH3ChainReview";
 const PLAN_NAME = "MiniMaxH3ChainPlan";
 const PLAN_NAMES = new Set([PLAN_NAME, "MiniMaxH3ChainPlanModern"]);
+const PROJECT_ASSET_MANAGER_NODE = "MiniMaxH3ProjectAssetManager";
 const PROMPT_EDITOR_SETTING = "MiniMaxH3ContexLoop.ReviewGate.PromptEditor";
 const VIDEO_HEIGHT_PROPERTY = "h3_chain_review_video_height";
 const PROMPT_HEIGHT_PROPERTY = "h3_chain_review_prompt_height";
@@ -647,26 +648,30 @@ function fetchPending() {
     return pendingFetchPromise;
 }
 
-function planRunNameTrusted(planNode) {
-    // Project Assets replaces Plan.run_name server-side while the plan editor
-    // deliberately leaves that now-hidden widget unchanged. Psylent_Gamer
-    // (4090) identified this Review Gate routing split through Banodoco.
-    if (!planNode) return true;
-    const input = planNode.inputs?.find((item) => item.name === "project_assets");
-    return input?.link === null || input?.link === undefined;
+function reviewRunName(planNode) {
+    if (!planNode) return "";
+    const assets = planNode.inputs?.find((item) => item.name === "project_assets");
+    if (assets?.link != null) {
+        const link = planNode.graph?.links?.[assets.link];
+        const manager = link
+            ? planNode.graph?.getNodeById?.(link.origin_id) : null;
+        // Project Assets is authoritative: it replaces Plan.run_name
+        // server-side while the Plan editor deliberately keeps its hidden
+        // widget unchanged. Do not fall back to a reused Review node id.
+        if (nodeType(manager) === PROJECT_ASSET_MANAGER_NODE) {
+            const run = String(widgetByName(manager, "run_name")?.value ?? "").trim();
+            if (run) return run;
+        }
+    }
+    return String(widgetByName(planNode, "run_name")?.value ?? "").trim();
 }
 
 function deliverReview(node, data) {
     if (!node || nodeType(node) !== NODE_NAME) return false;
     const expectedRun = String(data?.run_name ?? "").trim();
     if (expectedRun) {
-        const planNode = findUpstreamNode(node, PLAN_NAMES);
-        if (planRunNameTrusted(planNode)) {
-            const actualRun = String(
-                widgetByName(planNode, "run_name")?.value ?? "",
-            ).trim();
-            if (actualRun && actualRun !== expectedRun) return false;
-        }
+        const actualRun = reviewRunName(findUpstreamNode(node, PLAN_NAMES));
+        if (actualRun && actualRun !== expectedRun) return false;
     }
     if (typeof node._h3ReviewHandler === "function") {
         node._h3ReviewHandler(data);
@@ -686,12 +691,9 @@ function reviewFallbackNode(data) {
     ])];
     const expectedRun = String(data?.run_name ?? "").trim();
     if (expectedRun) {
-        const matchingRun = gates.filter((item) => {
-            const planNode = findUpstreamNode(item, PLAN_NAMES);
-            if (!planRunNameTrusted(planNode)) return false;
-            return String(widgetByName(planNode, "run_name")?.value ?? "").trim() ===
-                expectedRun;
-        });
+        const matchingRun = gates.filter((item) =>
+            reviewRunName(findUpstreamNode(item, PLAN_NAMES)) === expectedRun);
+
         if (matchingRun.length === 1) return matchingRun[0];
     }
     // GraphBuilder execution ids use dots while subgraph-qualified display

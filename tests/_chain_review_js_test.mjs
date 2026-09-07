@@ -314,17 +314,17 @@ assert.match(reviewSource, /Accept now & continue/);
 assert.match(reviewSource, /review_each_candidate/);
 assert.match(reviewSource, /review-candidate-batch/);
 assert.match(reviewSource, /candidate_batch_active/);
-assert.match(reviewSource, /function planRunNameTrusted\(planNode\)/);
+assert.match(reviewSource, /function reviewRunName\(planNode\)/);
 assert.match(reviewSource, /item\.name === "project_assets"/);
 assert.match(
     reviewSource,
-    /if \(planRunNameTrusted\(planNode\)\) \{[\s\S]*actualRun[\s\S]*actualRun !== expectedRun/,
-    "an exact Review Gate must ignore the stale Plan run-name widget when Project Assets owns it",
+    /widgetByName\(manager, "run_name"\)/,
+    "Project Assets must provide the authoritative run identity for review routing",
 );
 assert.match(
     reviewSource,
-    /const matchingRun = gates\.filter\([\s\S]*if \(!planRunNameTrusted\(planNode\)\) return false/,
-    "run-name fallback routing must not positively match a Project Assets-owned Plan",
+    /const matchingRun = gates\.filter\([\s\S]*reviewRunName\(findUpstreamNode\(item, PLAN_NAMES\)\) === expectedRun/,
+    "fallback routing must match Project Assets' authoritative run identity",
 );
 assert.match(reviewSource, /Pause candidate run/);
 assert.match(reviewSource, /\/api\/jobs\/\$\{encodeURIComponent\(execution\.promptId\)\}\/cancel/);
@@ -432,6 +432,11 @@ assert.match(reviewSource, /Scene Prompt Editor or Rich Scene Prompt Editor/);
 assert.match(reviewSource, /promptLabel\.hidden = !enabled/);
 assert.match(reviewSource, /promptNotice\.hidden = enabled/);
 assert.match(reviewSource, /_h3ReviewApplyLayout/);
+assert.match(reviewSource, /PROJECT_ASSET_MANAGER_NODE/);
+assert.match(reviewSource, /function reviewRunName\(planNode\)/);
+assert.match(reviewSource, /widgetByName\(manager, "run_name"\)/);
+assert.match(reviewSource, /reviewRunName\(findUpstreamNode\(item, PLAN_NAMES\)\)/);
+assert.doesNotMatch(reviewSource, /function planRunNameTrusted/);
 assert.match(reviewSource, /nodeType\.prototype\.onConfigure/);
 assert.match(reviewSource, /setPointerCapture/);
 assert.match(reviewSource, /visualHeight \/ layoutHeight/);
