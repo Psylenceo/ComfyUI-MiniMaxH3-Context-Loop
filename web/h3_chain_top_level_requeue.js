@@ -7,6 +7,7 @@ import {
     checkpointPredecessorReady,
     cleanupDelayMs,
     isQueueSafe,
+    matchingNextSceneHandoff,
     pendingNextSceneHandoffs,
     predecessorScene,
     resumeHint,
@@ -42,6 +43,7 @@ const CURRENT_TYPES = new Set([
     "MiniMaxH3CurrentTaggedReferenceScene",
 ]);
 const PLAN_TYPES = new Set(["MiniMaxH3ChainPlan", "MiniMaxH3ChainPlanModern"]);
+const PROJECT_ASSET_MANAGER_TYPE = "MiniMaxH3ProjectAssetManager";
 const QUEUE_POLL_INTERVAL_MS = 500;
 const QUEUE_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_OBSERVED_PROMPTS = 100;
@@ -49,7 +51,8 @@ const TRANSIENT_NOTICE_MS = 5000;
 
 let notifications = null;
 let pumpActive = false;
-let continuationWait = null; // {runName, handoffId} after queuePrompt
+let continuationWait = null; // {runName, handoffId, promptId} after acceptance
+let requeueEpoch = 0; // invalidates sleeps/polls when opt-in is withdrawn
 const sceneRecords = new Map();   // prompt_id -> observed H3 scene record
 const requeueQueue = [];
 const hintedRuns = new Set();     // run_names already shown a pending hint
@@ -150,6 +153,16 @@ function settingEnabled() {
     return app.ui?.settings?.getSettingValue?.(SETTING_ID) === true;
 }
 
+function operationIsCurrent(epoch) {
+    return settingEnabled() && epoch === requeueEpoch;
+}
+
+function requireCurrentOperation(epoch) {
+    if (!operationIsCurrent(epoch)) {
+        throw new Error("Automatic requeue was disabled or cancelled.");
+    }
+}
+
 function sleep(milliseconds) {
     return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
@@ -174,26 +187,6 @@ function onExecuted(detail) {
     if (!promptId || detail?.display_node == null) return;
     const node = findNodeByDisplayId(detail.display_node);
     const type = nodeType(node);
-    if (type === START_TYPE && continuationWait
-        && !sceneRecords.has(promptId)) {
-        // The first node of the continuation prompt executed: the claimed
-        // handoff is now genuinely consumed. Clear the transient queueing
-        // notice here so the browser can actually render it long enough to
-        // verify the dedicated stack during the requeue window.
-        clearNotifications();
-        const wait = continuationWait;
-        continuationWait = null;
-        void (async () => {
-            try {
-                await postHandoffTransition(
-                    wait.runName, wait.handoffId, "consumed");
-            } catch (error) {
-                // The scene is running; bookkeeping stays durable.
-                showError(`Marking the handoff consumed failed: `
-                    + `${error?.message || error}`);
-            }
-        })();
-    }
     let record = sceneRecords.get(promptId);
     if (!record) {
         record = {
@@ -203,6 +196,8 @@ function onExecuted(detail) {
             clipCount: 0,
             endClip: 0,
             shotId: "",
+            workflowFingerprint: "",
+            executionMode: "recursive_legacy",
             loopEndExecuted: false,
             displayNode: null,
             workflowIdentity: activeWorkflowIdentity(),
@@ -218,15 +213,22 @@ function onExecuted(detail) {
             record.clipCount = scene.clipCount;
             record.endClip = scene.endClip;
             record.shotId = scene.shotId;
+            record.workflowFingerprint = String(scene.workflowFingerprint || "");
             record.displayNode = String(detail.display_node);
         }
     } else if (type === END_TYPE) {
         record.loopEndExecuted = true;
+        record.executionMode = String(widgetByName(node, "execution_mode")?.value
+            ?? "recursive_legacy");
     }
 }
 
 function enqueueRequeue(record) {
-    requeueQueue.push(record);
+    // A success is only a candidate signal: it must be the matching opt-in
+    // Loop End execution, and opt-in is checked again at every async edge.
+    if (!settingEnabled() || !record.loopEndExecuted
+        || record.executionMode !== "top_level_requeue") return;
+    requeueQueue.push({record, epoch: requeueEpoch});
     void pumpRequeues();
 }
 
@@ -235,8 +237,8 @@ async function pumpRequeues() {
     pumpActive = true;
     try {
         while (requeueQueue.length) {
-            const record = requeueQueue.shift();
-            await processRequeue(record);
+            const scheduled = requeueQueue.shift();
+            await processRequeue(scheduled.record, scheduled.epoch);
         }
     } finally {
         pumpActive = false;
@@ -246,7 +248,7 @@ async function pumpRequeues() {
 function onExecutionSuccess(detail) {
     const promptId = String(detail?.prompt_id ?? "");
     const record = sceneRecords.get(promptId);
-    if (continuationWait && sceneRecords.has(promptId)
+    if (continuationWait && continuationWait.promptId === promptId
         && !record?.loopEndExecuted) {
         // Continuation prompt finished before its Loop Start event arrived;
         // the consumed bookkeeping is best-effort and stays durable.
@@ -254,15 +256,28 @@ function onExecutionSuccess(detail) {
     }
     if (!record) return;
     sceneRecords.delete(promptId);
-    if (record.runName && Number(record.clipIndex) < Number(record.endClip || record.clipCount)) {
+    if (record.runName && record.loopEndExecuted
+        && record.executionMode === "top_level_requeue"
+        && Number(record.clipIndex) < Number(record.endClip || record.clipCount)) {
         enqueueRequeue(record);
     }
+}
+
+function onContinuationStart(detail) {
+    const promptId = String(detail?.prompt_id ?? "");
+    if (!continuationWait || continuationWait.promptId !== promptId) return;
+    // execution_start is emitted for every normal prompt; unlike a UI output
+    // from Loop Start it is a real, prompt-specific executor event.
+    const wait = continuationWait;
+    continuationWait = null;
+    void postHandoffTransition(wait.runName, wait.handoffId, "consumed")
+        .catch((error) => showError(`Marking the handoff consumed failed: ${error?.message || error}`));
 }
 
 function onTerminalFailure(kind, detail) {
     const promptId = String(detail?.prompt_id ?? "");
     sceneRecords.delete(promptId);
-    if (continuationWait && !sceneRecords.has(promptId)) {
+    if (continuationWait && continuationWait.promptId === promptId) {
         // The continuation prompt ended before/without a recorded Loop Start
         // execution. The handoff deliberately stays queued: no auto-retry.
         const wait = continuationWait;
@@ -273,6 +288,17 @@ function onTerminalFailure(kind, detail) {
             + "before its scene started. The handoff stays queued; set Loop "
             + `Start to the handoff scene and queue manually to resume.`);
     }
+}
+
+function authoritativeRunName(planNode) {
+    const input = planNode?.inputs?.find((item) => item.name === "project_assets");
+    const link = input?.link != null ? planNode.graph?.links?.[input.link] : null;
+    const manager = link ? planNode.graph?.getNodeById?.(link.origin_id) : null;
+    if (nodeType(manager) === PROJECT_ASSET_MANAGER_TYPE) {
+        const managed = String(widgetByName(manager, "run_name")?.value ?? "").trim();
+        if (managed) return managed;
+    }
+    return String(widgetByName(planNode, "run_name")?.value ?? "").trim();
 }
 
 function requireVisibleWorkflow(record) {
@@ -287,7 +313,7 @@ function requireVisibleWorkflow(record) {
         ? findUpstreamNode(currentNode, START_TYPE) : null;
     const planNode = currentNode
         ? findUpstreamNode(currentNode, PLAN_TYPES) : null;
-    const runName = String(widgetByName(planNode, "run_name")?.value ?? "").trim();
+    const runName = authoritativeRunName(planNode);
     if (!currentNode || !startNode || !planNode
         || !record.runName || runName !== record.runName) {
         throw new Error("Return to the running H3 workflow before requeueing.");
@@ -295,9 +321,10 @@ function requireVisibleWorkflow(record) {
     return {startNode, planNode, runName};
 }
 
-async function waitForSafeQueue() {
+async function waitForSafeQueue(epoch) {
     const started = Date.now();
     for (;;) {
+        requireCurrentOperation(epoch);
         let safe = false;
         try {
             const response = await api.fetchApi("/api/queue");
@@ -305,7 +332,10 @@ async function waitForSafeQueue() {
         } catch (_error) {
             safe = false;
         }
-        if (safe) return;
+        if (safe) {
+            requireCurrentOperation(epoch);
+            return;
+        }
         if (Date.now() - started > QUEUE_WAIT_TIMEOUT_MS) {
             throw new Error(
                 "The queue did not reach a safe state within 10 minutes.");
@@ -331,7 +361,7 @@ async function verifyPredecessorCheckpoint(runName, predecessor) {
     }
 }
 
-async function postHandoffTransition(runName, handoffId, status) {
+async function postHandoffTransition(runName, handoffId, status, acceptedPromptId = null) {
     const response = await api.fetchApi(
         `${HANDOFF_API_BASE}/handoffs/transition`, {
             method: "POST",
@@ -340,6 +370,7 @@ async function postHandoffTransition(runName, handoffId, status) {
                 run_name: runName,
                 handoff_id: handoffId,
                 status,
+                accepted_prompt_id: acceptedPromptId,
             }),
         });
     if (!response.ok) {
@@ -349,14 +380,16 @@ async function postHandoffTransition(runName, handoffId, status) {
     }
 }
 
-async function processRequeue(record) {
+async function processRequeue(record, epoch) {
     const startedAt = Date.now();
     try {
+        requireCurrentOperation(epoch);
         if (!record.runName) {
             throw new Error("The active H3 run_name is empty.");
         }
         showTransient("Waiting for a safe queue state…");
-        await waitForSafeQueue();
+        await waitForSafeQueue(epoch);
+        requireCurrentOperation(epoch);
         const delay = cleanupDelayMs(
             app.ui?.settings?.getSettingValue?.(DELAY_SETTING_ID));
         const remaining = delay - (Date.now() - startedAt);
@@ -364,6 +397,7 @@ async function processRequeue(record) {
             showTransient(`Waiting for the cleanup interval… `
                 + `${Math.ceil(remaining / 1000)}s`);
             await sleep(remaining);
+            requireCurrentOperation(epoch);
         }
         showTransient("Checking the workflow and predecessor checkpoint…");
         const {startNode, runName} = requireVisibleWorkflow(record);
@@ -373,14 +407,14 @@ async function processRequeue(record) {
             throw new Error(
                 `The handoff list is unavailable (HTTP ${listResponse.status}).`);
         }
-        const pending = pendingNextSceneHandoffs(await listResponse.json());
-        if (!pending.length) {
+        const body = await listResponse.json();
+        const handoff = matchingNextSceneHandoff(body, record);
+        if (!handoff) {
             // Legacy recursion already handled this scene (or another client
             // already did). The backend is the source of truth: nothing to do.
             clearNotifications();
             return;
         }
-        const handoff = pending[0];
         const resume = resumeHint(handoff);
         if (!resume) {
             throw new Error(
@@ -388,6 +422,7 @@ async function processRequeue(record) {
         }
         await verifyPredecessorCheckpoint(
             runName, predecessorScene(resume));
+        requireCurrentOperation(epoch);
         const claimResponse = await api.fetchApi(
             `${HANDOFF_API_BASE}/handoffs/claim`, {
                 method: "POST",
@@ -409,6 +444,7 @@ async function processRequeue(record) {
         }
         let queued = false;
         try {
+            requireCurrentOperation(epoch);
             const startWidget = widgetByName(startNode, "start_clip");
             const rangeWidget = widgetByName(startNode, "scene_range");
             if (!startWidget) {
@@ -424,14 +460,27 @@ async function processRequeue(record) {
             startNode.graph?.setDirtyCanvas?.(true, true);
             showTransient(
                 `Queueing scene ${resume.startClip} as a new top-level prompt…`);
-            await app.queuePrompt(0, 1);
+            requireCurrentOperation(epoch);
+            const accepted = await app.queuePrompt(0, 1);
+            // ComfyUI explicitly resolves false for validation rejection.
+            if (accepted === false) throw new Error("ComfyUI rejected the prompt validation.");
+            const acceptedPromptId = typeof accepted === "object"
+                ? String(accepted.prompt_id ?? accepted.promptId ?? "") : "";
+            if (!acceptedPromptId) {
+                // Transport ambiguity is not retryable: release could create
+                // a duplicate if the server accepted before disconnect.
+                await postHandoffTransition(runName, handoff.handoff_id, "uncertain");
+                queued = true;
+                throw new Error("Queue delivery is uncertain; recover this handoff manually.");
+            }
             queued = true;
             continuationWait = {
                 runName,
                 handoffId: String(handoff.handoff_id),
+                promptId: acceptedPromptId,
             };
             await postHandoffTransition(
-                runName, handoff.handoff_id, "queued");
+                runName, handoff.handoff_id, "queued", acceptedPromptId);
         } catch (error) {
             if (!queued) {
                 try {
@@ -464,7 +513,7 @@ function findPlanRunName() {
     if (!graph?.nodes) return null;
     for (const node of graph.nodes) {
         if (!PLAN_TYPES.has(nodeType(node))) continue;
-        const value = String(widgetByName(node, "run_name")?.value ?? "").trim();
+        const value = authoritativeRunName(node);
         if (value) return value;
     }
     return null;
@@ -506,7 +555,10 @@ app.registerExtension({
             type: "boolean",
             defaultValue: false,
             onChange() {
-                if (!settingEnabled()) clearNotifications();
+                if (!settingEnabled()) {
+                    requeueEpoch += 1;
+                    clearNotifications();
+                }
             },
         });
         app.ui?.settings?.addSetting?.({
@@ -522,6 +574,7 @@ app.registerExtension({
     },
     setup() {
         api.addEventListener("executed", (event) => onExecuted(event.detail));
+        api.addEventListener("execution_start", (event) => onContinuationStart(event.detail));
         api.addEventListener("execution_success", (event) =>
             onExecutionSuccess(event.detail));
         api.addEventListener("execution_error", (event) =>

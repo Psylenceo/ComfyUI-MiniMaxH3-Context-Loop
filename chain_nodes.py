@@ -18879,6 +18879,7 @@ class MiniMaxH3ChainCurrent:
             "end_clip": int(state.get("end_clip", len(plan["shots"]))),
             "shot_id": str(shot["id"]),
             "seed": str(shot["seed"]),
+            "workflow_fingerprint": str(plan.get("plan_hash") or ""),
         }
         # Prompt history is supplementary recovery data and must never block a
         # generation. Mark the exact scene prompt immutable as soon as this
@@ -21947,19 +21948,13 @@ def _write_next_scene_handoff(plan: dict[str, Any], index: int,
     frontend can later claim it and queue the SAME workflow as a new
     top-level prompt.  The Plan JSON is never touched.
 
-    Idempotent per (run, scene): a re-invocation for the same scene finds
-    and returns the existing record instead of creating a duplicate, so a
-    crashed/retimed Loop End cannot double-enqueue.
+    Idempotent per committed transition, not merely per destination scene.
+    A rerender with a new predecessor revision/checkpoint/range gets a new
+    record; an exact Loop End retry gets the same record.  Terminal history
+    is never reset or reused as new work.
     """
     run_name = str(plan.get("run_name") or "")
     next_scene = int(index) + 1
-    handoff_id = "next_scene_%04d" % next_scene
-    store = _HandoffStore(_output_root())
-    try:
-        return store.load(run_name, handoff_id)
-    except _HandoffNotFoundError:
-        pass
-
     paths = _artifact_paths(plan, index)
     checkpoint_sha = None
     if os.path.isfile(paths["metadata"]):
@@ -21971,6 +21966,21 @@ def _write_next_scene_handoff(plan: dict[str, Any], index: int,
     shot = plan["shots"][next_scene - 1]
     revision = str(next_segment.get("revision")
                    or checkpoint_revision_token(index, next_segment) or "")
+    # The digest is a durable transition identity.  It includes every value
+    # that can make a continuation semantically different while avoiding any
+    # Plan/tensor payload in the handoff itself.
+    transition_key = hashlib.sha256(json.dumps({
+        "predecessor": int(index), "next": next_scene,
+        "revision": revision, "checkpoint": checkpoint_sha,
+        "workflow": str(plan.get("plan_hash") or ""),
+        "end": int(end_clip),
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    handoff_id = "next_scene_%04d_%s" % (next_scene, transition_key[:16])
+    store = _HandoffStore(_output_root())
+    try:
+        return store.load(run_name, handoff_id)
+    except _HandoffNotFoundError:
+        pass
     return store.create(
         run_name, action="next_scene",
         scene=next_scene, start_clip=next_scene, end_clip=int(end_clip),
@@ -21978,6 +21988,7 @@ def _write_next_scene_handoff(plan: dict[str, Any], index: int,
         source_revision=revision,
         source_checkpoint_sha256=checkpoint_sha,
         workflow_fingerprint=str(plan.get("plan_hash") or ""),
+        predecessor_scene=int(index), transition_key=transition_key,
         handoff_id=handoff_id)
 
 
@@ -26906,8 +26917,13 @@ async def _submit_review_decision(request):
     token = str(body.get("token") or "")
     pending = _PENDING_REVIEWS.get(token)
     if pending is None:
-        return web.json_response(
-            {"error": "This H3 review is no longer pending."}, status=404)
+        # A snapshot may survive a process restart, but its executor future
+        # cannot.  Do not pretend an approve button can resume a dead prompt.
+        return web.json_response({
+            "error": "This review was recovered after its live prompt ended.",
+            "recovery": True,
+            "instructions": "Use the saved checkpoint/segment inventory to resume manually.",
+        }, status=409)
     future = pending["future"]
     if future.done():
         return web.json_response(
@@ -27137,6 +27153,11 @@ async def _list_pending_reviews(_request):
             reviews.append({
                 "token": token,
                 "durable": True,
+                "actionable": False,
+                "recovery_instructions": (
+                    "This review's original prompt ended. Inspect saved "
+                    "candidates and resume manually from its checkpoint; "
+                    "approve/retry decisions are unavailable after restart."),
                 "run_name": str(snapshot.get("run_name") or run_name),
                 "clip_index": snapshot.get("scene"),
                 "candidates": snapshot.get("candidates") or [],
@@ -29424,7 +29445,7 @@ async def _project_asset_media(request):
 # ---------------------------------------------------------------------------
 
 
-_HANDOFF_TRANSITION_STATUSES = ("queued", "consumed", "cancelled")
+_HANDOFF_TRANSITION_STATUSES = ("queued", "consumed", "cancelled", "failed", "uncertain")
 
 
 def _handoff_store() -> "_HandoffStore":
@@ -29521,6 +29542,7 @@ async def _transition_handoff(request):
     run_name = _safe_name(str(body.get("run_name") or ""), "")
     handoff_id = str(body.get("handoff_id") or "").strip()
     status = str(body.get("status") or "").strip()
+    accepted_prompt_id = str(body.get("accepted_prompt_id") or "").strip() or None
     if status not in _HANDOFF_TRANSITION_STATUSES:
         return web.json_response({
             "error": "status must be one of %s." %
@@ -29531,7 +29553,8 @@ async def _transition_handoff(request):
             {"error": "run_name and handoff_id are required."}, status=400)
     try:
         record = await asyncio.to_thread(
-            _handoff_store().transition, run_name, handoff_id, status)
+            _handoff_store().transition, run_name, handoff_id, status,
+            accepted_prompt_id)
     except _HandoffNotFoundError as exc:
         return web.json_response({"error": str(exc)}, status=404)
     except _IllegalHandoffTransitionError as exc:

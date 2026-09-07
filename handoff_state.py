@@ -57,8 +57,11 @@ HANDOFF_STATUSES = (
     "consumed",
     "cancelled",
     "failed",
+    # Delivery may have reached ComfyUI even though the browser lost the
+    # acknowledgement.  It is deliberately not auto-released/retried.
+    "uncertain",
 )
-TERMINAL_HANDOFF_STATUSES = ("consumed", "cancelled", "failed")
+TERMINAL_HANDOFF_STATUSES = ("consumed", "cancelled", "failed", "uncertain")
 DEFAULT_MAX_ATTEMPTS = 3
 # Stale lock cleanup threshold. A live holder refreshes the lock while
 # working; anything older is presumed to belong to a crashed process.
@@ -71,8 +74,9 @@ _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 # status -> statuses a legal transition may enter.
 _HANDOFF_TRANSITIONS = {
     "pending": ("claimed", "cancelled"),
-    "claimed": ("queued", "consumed", "cancelled", "failed"),
+    "claimed": ("queued", "consumed", "cancelled", "failed", "uncertain"),
     "queued": ("consumed", "cancelled", "failed"),
+    "uncertain": ("consumed", "cancelled", "failed"),
     "consumed": (),
     "cancelled": (),
     "failed": (),
@@ -220,7 +224,7 @@ def _validate_record(record: Any, *, expect_format: str = HANDOFF_FORMAT_VERSION
     _validate_handoff_id(record.get("handoff_id"))
     _validate_run_name(record.get("run_name"))
     for key in ("scene", "start_clip", "end_clip", "candidate_ordinal",
-                "candidate_count", "seed"):
+                "candidate_count", "seed", "predecessor_scene"):
         value = record.get(key)
         if value is not None and (not isinstance(value, int)
                                   or isinstance(value, bool)):
@@ -241,7 +245,8 @@ def _validate_record(record: Any, *, expect_format: str = HANDOFF_FORMAT_VERSION
             raise HandoffCorruptError(
                 "candidate_ordinal must be within 1..candidate_count.")
     for key in ("candidate_batch_id", "source_prompt_id", "source_revision",
-                "source_checkpoint_sha256", "workflow_fingerprint"):
+                "source_checkpoint_sha256", "workflow_fingerprint",
+                "transition_key", "accepted_prompt_id"):
         value = record.get(key)
         if value is not None and (not isinstance(value, str) or not value):
             raise HandoffCorruptError(
@@ -460,6 +465,8 @@ class HandoffStore:
                source_revision: str | None = None,
                source_checkpoint_sha256: str | None = None,
                workflow_fingerprint: str | None = None,
+               predecessor_scene: int | None = None,
+               transition_key: str | None = None,
                max_attempts: int = DEFAULT_MAX_ATTEMPTS,
                handoff_id: str | None = None) -> dict[str, Any]:
         """Create a fresh ``pending`` handoff with a unique ID.
@@ -479,6 +486,7 @@ class HandoffStore:
             "scene": scene, "start_clip": start_clip, "end_clip": end_clip,
             "candidate_ordinal": candidate_ordinal,
             "candidate_count": candidate_count, "seed": seed,
+            "predecessor_scene": predecessor_scene,
         }.items():
             if value is not None and (not isinstance(value, int)
                                       or isinstance(value, bool)):
@@ -499,6 +507,7 @@ class HandoffStore:
             "source_prompt_id": source_prompt_id,
             "source_revision": source_revision,
             "workflow_fingerprint": workflow_fingerprint,
+            "transition_key": transition_key,
         }.items():
             if value is not None and (not isinstance(value, str) or not value):
                 raise HandoffError("Handoff field %r must be a non-empty "
@@ -518,10 +527,12 @@ class HandoffStore:
             "candidate_ordinal": candidate_ordinal,
             "candidate_count": candidate_count,
             "seed": seed,
+            "predecessor_scene": predecessor_scene,
             "source_prompt_id": source_prompt_id,
             "source_revision": source_revision,
             "source_checkpoint_sha256": checkpoint,
             "workflow_fingerprint": workflow_fingerprint,
+            "transition_key": transition_key,
             "attempt": 0,
             "max_attempts": max_attempts,
             "created_at": now,
@@ -548,7 +559,8 @@ class HandoffStore:
     # -- transitions ------------------------------------------------------
 
     def transition(self, run_name: Any, handoff_id: Any,
-                   new_status: str) -> dict[str, Any]:
+                   new_status: str, accepted_prompt_id: str | None = None
+                   ) -> dict[str, Any]:
         """Apply a legal status transition atomically.
 
         Bounded retries never go through this method: ``claimed -> pending``
@@ -564,6 +576,8 @@ class HandoffStore:
             current = record["status"]
             if new_status in _HANDOFF_TRANSITIONS.get(current, ()):
                 record["status"] = new_status
+                if accepted_prompt_id:
+                    record["accepted_prompt_id"] = str(accepted_prompt_id)
                 record["updated_at"] = self._now()
                 self._write_record(run, record)
                 return record

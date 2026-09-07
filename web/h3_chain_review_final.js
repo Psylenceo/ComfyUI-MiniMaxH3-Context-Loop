@@ -1114,6 +1114,10 @@ function mount(node) {
     }
 
     function setActionsEnabled(enabled) {
+        // Recovered durable inventory has no live PromptExecutor future.
+        // It is intentionally read-only rather than offering decisions that
+        // are guaranteed to fail after a server restart.
+        if (current?.actionable === false) enabled = false;
         for (const button of actionButtons) button.disabled = !enabled;
         if (enabled && current?.candidate_batch_active) {
             retryButton.disabled = true;
@@ -1564,7 +1568,9 @@ function mount(node) {
         const complete = Boolean(current.candidate_generation_complete) ||
             generated >= target;
         const batchCommand = current.candidate_batch_command_pending;
-        const message = batchCommand
+        const message = current.actionable === false
+            ? (current.recovery_instructions || "Recovered review inventory is read-only; resume manually from the saved checkpoint.")
+            : batchCommand
             ? batchCommand === "accept"
                 ? "Selected take is being activated; Review Gate is stopping the speculative take."
                 : "Pause queued. The current in-flight candidate will finish, then Review Gate will wait here."

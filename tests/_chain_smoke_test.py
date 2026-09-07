@@ -1309,6 +1309,7 @@ def main():
                 "end_clip": 2,
                 "shot_id": prepared_plan["shots"][0]["id"],
                 "seed": str(prepared_plan["shots"][0]["seed"]),
+                "workflow_fingerprint": str(prepared_plan["plan_hash"]),
             }]
             current = current_payload["result"]
             assert current[1:3] == (1, 2)

@@ -46,6 +46,20 @@ export function pendingNextSceneHandoffs(body) {
         && item.handoff_id != null && String(item.handoff_id) !== "");
 }
 
+// A completion may only adopt the transition it produced.  Old pending
+// records remain listed for manual recovery, but must never move a run
+// backwards merely because they sort first on disk.
+export function matchingNextSceneHandoff(body, completed) {
+    return pendingNextSceneHandoffs(body).find((item) =>
+        Number(item.predecessor_scene) === Number(completed?.clipIndex)
+        && Number(item.start_clip) === Number(completed?.clipIndex) + 1
+        && String(item.workflow_fingerprint || "") ===
+            String(completed?.workflowFingerprint || "")
+        && (!completed?.sourceRevision || item.source_revision === completed.sourceRevision)
+        && (!completed?.checkpointSha || item.source_checkpoint_sha256 === completed.checkpointSha)
+    ) ?? null;
+}
+
 export function resumeHint(handoff) {
     const resume = handoff?.resume;
     if (!resume || typeof resume !== "object") return null;

@@ -168,9 +168,12 @@ def requeue_mode(root):
         "requeue mode persists a partial through-clip manifest"
     assert json.loads(partial.read_text(encoding="utf-8")) == manifest
 
-    record_path = handoff_path(root, "requeue_run", "next_scene_0002")
-    assert record_path.is_file(), "next_scene handoff must be durable"
+    records = list((run_dir / "orchestration").glob("next_scene_0002_*.json"))
+    assert len(records) == 1, "next_scene handoff must be durable"
+    record_path = records[0]
     record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["predecessor_scene"] == 1
+    assert record["transition_key"], "identity is bound to committed transition"
     assert record["format"] == "h3_top_level_handoff_v1"
     assert record["action"] == "next_scene"
     assert record["status"] == "pending"
@@ -207,6 +210,17 @@ def requeue_mode(root):
     assert len(records) == 1, \
         "a re-timed Loop End must not create a second handoff"
     assert json.loads(records[0].read_text(encoding="utf-8"))["attempt"] == 0
+
+    # A later rerender is new committed work, not a resurrection of the old
+    # terminal/claimed transition.  The old record remains durable history.
+    state3, images3, latent3, segment3 = make_inputs(plan)
+    segment3["revision"] = "cd" * 16
+    chain.MiniMaxH3ChainLoopEnd().end(
+        None, state3, images3, latent3, segment3,
+        execution_mode="top_level_requeue")
+    records = list((run_dir / "orchestration").glob("*.json"))
+    assert len(records) == 2
+    assert len({json.loads(path.read_text())["transition_key"] for path in records}) == 2
 
 
 def legacy_mode(root):
@@ -315,8 +329,10 @@ def routes(root):
 
         # --- queued -> consumed lifecycle -------------------------------------
         response = await chain._transition_handoff(FakeRequest(body={
-            "run_name": run, "handoff_id": "rs_full", "status": "queued"}))
+            "run_name": run, "handoff_id": "rs_full", "status": "queued",
+            "accepted_prompt_id": "accepted-prompt"}))
         assert _status(response) == 200
+        assert store.load(run, "rs_full")["accepted_prompt_id"] == "accepted-prompt"
         response = await chain._transition_handoff(FakeRequest(body={
             "run_name": run, "handoff_id": "rs_full",
             "status": "consumed"}))

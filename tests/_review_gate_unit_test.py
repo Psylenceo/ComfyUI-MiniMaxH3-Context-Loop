@@ -262,7 +262,8 @@ def main():
         chain._PENDING_REVIEWS.clear()
 
         class FakeRequest:
-            pass
+            async def json(self):
+                return {"token": "tok-restart", "action": "approve"}
 
         async def scenario():
             response = await chain._list_pending_reviews(FakeRequest())
@@ -278,6 +279,13 @@ def main():
             assert durable[0]["candidates"][0]["revision"] == "rev-x"
             assert durable[0]["video"] is None, \
                 "durable reviews never carry live tensors"
+            assert durable[0]["actionable"] is False
+            assert "resume manually" in durable[0]["recovery_instructions"]
+            # The API deliberately rejects an action after clearing the live
+            # future; recovery inventory must not masquerade as actionable.
+            decision = await chain._submit_review_decision(FakeRequest())
+            assert decision.status == 409
+            assert json.loads(decision.text)["recovery"] is True
 
         asyncio.new_event_loop().run_until_complete(scenario())
         # After the review is decided, the restart listing is empty again.

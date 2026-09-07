@@ -13,6 +13,7 @@ import {
     executionModeFromValue,
     isQueueSafe,
     isRequeueMode,
+    matchingNextSceneHandoff,
     pendingNextSceneHandoffs,
     predecessorScene,
     resumeHint,
@@ -93,6 +94,16 @@ assert.deepEqual(
 assert.deepEqual(pendingNextSceneHandoffs({handoffs: "nope"}), []);
 assert.deepEqual(pendingNextSceneHandoffs(null), []);
 assert.deepEqual(pendingNextSceneHandoffs({}), []);
+const matching = matchingNextSceneHandoff({handoffs: [
+    {...handoffList.handoffs[0], predecessor_scene: 1, workflow_fingerprint: "wf"},
+    {handoff_id: "stale", action: "next_scene", status: "pending", start_clip: 2,
+        predecessor_scene: 1, workflow_fingerprint: "old"},
+]}, {clipIndex: 1, workflowFingerprint: "wf"});
+assert.equal(matching.handoff_id, "next_scene_0002");
+assert.equal(matchingNextSceneHandoff({handoffs: [
+    {handoff_id: "old", action: "next_scene", status: "pending", start_clip: 2,
+        predecessor_scene: 1, workflow_fingerprint: "old"},
+]}, {clipIndex: 1, workflowFingerprint: "wf"}), null);
 
 assert.deepEqual(resumeHint(handoffList.handoffs[0]), {
     startClip: 2,
@@ -163,7 +174,7 @@ assert.match(source, /api\.addEventListener\("execution_error"/);
 assert.match(source, /The handoff stays queued/);
 // Safe queue + configurable cleanup interval measured from terminal success.
 assert.match(source, /\/api\/queue/);
-assert.match(source, /waitForSafeQueue\(\)/);
+assert.match(source, /waitForSafeQueue\(epoch\)/);
 assert.match(source, /cleanupDelayMs\(/);
 assert.match(source, /MiniMaxH3ContextLoop\.topLevelRequeueCleanupDelay/);
 assert.match(source, /defaultValue:\s*DEFAULT_CLEANUP_DELAY_MS/);
@@ -193,6 +204,10 @@ assert.match(source, /await app\.queuePrompt\(0, 1\)/);
 assert.match(source, /handoffs\/transition/);
 assert.match(source, /"consumed"/);
 assert.match(source, /"queued"/);
+assert.match(source, /"uncertain"/);
+assert.match(source, /accepted === false/);
+assert.match(source, /requireCurrentOperation\(epoch\)/);
+assert.match(source, /execution_start/);
 // Failures release the claim for manual recovery.
 assert.match(source, /handoffs\/release/);
 assert.match(source, /queue the workflow manually/);
