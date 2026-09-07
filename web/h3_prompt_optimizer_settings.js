@@ -125,10 +125,10 @@ function serverProfileTooltip(entries) {
         .filter((entry) => entry.value !== "custom")
         .map((entry) => `• ${entry.label} (${entry.api_format ?? "manual"}` +
             `${entry.default_url ? `, default ${entry.default_url}` : ""}) — ${entry.notes}`);
-    return "Picks the right Direct API format (and, where confidently known, a " +
-        "default Direct API URL) for a known local server. Does not overwrite an " +
-        "already-filled Direct API URL. Purely a convenience preset — you can still " +
-        "set Direct API format/URL by hand instead. This does NOT bypass the " +
+    return "Sets Direct API format (and, where confidently known, Direct API URL) " +
+        "to match a known local server — picking one overwrites whatever those two " +
+        "fields currently hold. Purely a convenience preset — you can still edit " +
+        "Direct API format/URL by hand afterward instead. This does NOT bypass the " +
         "server's origin allow-list: OpenAI, Gemini, and OpenRouter are permitted " +
         "by default, so a local server still needs its exact origin added via " +
         "H3_PROMPT_OPTIMIZER_ALLOWED_ORIGINS before starting ComfyUI, or the call " +
@@ -233,8 +233,7 @@ app.registerExtension({
                     app.ui?.settings?.setSettingValue?.(
                         PROMPT_OPTIMIZER_SETTING_IDS.apiFormat, profile.api_format);
                 }
-                const currentUrl = String(settingValue(PROMPT_OPTIMIZER_SETTING_IDS.apiUrl, "") ?? "").trim();
-                if (profile.default_url && !currentUrl) {
+                if (profile.default_url) {
                     app.ui?.settings?.setSettingValue?.(
                         PROMPT_OPTIMIZER_SETTING_IDS.apiUrl, profile.default_url);
                 }

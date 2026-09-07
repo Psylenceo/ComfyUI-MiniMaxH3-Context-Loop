@@ -48,9 +48,9 @@
     "value": "unsloth_studio",
     "label": "Unsloth Studio",
     "api_format": "openai",
-    "default_url": "",
+    "default_url": "http://127.0.0.1:8888",
     "model_list_path": "/v1/models",
     "unload_supported": true,
-    "notes": "Also exposes /v1/responses and an Anthropic-style /v1/messages endpoint (that format isn't implemented by this pack yet). Requires an Authorization: Bearer API key on every call. No fixed default port confirmed, so its URL isn't auto-filled -- check your own Unsloth Studio configuration."
+    "notes": "Also exposes /v1/responses and an Anthropic-style /v1/messages endpoint (that format isn't implemented by this pack yet). Requires an Authorization: Bearer API key on every call. Default port may vary by install -- check your own Unsloth Studio configuration if this preset's URL doesn't match."
   }
 ]
