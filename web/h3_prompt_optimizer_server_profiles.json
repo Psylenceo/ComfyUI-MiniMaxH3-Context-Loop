@@ -27,13 +27,7 @@
       {"method": "POST", "path": "/api/embed", "description": "Native embeddings (current)."},
       {"method": "POST", "path": "/api/embeddings", "description": "Native embeddings (legacy alias of /api/embed)."},
       {"method": "GET", "path": "/api/tags", "description": "List models available locally."},
-      {"method": "GET", "path": "/api/ps", "description": "List models currently loaded in memory, with VRAM usage."},
-      {"method": "POST", "path": "/api/show", "description": "Show a model's Modelfile, parameters, and template."},
-      {"method": "POST", "path": "/api/pull", "description": "Download a model from the Ollama library."},
-      {"method": "POST", "path": "/api/push", "description": "Upload a model to a model library."},
-      {"method": "POST", "path": "/api/create", "description": "Create a model from a Modelfile."},
-      {"method": "POST", "path": "/api/copy", "description": "Duplicate an existing model under a new name."},
-      {"method": "DELETE", "path": "/api/delete", "description": "Delete a model and its data."}
+      {"method": "GET", "path": "/api/ps", "description": "List models currently loaded in memory, with VRAM usage."}
     ]
   },
   {
@@ -51,11 +45,6 @@
       {"method": "GET", "path": "/v1/models", "description": "OpenAI-compatible model list."},
       {"method": "POST", "path": "/v1/responses", "description": "OpenAI Responses-shaped endpoint (this pack's \"responses\" Direct API format; not the default preset choice here)."},
       {"method": "POST", "path": "/v1/messages", "description": "Anthropic Messages-compatible endpoint. Not implemented by this pack's request-building code."},
-      {"method": "GET", "path": "/api/v0/models", "description": "Native REST v0: list all loaded and downloaded models with rich metadata (quantization, context length, load state)."},
-      {"method": "GET", "path": "/api/v0/models/{model}", "description": "Native REST v0: info about one specific model."},
-      {"method": "POST", "path": "/api/v0/chat/completions", "description": "Native REST v0 chat completions, adds token/sec and time-to-first-token stats."},
-      {"method": "POST", "path": "/api/v0/completions", "description": "Native REST v0 text completions."},
-      {"method": "POST", "path": "/api/v0/embeddings", "description": "Native REST v0 embeddings."},
       {"method": "GET", "path": "/api/v1/models", "description": "Native REST v1 model list, used to find a loaded model's instance_id for unload. Confirmed by live testing, not fully covered in current official docs."},
       {"method": "POST", "path": "/api/v1/models/unload", "description": "Native REST v1 unload. Body is {\"instance_id\": ...} (NOT {\"model\": ...} - that 400s). Confirmed by live testing, not fully covered in current official docs."}
     ]
@@ -82,7 +71,6 @@
       {"method": "POST", "path": "/apply-template", "description": "Apply the model's chat template to a messages array without generating."},
       {"method": "POST", "path": "/reranking", "description": "Reorder documents by relevance to a query."},
       {"method": "GET", "path": "/health", "description": "Health check; reports whether a model is loaded."},
-      {"method": "GET", "path": "/props", "description": "Server global properties and defaults."},
       {"method": "GET", "path": "/slots", "description": "Current state of each parallel processing slot."},
       {"method": "GET", "path": "/metrics", "description": "Prometheus-format performance metrics."},
       {"method": "GET", "path": "/lora-adapters", "description": "List loaded LoRA adapters and their scales."}
