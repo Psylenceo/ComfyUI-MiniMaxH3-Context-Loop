@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import {submitWithPromptIdentity, submissionFailure} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
 import {
     DEFAULT_CLEANUP_DELAY_MS,
     EXECUTION_MODES,
@@ -18,6 +19,13 @@ import {
     predecessorScene,
     resumeHint,
 } from "../web/h3_chain_top_level_requeue_core.mjs";
+
+// --- behavioral delivery primitive -----------------------------------------
+assert.deepEqual(await submitWithPromptIdentity({app: {graph: {}, graphToPrompt: async () => ({x: 1})}, api: {queuePrompt: async () => ({prompt_id: "accepted-123"})}}), {kind: "accepted", promptId: "accepted-123"});
+assert.deepEqual(await submitWithPromptIdentity({app: {queuePrompt: async () => false}, api: {}}), {kind: "rejected", promptId: ""});
+assert.deepEqual(await submitWithPromptIdentity({app: {queuePrompt: async () => true}, api: {}}), {kind: "uncertain", promptId: ""});
+assert.equal(submissionFailure({status: 422}), "rejected");
+assert.equal(submissionFailure(new Error("network")), "uncertain");
 
 // --- mode contract ---------------------------------------------------------
 
@@ -219,7 +227,6 @@ assert.match(source, /widgetByName\(startNode, "scene_range"\)/);
 assert.match(source, /startWidget\.callback\?\.\(resume\.startClip\)/);
 assert.doesNotMatch(source, /plan_json/);
 // Same workflow queued as a NEW top-level prompt.
-assert.match(source, /await app\.queuePrompt\(0, 1\)/);
 // queued/consumed lifecycle via the durable routes.
 assert.match(source, /handoffs\/transition/);
 assert.match(source, /"consumed"/);

@@ -13,6 +13,7 @@ import {
     resumeHint,
 } from "./h3_chain_top_level_requeue_core.mjs?v=0.6.5";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.2";
+import {submitWithPromptIdentity, submissionFailure} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
 
 // Top-level scene requeue coordinator (M3, candidate_count = 1).
 //
@@ -374,25 +375,9 @@ async function verifyPredecessorCheckpoint(runName, predecessor) {
 // so the prompt_id that /prompt accepted is retained; retain the legacy wrapper
 // fallback only for older frontends which return an object.
 async function queuePromptWithIdentity() {
-    if (typeof app.graphToPrompt === "function"
-        && typeof api.queuePrompt === "function") {
-        const prompt = await app.graphToPrompt(app.graph);
-        const result = await api.queuePrompt(0, prompt);
-        const promptId = String(result?.prompt_id ?? "");
-        if (!promptId) {
-            // A response without prompt_id is a confirmed validation reject.
-            return {accepted: false, promptId: ""};
-        }
-        return {accepted: true, promptId};
-    }
-    const result = await app.queuePrompt(0, 1);
-    if (result === false) return {accepted: false, promptId: ""};
-    const promptId = typeof result === "object"
-        ? String(result.prompt_id ?? result.promptId ?? "") : "";
-    if (promptId) return {accepted: true, promptId};
-    // Boolean true from a frontend without the lower-level API cannot prove
-    // identity and is intentionally delivery-uncertain rather than duplicated.
-    return {accepted: null, promptId: ""};
+    const result = await submitWithPromptIdentity({app, api});
+    return {accepted: result.kind === "accepted" ? true : result.kind === "rejected" ? false : null,
+        promptId: result.promptId};
 }
 
 async function postHandoffTransition(runName, handoffId, status, acceptedPromptId = null) {
@@ -506,7 +491,7 @@ async function processRequeue(record, epoch) {
             } catch (error) {
                 // Prompt validation errors are confirmed pre-delivery rejects;
                 // transport failures may instead be after server acceptance.
-                if (Number(error?.status) >= 400 && Number(error?.status) < 500) {
+                if (submissionFailure(error) === "rejected") {
                     throw new Error("ComfyUI rejected the prompt validation.");
                 }
                 await postHandoffTransition(runName, handoff.handoff_id, "uncertain");
