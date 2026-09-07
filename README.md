@@ -15,6 +15,12 @@ result later—without keeping the whole production in memory.
 
 ## Changelog
 
+### 0.6.4 — Preserve reference sizing during recovery
+
+- Recover saved Max sizing through linked inputs and Tagged Scene Options.
+- Apply Match/Max upscale overrides to automatic caches too, rebuilding native
+  picture conditioning from original masters without changing the source cache.
+
 ### 0.6.3 — Cancellation-safe processing saves
 
 - Preserve saved DeRoPE/upscale scenes when manifest updates or network

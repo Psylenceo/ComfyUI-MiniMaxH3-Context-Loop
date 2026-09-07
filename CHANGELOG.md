@@ -3,6 +3,16 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
+## v0.6.4 — Preserve reference sizing during recovery
+
+- Recover saved Match/Max sizing through static input links and modern Tagged
+  Scene Options, including when the reference tensors have been lost.
+- Apply upscale sizing overrides to cached and reconstructed references, not
+  only connected Tagged overrides. Match-to-Max changes re-encode original
+  picture masters; legacy caches recover those masters from saved media.
+- Preserve source caches and unrelated reference roles; report the actual
+  effective policy and rebuild count. Added CPU policy/geometry regressions.
+
 ## v0.6.3 — Cancellation-safe processing saves
 
 - DeRoPE/upscale publication retains media after uncertain checkpoint commits;
