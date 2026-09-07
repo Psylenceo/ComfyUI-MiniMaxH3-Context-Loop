@@ -57,9 +57,70 @@ function notifyChanged() {
 
 const CATEGORY_ROOT = ["MiniMax H3 Context Loop", "Prompt optimizer"];
 
+const API_FORMATS_JSON_PATH = "h3_prompt_optimizer_api_formats.json";
+const MCP_PROVIDERS_JSON_PATH = "h3_prompt_optimizer_mcp_providers.json";
+
+// Kept only as a last resort if the JSON file can't be fetched (moved file,
+// read-only install, etc.) so the settings still register with something.
+const FALLBACK_API_FORMATS = [
+    {value: "openai", label: "OpenAI-compatible Chat Completions",
+        endpoint: "POST {Direct API URL}/v1/chat/completions",
+        compatibility: "OpenAI, most local servers, and most proxies.",
+        media: "Reference media: images only."},
+    {value: "responses", label: "OpenAI Responses",
+        endpoint: "POST {Direct API URL}/v1/responses",
+        compatibility: "OpenAI's newer Responses API shape.",
+        media: "Reference media: images only."},
+    {value: "gemini", label: "Gemini Native",
+        endpoint: "POST {Direct API URL}/v1beta/models/{Direct API model}:generateContent",
+        compatibility: "Google's native Gemini request/response shape.",
+        media: "Reference media: images, video, and audio."},
+];
+const FALLBACK_MCP_PROVIDERS = [
+    "codex", "claude", "gemini", "hermes", "kimi", "moonshot", "glm",
+    "minimax", "ollama", "openrouter", "lmstudio", "llamacpp", "custom",
+].map((value) => ({value, label: value}));
+
+async function loadJson(filename, fallback) {
+    try {
+        const response = await fetch(new URL(`./${filename}`, import.meta.url));
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (!Array.isArray(data) || !data.length) throw new Error("empty or malformed list");
+        return data;
+    } catch (error) {
+        console.warn(`[H3 prompt optimizer] failed to load ${filename}, using built-in defaults:`, error);
+        return fallback;
+    }
+}
+
+function apiFormatTooltip(entries) {
+    const bullets = entries.map((entry) =>
+        `• ${entry.label} — ${entry.endpoint}. ${entry.compatibility} ${entry.media}`);
+    return "Which endpoint and request shape the Direct API call uses:\n\n" +
+        bullets.join("\n\n") +
+        `\n\nDefined in web/${API_FORMATS_JSON_PATH} inside this node pack's folder — ` +
+        "edit that file to add or adjust entries.";
+}
+
+function mcpProviderTooltip(entries) {
+    const bullets = entries.map((entry) =>
+        `• ${entry.label}${entry.note ? ` — ${entry.note}` : ""}`);
+    return "Used only when Prompt optimizer backend is MCP agent. The connected " +
+        "comfyui-mcp bridge validates live whether a provider is actually installed " +
+        "and authenticated; this list is only the set of recognized names:\n\n" +
+        bullets.join("\n") +
+        `\n\nDefined in web/${MCP_PROVIDERS_JSON_PATH} inside this node pack's folder — ` +
+        "edit that file to add or adjust entries.";
+}
+
 app.registerExtension({
     name: "minimax_h3_context_loop.prompt_optimizer_settings",
-    init() {
+    async init() {
+        const [apiFormats, mcpProviders] = await Promise.all([
+            loadJson(API_FORMATS_JSON_PATH, FALLBACK_API_FORMATS),
+            loadJson(MCP_PROVIDERS_JSON_PATH, FALLBACK_MCP_PROVIDERS),
+        ]);
         // Every setting needs its own distinct third category segment. The
         // settings panel's default (unsearched) view renders one row per
         // unique category path; six settings sharing the same literal leaf
@@ -101,10 +162,10 @@ app.registerExtension({
         add("MCP agent provider", {
             id: PROMPT_OPTIMIZER_SETTING_IDS.mcpProvider,
             name: "MCP agent provider",
-            tooltip: "Used only when Prompt optimizer backend is MCP agent. The compatible comfyui-mcp bridge validates whether the provider is installed and authenticated.",
+            tooltip: mcpProviderTooltip(mcpProviders),
             type: "combo",
             defaultValue: "codex",
-            options: ["codex", "claude", "gemini", "hermes", "kimi", "moonshot", "glm", "minimax", "ollama", "openrouter", "lmstudio", "llamacpp", "custom"],
+            options: mcpProviders.map((entry) => entry.value),
             attrs: {editable: true, filter: true},
         });
         add("Direct API key", {
@@ -127,23 +188,10 @@ app.registerExtension({
         add("Direct API format", {
             id: PROMPT_OPTIMIZER_SETTING_IDS.apiFormat,
             name: "Direct API format",
-            tooltip: "Which endpoint and request shape the Direct API call uses:\n\n" +
-                "• OpenAI-compatible Chat Completions — POST {Direct API URL}/v1/chat/completions. " +
-                "Works with OpenAI, most local servers (LM Studio, llama.cpp, Ollama's OpenAI-compatible " +
-                "route, etc.), and most third-party proxies. Reference media: images only.\n\n" +
-                "• OpenAI Responses — POST {Direct API URL}/v1/responses. OpenAI's newer Responses " +
-                "API shape; use this only against a server that actually implements /v1/responses. " +
-                "Reference media: images only.\n\n" +
-                "• Gemini Native — POST {Direct API URL}/v1beta/models/{Direct API model}:" +
-                "generateContent. Google's native Gemini request/response shape; requires a Direct API " +
-                "key. Reference media: images, video, and audio.",
+            tooltip: apiFormatTooltip(apiFormats),
             type: "combo",
             defaultValue: "openai",
-            options: [
-                {text: "OpenAI-compatible Chat Completions", value: "openai"},
-                {text: "OpenAI Responses", value: "responses"},
-                {text: "Gemini Native", value: "gemini"},
-            ],
+            options: apiFormats.map((entry) => ({text: entry.label, value: entry.value})),
         });
         add("Backend", {
             id: PROMPT_OPTIMIZER_SETTING_IDS.backend,

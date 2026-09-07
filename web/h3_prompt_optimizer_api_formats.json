@@ -1,0 +1,23 @@
+[
+  {
+    "value": "openai",
+    "label": "OpenAI-compatible Chat Completions",
+    "endpoint": "POST {Direct API URL}/v1/chat/completions",
+    "compatibility": "OpenAI, most local servers (LM Studio, llama.cpp, Ollama's OpenAI-compatible route, etc.), and most third-party proxies.",
+    "media": "Reference media: images only."
+  },
+  {
+    "value": "responses",
+    "label": "OpenAI Responses",
+    "endpoint": "POST {Direct API URL}/v1/responses",
+    "compatibility": "OpenAI's newer Responses API shape. Use this only against a server that actually implements /v1/responses.",
+    "media": "Reference media: images only."
+  },
+  {
+    "value": "gemini",
+    "label": "Gemini Native",
+    "endpoint": "POST {Direct API URL}/v1beta/models/{Direct API model}:generateContent",
+    "compatibility": "Google's native Gemini request/response shape. Requires a Direct API key.",
+    "media": "Reference media: images, video, and audio."
+  }
+]

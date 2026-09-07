@@ -1,0 +1,67 @@
+[
+  {
+    "value": "codex",
+    "label": "Codex",
+    "note": "Native comfyui-mcp orchestrator backend using OpenAI's Codex app-server (threads, turns, streamed events, approvals, interruption)."
+  },
+  {
+    "value": "hermes",
+    "label": "Hermes",
+    "note": "Registered through `comfyui-mcp setup hermes`, using its tool-restricted one-shot interface. Not currently a full panel-orchestrator backend."
+  },
+  {
+    "value": "claude",
+    "label": "Claude",
+    "note": "Forwarded to comfyui-mcp; that bridge validates installation and authentication live."
+  },
+  {
+    "value": "gemini",
+    "label": "Gemini",
+    "note": "Forwarded to comfyui-mcp; that bridge validates installation and authentication live."
+  },
+  {
+    "value": "kimi",
+    "label": "Kimi",
+    "note": "Forwarded to comfyui-mcp; that bridge validates installation and authentication live."
+  },
+  {
+    "value": "moonshot",
+    "label": "Moonshot",
+    "note": "Forwarded to comfyui-mcp; that bridge validates installation and authentication live."
+  },
+  {
+    "value": "glm",
+    "label": "GLM",
+    "note": "Forwarded to comfyui-mcp; that bridge validates installation and authentication live."
+  },
+  {
+    "value": "minimax",
+    "label": "MiniMax",
+    "note": "Forwarded to comfyui-mcp; that bridge validates installation and authentication live."
+  },
+  {
+    "value": "ollama",
+    "label": "Ollama",
+    "note": "Forwarded to comfyui-mcp; that bridge validates installation and authentication live."
+  },
+  {
+    "value": "openrouter",
+    "label": "OpenRouter",
+    "note": "Forwarded to comfyui-mcp; that bridge validates installation and authentication live."
+  },
+  {
+    "value": "lmstudio",
+    "label": "LM Studio",
+    "note": "Forwarded to comfyui-mcp; that bridge validates installation and authentication live."
+  },
+  {
+    "value": "llamacpp",
+    "label": "llama.cpp",
+    "note": "Forwarded to comfyui-mcp; that bridge validates installation and authentication live."
+  },
+  {
+    "value": "custom",
+    "label": "Custom",
+    "note": "Any other provider id your comfyui-mcp installation recognizes; forwarded as-is."
+  }
+]
