@@ -3,7 +3,7 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
-## Unreleased
+## v0.6.2 — Maintained workflow and release packaging
 
 - Added a durable review-gate snapshot (`review_inventory.py`, format
   `h3_review_snapshot_v1`) under the run-local orchestration directory so a
@@ -39,6 +39,8 @@ this file records the detailed changes.
   Loop Start validation without changing Plan JSON or rewriting prompts; the
   original optional socket order remains intact and the new sockets are
   appended.
+
+## Unreleased
 
 ## v0.6.1 — Chapter output and authoring polish
 

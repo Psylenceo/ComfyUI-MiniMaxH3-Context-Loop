@@ -301,8 +301,8 @@ change its backend index or serialized position.
 ## Release validation
 
 All ten delivery stages are implemented. The maintained workflow catalog uses
-one-wire Chain Policy, Source Timeline, and model-free
-preflight. The migration tool is idempotent, the frozen 0.4 positional contract
-is covered by regression tests, and backend/frontend release checks enforce a
-single package version. Archived 0.4 workflows remain unchanged examples of the
-supported compatibility route.
+one-wire Chain Policy, Source Timeline, model-free preflight, and the durable
+top-level prompt lifecycle described above. The migration tool is idempotent,
+the frozen 0.4 positional contract is covered by regression tests, and
+backend/frontend release checks enforce a single package version. Archived 0.4
+workflows remain unchanged examples of the supported compatibility route.

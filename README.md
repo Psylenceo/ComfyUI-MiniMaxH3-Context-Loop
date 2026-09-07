@@ -15,19 +15,21 @@ result later—without keeping the whole production in memory.
 
 ## Changelog
 
-### 0.6.1 — Latest updates
+### 0.6.2 — Latest updates
 
-- **Chapter output.** Export or recover a chosen chapter, including its already
-  generated scenes while it is unfinished. Chapters can use different resolutions;
-  locked saved scenes preserve their chapter's original size.
-- **Local checkpoint branches.** Pin a branch for this workflow's output without
-  changing the project's active branch. Select **Selected chapter only** for
-  chapter-specific export and upscale experiments.
-- **Authoring polish.** Rich prompt marker menus and completion improvements,
-  clearer responsive/light-theme controls, and scene duplication that preserves
-  prompts and updates context links correctly.
-- **Pixel upscale controls.** Optional conditioning width and height; `0` keeps
-  automatic sizing from the upscaled images.
+- **Maintained workflow path.** The release docs now describe the proven
+  memory-safe top-level prompt lifecycle: keep the same Plan and creative
+  model stack, let Loop End finish, wait through the cleanup delay, then queue
+  the next heavyweight scene as a new top-level prompt.
+- **Reference propagation fix.** Valid prompt `@tags` again see the connected
+  Tagged registry during preflight without rewriting prompt text or storing
+  reference data in the Plan.
+- **Crash-safe review and resume.** Review snapshots stay visible after a
+  refresh or restart, and durable handoffs/manual resume keep the same Plan
+  semantics while avoiding duplicate queues.
+- **Release packaging.** The changelog, compatibility notes, and workflow docs
+  now call out the WSL2 pinned-memory caveat separately from the architectural
+  fix.
 
 ### 0.6 — Better authoring, recovery, and export
 
@@ -80,7 +82,7 @@ git clone https://github.com/seitanism/ComfyUI-H3-Motion-Context-MultiRef.git
 git clone https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop.git
 ```
 
-`main` is the 0.6 release line. Use `nightly` only for development features.
+`main` is the 0.6.2 release line. Use `nightly` only for development features.
 
 Restart ComfyUI. Use a build with native MiniMax H3 **Add Guide** support and
 install your H3 model, text encoder, video VAE, and audio VAE; models are not

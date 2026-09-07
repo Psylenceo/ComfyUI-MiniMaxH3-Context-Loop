@@ -47,6 +47,16 @@ the retry instead.
 Disable the floating control under **Settings → MiniMax H3 Context Loop →
 Interface → Cancel & reroll** without affecting Review Gate.
 
+## Top-level prompt lifecycle
+
+The maintained memory-safe mode keeps heavyweight H3 jobs separate:
+Loop End finishes the current scene, writes durable orchestration state, the
+frontend waits through the cleanup delay, then claims the handoff and queues a
+brand-new top-level prompt. The delay is configurable and starts when the
+source prompt reaches terminal success. This is the architectural fix for the
+same-prompt retention bug; `--disable-pinned-memory` is only a separate WSL2
+workaround for host pinning behavior.
+
 ## Between-scene memory cleanup
 
 Loop End can apply a runtime-only `between_scene_cleanup` policy after the
