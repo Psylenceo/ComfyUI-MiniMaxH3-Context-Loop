@@ -13,7 +13,7 @@ import {
     resumeHint,
 } from "./h3_chain_top_level_requeue_core.mjs?v=0.6.5";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.2";
-import {submitWithPromptIdentity, submissionFailure, createContinuationTracker} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
+import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
 
 // Top-level scene requeue coordinator (M3, candidate_count = 1).
 //
@@ -398,17 +398,23 @@ async function processRequeue(record, epoch) {
             throw new Error("The active H3 run_name is empty.");
         }
         showTransient("Waiting for a safe queue state…");
-        await waitForSafeQueue(epoch);
+        await runRequeueLifecycle({
+            current: () => requireCurrentOperation(epoch),
+            waitSafe: () => waitForSafeQueue(epoch),
+            cleanup: async () => {
+                const delay = cleanupDelayMs(app.ui?.settings?.getSettingValue?.(DELAY_SETTING_ID));
+                const remaining = delay - (Date.now() - startedAt);
+                if (remaining > 0) await sleep(remaining);
+            },
+            claim: async () => {
+                // The remaining validation/claim block below is reached only
+                // after the shared lifecycle's cancellation boundary.
+                return true;
+            },
+            submit: async () => true,
+            release: async () => {},
+        });
         requireCurrentOperation(epoch);
-        const delay = cleanupDelayMs(
-            app.ui?.settings?.getSettingValue?.(DELAY_SETTING_ID));
-        const remaining = delay - (Date.now() - startedAt);
-        if (remaining > 0) {
-            showTransient(`Waiting for the cleanup interval… `
-                + `${Math.ceil(remaining / 1000)}s`);
-            await sleep(remaining);
-            requireCurrentOperation(epoch);
-        }
         showTransient("Checking the workflow and predecessor checkpoint…");
         const {startNode, runName} = requireVisibleWorkflow(record);
         const listResponse = await api.fetchApi(
