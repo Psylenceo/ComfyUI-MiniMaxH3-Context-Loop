@@ -123,8 +123,16 @@ function mcpProviderTooltip(entries) {
 function serverProfileTooltip(entries) {
     const bullets = entries
         .filter((entry) => entry.value !== "custom")
-        .map((entry) => `• ${entry.label} (${entry.api_format ?? "manual"}` +
-            `${entry.default_url ? `, default ${entry.default_url}` : ""}) — ${entry.notes}`);
+        .map((entry) => {
+            const endpointCount = Array.isArray(entry.endpoints) ? entry.endpoints.length : 0;
+            const endpointNote = endpointCount
+                ? ` ${endpointCount} documented endpoint${endpointCount === 1 ? "" : "s"} ` +
+                  `(chat, models, unload, etc. where supported) listed in this preset's JSON entry.`
+                : "";
+            return `• ${entry.label} (${entry.api_format ?? "manual"}` +
+                `${entry.default_url ? `, default ${entry.default_url}` : ""}) — ` +
+                `${entry.notes}${endpointNote}`;
+        });
     return "Sets Direct API format (and, where confidently known, Direct API URL) " +
         "to match a known local server — picking one overwrites whatever those two " +
         "fields currently hold. Purely a convenience preset — you can still edit " +
