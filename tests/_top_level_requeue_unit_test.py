@@ -238,28 +238,33 @@ def requeue_mode(root):
                                       execution_mode="top_level_requeue")
     assert len(list((run_dir / "orchestration").glob("*.json"))) == 2
 
-    # Terminal/non-pending history never blocks a new committed transition.
+    # Real Loop End writer: terminal history never blocks a new render.
     for status in ("queued", "consumed", "cancelled", "failed"):
-        run = "matrix_%s" % status
+        matrix_plan = make_plan("matrix_%s" % status)
+        matrix_dir = pathlib.Path(root) / "h3_chains" / matrix_plan["run_name"]
+        (matrix_dir / "segments").mkdir(parents=True, exist_ok=True)
+        a_state, a_images, a_latent, a_segment = make_inputs(matrix_plan)
+        a_segment["revision"] = "aa" * 16
+        chain.MiniMaxH3ChainLoopEnd().end(None, a_state, a_images, a_latent, a_segment, execution_mode="top_level_requeue")
         matrix = chain._HandoffStore(root)
-        a = matrix.create(run, action="next_scene", scene=2, start_clip=2,
-                          end_clip=2, source_revision="rev-a",
-                          workflow_fingerprint="wf-a", transition_key="key-a")
-        if status == "cancelled":
-            matrix.transition(run, a["handoff_id"], "cancelled")
+        a = matrix.list(matrix_plan["run_name"])[0]
+        if status == "cancelled": matrix.transition(matrix_plan["run_name"], a["handoff_id"], "cancelled")
         else:
-            matrix.claim(run, a["handoff_id"])
-            if status == "failed":
-                matrix.transition(run, a["handoff_id"], "failed")
+            matrix.claim(matrix_plan["run_name"], a["handoff_id"])
+            if status == "failed": matrix.transition(matrix_plan["run_name"], a["handoff_id"], "failed")
             else:
-                matrix.transition(run, a["handoff_id"], "queued")
-                if status == "consumed": matrix.transition(run, a["handoff_id"], "consumed")
-        b = matrix.create(run, action="next_scene", scene=2, start_clip=2,
-                          end_clip=3, source_revision="rev-b",
-                          workflow_fingerprint="wf-b", transition_key="key-b")
-        assert matrix.load(run, a["handoff_id"])["status"] == status
+                matrix.transition(matrix_plan["run_name"], a["handoff_id"], "queued")
+                if status == "consumed": matrix.transition(matrix_plan["run_name"], a["handoff_id"], "consumed")
+        b_state, b_images, b_latent, b_segment = make_inputs(matrix_plan)
+        b_segment["revision"] = "bb" * 16
+        chain.MiniMaxH3ChainLoopEnd().end(None, b_state, b_images, b_latent, b_segment, execution_mode="top_level_requeue")
+        records = matrix.list(matrix_plan["run_name"])
+        b = next(item for item in records if item["source_revision"] == "bb" * 16)
+        assert matrix.load(matrix_plan["run_name"], a["handoff_id"])["status"] == status
         assert b["status"] == "pending" and b["handoff_id"] != a["handoff_id"]
         assert b["transition_key"] != a["transition_key"]
+        chain.MiniMaxH3ChainLoopEnd().end(None, b_state, b_images, b_latent, b_segment, execution_mode="top_level_requeue")
+        assert len(matrix.list(matrix_plan["run_name"])) == 2
 
 
 def legacy_mode(root):
