@@ -504,7 +504,11 @@ async function processRequeue(record, epoch) {
             try {
                 submission = await queuePromptWithIdentity();
             } catch (error) {
-                // A transport exception may be after server acceptance.
+                // Prompt validation errors are confirmed pre-delivery rejects;
+                // transport failures may instead be after server acceptance.
+                if (Number(error?.status) >= 400 && Number(error?.status) < 500) {
+                    throw new Error("ComfyUI rejected the prompt validation.");
+                }
                 await postHandoffTransition(runName, handoff.handoff_id, "uncertain");
                 queued = true;
                 throw error;
