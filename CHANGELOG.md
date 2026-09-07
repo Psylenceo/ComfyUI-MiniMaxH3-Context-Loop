@@ -3,6 +3,17 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
+## Unreleased
+
+- Grouped full-mix/vocal/instrumental sources in the Carousel and a reusable
+  Audio Tracks node. Full mixes are never doubled with stems; stems-only mixes
+  are frame-aligned, peak-protected and previewable. Audio archives include
+  every track and validate their recovery hashes.
+- Per-scene Lip-sync Inherit/On/Off in Plan Studio and the Plan editor, using
+  the established source-target/reference/carry fields. Grouped lip-sync uses
+  vocals only; delivery remains the full mix. Existing single-track workflows
+  are unchanged. Missing vocals and mismatched stem durations fail clearly.
+
 ## v0.6.2 — Maintained workflow and release packaging
 
 - Added a durable review-gate snapshot (`review_inventory.py`, format
@@ -39,8 +50,6 @@ this file records the detailed changes.
   Loop Start validation without changing Plan JSON or rewriting prompts; the
   original optional socket order remains intact and the new sockets are
   appended.
-
-## Unreleased
 
 ## v0.6.1 — Chapter output and authoring polish
 

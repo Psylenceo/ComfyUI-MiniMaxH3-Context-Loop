@@ -1,0 +1,21 @@
+{
+  "candidates": [
+    {
+      "created_at": "",
+      "has_audio": false,
+      "number": 1,
+      "revision": "cccccccccccccccccccccccccccccccc",
+      "seed": "2",
+      "warning": ""
+    }
+  ],
+  "deadline": null,
+  "decided_at": 1788800680.8295906,
+  "decision_action": "approve",
+  "format": "h3_review_snapshot_v1",
+  "run_name": "review_length",
+  "scene": 2,
+  "server_now": 1788800680.8183522,
+  "status": "decided",
+  "token": "a64e38178fb24612be94051c4e6efbb2"
+}

@@ -1,0 +1,29 @@
+{
+  "candidates": [
+    {
+      "created_at": "",
+      "has_audio": false,
+      "number": 1,
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "seed": "2",
+      "warning": ""
+    },
+    {
+      "created_at": "",
+      "has_audio": false,
+      "number": 2,
+      "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "seed": "13911308617825440366",
+      "warning": ""
+    }
+  ],
+  "deadline": null,
+  "decided_at": 1788800680.8153362,
+  "decision_action": "approve",
+  "format": "h3_review_snapshot_v1",
+  "run_name": "review_length",
+  "scene": 2,
+  "server_now": 1788800680.804123,
+  "status": "decided",
+  "token": "fbcd1dbd8f614a48b4bbd0acbf57787f"
+}
