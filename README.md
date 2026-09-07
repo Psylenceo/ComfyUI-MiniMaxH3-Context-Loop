@@ -13,6 +13,20 @@ result later—without keeping the whole production in memory.
 [Changelog](CHANGELOG.md) ·
 [Documentation](docs/README.md)
 
+## Fork status (Psylenceo)
+
+Branches on this fork with work that isn't in Ethanfel's upstream yet. Update
+this section whenever a branch here is opened as a PR, merged, or dropped.
+
+| Branch | What it does | Status |
+| --- | --- | --- |
+| [`fix/prompt-optimizer-settings-visibility`](https://github.com/Psylenceo/ComfyUI-MiniMaxH3-Context-Loop/tree/fix/prompt-optimizer-settings-visibility) | Fixes Direct API settings not appearing in Settings without searching; reorders/widens the Prompt optimizer fields; adds a "Local server preset" picker with documented API endpoints for Ollama, LM Studio, llama.cpp server, vLLM, and Unsloth Studio. | Not yet submitted — PR not opened |
+| [`feature/settings-based-origin-allowlist`](https://github.com/Psylenceo/ComfyUI-MiniMaxH3-Context-Loop/tree/feature/settings-based-origin-allowlist) | Adds a per-user "Additional allowed Direct API origins" setting so local LLM servers can be allow-listed through ComfyUI Settings instead of an environment variable — same request-body-can-never-reach-it trust boundary as Ethanfel's SSRF fix ([`212486f`](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop/commit/212486fc2029cd60845cfd666a0bf89cf65dfe96)). | Held back until this node pack's pending ComfyUI Manager review resolves — PR not opened |
+
+Already merged upstream: frame-capture support in the Review Gate (scrub a
+saved segment, save a frame straight into the Project Asset Carousel) —
+merged into `nightly`.
+
 ## Changelog
 
 ### 0.6.4 — Preserve reference sizing during recovery
