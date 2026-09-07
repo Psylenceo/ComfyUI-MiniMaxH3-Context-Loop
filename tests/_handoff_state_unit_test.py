@@ -325,6 +325,44 @@ def main():
                 "pending", "claimed", "queued", "consumed",
                 "cancelled", "failed")
 
+    # --- M3 additive: end_clip + claim-time source_prompt_id ----------------
+    range_record = store.create(
+        "film_run", action="next_scene", scene=2, start_clip=2,
+        end_clip=5, handoff_id="range_handoff")
+    assert range_record["end_clip"] == 5
+    assert store.load("film_run", "range_handoff")["end_clip"] == 5
+    for bad_end, handoff_id in ((1, "bad_end_low"), (5.5, "bad_end_f")):
+        try:
+            store.create("film_run", action="next_scene", scene=2,
+                         start_clip=2, end_clip=bad_end,
+                         handoff_id=handoff_id)
+        except HandoffError:
+            pass
+        else:
+            raise AssertionError("end_clip %r must raise "
+                                 "(below start_clip or non-integer)" % bad_end)
+    # end_clip stays optional: records without it remain valid.
+    assert store.create("film_run", action="next_scene", scene=4,
+                        handoff_id="no_end_clip")["end_clip"] is None
+
+    claim_id = store.create("film_run", action="next_scene", scene=3,
+                            start_clip=3, end_clip=5,
+                            handoff_id="claim_pid")["handoff_id"]
+    claimed_pid = store.claim("film_run", claim_id, "coordinator",
+                              source_prompt_id="prompt-source-n")
+    assert claimed_pid["status"] == "claimed"
+    assert claimed_pid["source_prompt_id"] == "prompt-source-n"
+    # First writer wins: a duplicate claim can never re-stamp the id.
+    try:
+        store.claim("film_run", claim_id, "rival",
+                    source_prompt_id="prompt-rival")
+    except HandoffClaimError:
+        pass
+    else:
+        raise AssertionError("duplicate claim must raise")
+    assert store.load("film_run", claim_id)["source_prompt_id"] \
+        == "prompt-source-n"
+
     # --- no Plan JSON modification ---------------------------------------------------
     plan_invariance()
 

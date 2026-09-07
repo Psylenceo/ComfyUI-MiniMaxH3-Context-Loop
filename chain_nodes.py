@@ -75,9 +75,11 @@ except ImportError:
 
 try:
     from aiohttp import web
-    from server import PromptServer
 except ImportError:
     web = None
+try:
+    from server import PromptServer
+except ImportError:
     PromptServer = None
 
 from .nodes import (
@@ -91,6 +93,13 @@ from .motion_context_upstream import apply_motion_context
 from .chapter_resolution import (
     normalize_resolution, scene_resolution, saved_resolution,
     apply_chapter_resolutions, common_saved_resolution,
+)
+from .handoff_state import (
+    HandoffClaimError as _HandoffClaimError,
+    HandoffError as _HandoffError,
+    HandoffNotFoundError as _HandoffNotFoundError,
+    HandoffStore as _HandoffStore,
+    IllegalHandoffTransitionError as _IllegalHandoffTransitionError,
 )
 from .prompt_history import PromptHistoryStore
 from .prompt_optimizer import optimize_prompt_payload
@@ -199,6 +208,14 @@ CONTINUATION_MODES = (
 SCENE_LORA_ROUTES = (
     "base", *(chr(ord("a") + offset) for offset in range(26)))
 LOOP_MEMORY_POLICIES = ("off", "unload_models", "fresh_scene")
+# Scene-boundary orchestration modes for Chain Loop End. recursive_legacy is
+# the pre-0.7 behavior (the next H3 scene expands recursively inside the same
+# top-level prompt). top_level_requeue stops after the scene N checkpoint and
+# leaves a durable next_scene handoff; the frontend later queues the SAME
+# workflow as a NEW top-level prompt and Loop Start resumes the same Plan at
+# scene N+1 from the accepted checkpoint lineage. The mode lives on the node
+# (workflow JSON), never in the Plan JSON (PLAN_SCHEMA_INVARIANT_SPEC).
+LOOP_EXECUTION_MODES = ("recursive_legacy", "top_level_requeue")
 GUIDE_CONTINUATION_MODES = frozenset((
     "guide", "tone_carry_guide", "latent_guide", "tapered_guide"))
 MASKED_CONTINUATION_MODES = frozenset((
@@ -21294,6 +21311,52 @@ def _saved_scene_prefix_length(plan: dict[str, Any]) -> int:
     return saved
 
 
+def _write_next_scene_handoff(plan: dict[str, Any], index: int,
+                              end_clip: int,
+                              next_segment: dict[str, Any]) -> dict[str, Any]:
+    """Write the lightweight durable next-scene handoff for requeue mode.
+
+    Called after the scene N checkpoint/segment transaction has completed
+    (Segment Save), immediately before Loop End stops instead of recursively
+    expanding scene N+1.  The record carries only identity values (run name,
+    scene numbers, seed, revision/checkpoint SHA, Plan fingerprint) so the
+    frontend can later claim it and queue the SAME workflow as a new
+    top-level prompt.  The Plan JSON is never touched.
+
+    Idempotent per (run, scene): a re-invocation for the same scene finds
+    and returns the existing record instead of creating a duplicate, so a
+    crashed/retimed Loop End cannot double-enqueue.
+    """
+    run_name = str(plan.get("run_name") or "")
+    next_scene = int(index) + 1
+    handoff_id = "next_scene_%04d" % next_scene
+    store = _HandoffStore(_output_root())
+    try:
+        return store.load(run_name, handoff_id)
+    except _HandoffNotFoundError:
+        pass
+
+    paths = _artifact_paths(plan, index)
+    checkpoint_sha = None
+    if os.path.isfile(paths["metadata"]):
+        try:
+            checkpoint_sha = _file_sha256(paths["metadata"])
+        except OSError:
+            checkpoint_sha = None
+
+    shot = plan["shots"][next_scene - 1]
+    revision = str(next_segment.get("revision")
+                   or checkpoint_revision_token(index, next_segment) or "")
+    return store.create(
+        run_name, action="next_scene",
+        scene=next_scene, start_clip=next_scene, end_clip=int(end_clip),
+        seed=int(shot["seed"]),
+        source_revision=revision,
+        source_checkpoint_sha256=checkpoint_sha,
+        workflow_fingerprint=str(plan.get("plan_hash") or ""),
+        handoff_id=handoff_id)
+
+
 class MiniMaxH3ChainLoopEnd:
     @classmethod
     def INPUT_TYPES(cls):
@@ -21337,6 +21400,22 @@ class MiniMaxH3ChainLoopEnd:
                                "model-switching chains. ComfyUI has no safe "
                                "full executor reset inside a running recursive "
                                "prompt, so the small live loop carry remains."}),
+                "execution_mode": (list(LOOP_EXECUTION_MODES), {
+                    "default": "recursive_legacy",
+                    "tooltip": "How the next scene is scheduled. "
+                               "recursive_legacy keeps the classic behavior: "
+                               "the next H3 scene expands recursively inside "
+                               "the same top-level prompt. top_level_requeue "
+                               "(recommended for long runs) stops right after "
+                               "the scene checkpoint is persisted, writes a "
+                               "lightweight durable handoff, and lets the "
+                               "frontend queue this same workflow as a NEW "
+                               "top-level prompt; Loop Start resumes the same "
+                               "Plan at the next scene from the accepted "
+                               "checkpoint lineage. Errors and interruptions "
+                               "never auto-queue; a pending handoff can be "
+                               "resumed or cancelled manually. The mode is "
+                               "stored on this node, never in the Plan JSON."}),
             },
             "hidden": {
                 "dynprompt": "DYNPROMPT",
@@ -21465,7 +21544,8 @@ class MiniMaxH3ChainLoopEnd:
         }
 
     def end(self, flow, state, images, sampled_latent, segment,
-            between_scene_cleanup="off", dynprompt=None, unique_id=None):
+            between_scene_cleanup="off", execution_mode="recursive_legacy",
+            dynprompt=None, unique_id=None):
         plan = state["plan"]
         index = int(state["index"])
         if int(segment.get("index", -1)) != index:
@@ -21569,6 +21649,38 @@ class MiniMaxH3ChainLoopEnd:
             next_state["source_timeline"] = state["source_timeline"]
         end_clip = int(next_state["end_clip"])
         if index < end_clip:
+            if execution_mode == "top_level_requeue":
+                # Scene N is checkpointed; do NOT expand the next H3 scene
+                # inside this top-level prompt. Persist the lightweight
+                # durable handoff first (the checkpoint transaction already
+                # completed in Segment Save), then stop with a partial
+                # manifest so this prompt can reach terminal success. The
+                # frontend later queues the SAME workflow as a new top-level
+                # prompt and Loop Start resumes the same Plan at scene
+                # N+1 from the accepted checkpoint lineage.
+                handoff = _write_next_scene_handoff(
+                    plan, index, end_clip, next_segment)
+                del selected_frames, selected_latent
+                del images, sampled_latent, segment, state
+                _release_loop_boundary_resources(
+                    between_scene_cleanup, index)
+                manifest = _manifest_from_segments(
+                    plan, next_state["segments"], complete=False)
+                if os.path.isdir(_run_dir(plan)):
+                    manifest_path = os.path.join(
+                        _run_dir(plan), "partial",
+                        "through_clip_%04d.manifest.json" % index)
+                    _atomic_json(manifest_path, manifest)
+                manifest_json = json.dumps(
+                    manifest, ensure_ascii=False, indent=2, sort_keys=True)
+                _LOG.info(
+                    "H3 Chain %s scene %d checkpointed in top-level "
+                    "requeue mode; next scene deferred to handoff %s "
+                    "(new top-level prompt required).",
+                    plan["run_name"], index, handoff["handoff_id"])
+                return (manifest, manifest_json,
+                        next_state["previous_frames"],
+                        next_state["previous_latent"])
             expansion = self._recurse(
                 flow, next_state, dynprompt, unique_id)
             # The recursive state owns independent CPU clones. Release this
@@ -28203,6 +28315,160 @@ async def _project_asset_media(request):
         return web.json_response({"error": str(exc)}, status=400)
 
 
+# ---------------------------------------------------------------------------
+# Durable top-level handoff routes (top-level scene requeue).
+#
+# These are the ONLY backend surface for the separate run-local handoff
+# state written by Chain Loop End in top_level_requeue mode. They read and
+# mutate records under output/h3_chains/<run>/orchestration/ via the
+# exactly-once HandoffStore primitives; they never accept filesystem paths
+# and never touch the Plan JSON. The frontend coordinator calls them in the
+# order: list -> claim -> (queue new top-level prompt) -> transition queued
+# -> transition consumed; failures release the claim for manual recovery.
+# ---------------------------------------------------------------------------
+
+
+_HANDOFF_TRANSITION_STATUSES = ("queued", "consumed", "cancelled")
+
+
+def _handoff_store() -> "_HandoffStore":
+    return _HandoffStore(_output_root())
+
+
+def _handoff_scene_count(run_name: str) -> int | None:
+    """Scene count of the run's saved Plan, or None when unreadable."""
+    plan_path = os.path.join(
+        _output_root(), "h3_chains", _safe_name(run_name, ""), "plan.json")
+    try:
+        with open(plan_path, "r", encoding="utf-8") as handle:
+            plan = json.load(handle)
+        shots = plan.get("shots")
+        if isinstance(shots, list) and shots:
+            return len(shots)
+    except (OSError, TypeError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def _handoff_record_view(record: dict[str, Any]) -> dict[str, Any]:
+    """Record plus a safe manual-resume hint (widgets only, no paths)."""
+    view = dict(record)
+    if record.get("action") != "next_scene":
+        return view
+    start = record.get("start_clip")
+    end = record.get("end_clip")
+    total = _handoff_scene_count(record.get("run_name", ""))
+    if not isinstance(start, int) or isinstance(start, bool) or start < 1:
+        return view
+    if total is None:
+        total = max(start + 1, int(end) if isinstance(end, int) else start + 1)
+    resolved_end = end if isinstance(end, int) and not isinstance(end, bool) else total
+    if resolved_end < total:
+        scene_range = str(start) if start == resolved_end \
+            else "%d:%d" % (start, resolved_end)
+    else:
+        scene_range = ""
+    view["resume"] = {
+        "start_clip": start,
+        "scene_range": scene_range,
+        "end_clip": resolved_end,
+        "total_scenes": total,
+    }
+    return view
+
+
+async def _list_handoffs(request):
+    run_name = _safe_name(request.query.get("run_name", ""), "")
+    if not run_name:
+        return web.json_response(
+            {"error": "run_name is required."}, status=400)
+    try:
+        records = await asyncio.to_thread(
+            _handoff_store().list, run_name)
+        views = [_handoff_record_view(record) for record in records]
+    except _HandoffError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response({"run_name": run_name, "handoffs": views})
+
+
+async def _claim_handoff(request):
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, TypeError):
+        return web.json_response(
+            {"error": "H3 handoff claim requires JSON."}, status=400)
+    run_name = _safe_name(str(body.get("run_name") or ""), "")
+    handoff_id = str(body.get("handoff_id") or "").strip()
+    source_prompt_id = str(body.get("source_prompt_id") or "").strip() or None
+    if not run_name or not handoff_id:
+        return web.json_response(
+            {"error": "run_name and handoff_id are required."}, status=400)
+    try:
+        record = await asyncio.to_thread(
+            _handoff_store().claim, run_name, handoff_id,
+            "top_level_requeue", source_prompt_id)
+    except _HandoffNotFoundError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    except _HandoffClaimError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+    except _HandoffError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response({"handoff": _handoff_record_view(record)})
+
+
+async def _transition_handoff(request):
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, TypeError):
+        return web.json_response(
+            {"error": "H3 handoff transition requires JSON."}, status=400)
+    run_name = _safe_name(str(body.get("run_name") or ""), "")
+    handoff_id = str(body.get("handoff_id") or "").strip()
+    status = str(body.get("status") or "").strip()
+    if status not in _HANDOFF_TRANSITION_STATUSES:
+        return web.json_response({
+            "error": "status must be one of %s." %
+                     (", ".join(_HANDOFF_TRANSITION_STATUSES),),
+        }, status=400)
+    if not run_name or not handoff_id:
+        return web.json_response(
+            {"error": "run_name and handoff_id are required."}, status=400)
+    try:
+        record = await asyncio.to_thread(
+            _handoff_store().transition, run_name, handoff_id, status)
+    except _HandoffNotFoundError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    except _IllegalHandoffTransitionError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+    except _HandoffError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response({"handoff": _handoff_record_view(record)})
+
+
+async def _release_handoff(request):
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, TypeError):
+        return web.json_response(
+            {"error": "H3 handoff release requires JSON."}, status=400)
+    run_name = _safe_name(str(body.get("run_name") or ""), "")
+    handoff_id = str(body.get("handoff_id") or "").strip()
+    reason = str(body.get("reason") or "").strip() or None
+    if not run_name or not handoff_id:
+        return web.json_response(
+            {"error": "run_name and handoff_id are required."}, status=400)
+    try:
+        record = await asyncio.to_thread(
+            _handoff_store().release, run_name, handoff_id, reason)
+    except _HandoffNotFoundError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+    except _IllegalHandoffTransitionError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+    except _HandoffError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response({"handoff": _handoff_record_view(record)})
+
+
 if (PromptServer is not None and web is not None and
         getattr(PromptServer, "instance", None) is not None):
     PromptServer.instance.routes.post(
@@ -28214,6 +28480,14 @@ if (PromptServer is not None and web is not None and
         "/minimax_h3_context_loop/reviews")(_list_pending_reviews)
     PromptServer.instance.routes.get(
         "/minimax_h3_context_loop/checkpoints")(_list_saved_checkpoints)
+    PromptServer.instance.routes.get(
+        "/minimax_h3_context_loop/handoffs")(_list_handoffs)
+    PromptServer.instance.routes.post(
+        "/minimax_h3_context_loop/handoffs/claim")(_claim_handoff)
+    PromptServer.instance.routes.post(
+        "/minimax_h3_context_loop/handoffs/transition")(_transition_handoff)
+    PromptServer.instance.routes.post(
+        "/minimax_h3_context_loop/handoffs/release")(_release_handoff)
     PromptServer.instance.routes.post(
         "/minimax_h3_context_loop/editorial")(_update_run_editorial)
     PromptServer.instance.routes.post(

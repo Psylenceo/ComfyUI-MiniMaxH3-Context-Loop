@@ -219,13 +219,18 @@ def _validate_record(record: Any, *, expect_format: str = HANDOFF_FORMAT_VERSION
                 "Handoff record %s must be an ISO-8601 string." % key)
     _validate_handoff_id(record.get("handoff_id"))
     _validate_run_name(record.get("run_name"))
-    for key in ("scene", "start_clip", "candidate_ordinal",
+    for key in ("scene", "start_clip", "end_clip", "candidate_ordinal",
                 "candidate_count", "seed"):
         value = record.get(key)
         if value is not None and (not isinstance(value, int)
                                   or isinstance(value, bool)):
             raise HandoffCorruptError(
                 "Handoff record field %r must be an integer or null." % key)
+    end_clip = record.get("end_clip")
+    if end_clip is not None and record.get("start_clip") is not None:
+        if end_clip < record["start_clip"]:
+            raise HandoffCorruptError(
+                "end_clip must not be below start_clip.")
     if record.get("candidate_ordinal") is not None:
         if record.get("candidate_count") is None:
             raise HandoffCorruptError(
@@ -446,6 +451,7 @@ class HandoffStore:
 
     def create(self, run_name: Any, *, action: str, scene: int | None = None,
                start_clip: int | None = None,
+               end_clip: int | None = None,
                candidate_batch_id: str | None = None,
                candidate_ordinal: int | None = None,
                candidate_count: int | None = None,
@@ -470,7 +476,7 @@ class HandoffStore:
         record_id = _validate_handoff_id(
             handoff_id or "h3-%s" % uuid.uuid4().hex)
         for key, value in {
-            "scene": scene, "start_clip": start_clip,
+            "scene": scene, "start_clip": start_clip, "end_clip": end_clip,
             "candidate_ordinal": candidate_ordinal,
             "candidate_count": candidate_count, "seed": seed,
         }.items():
@@ -478,6 +484,9 @@ class HandoffStore:
                                       or isinstance(value, bool)):
                 raise HandoffError("Handoff field %r must be an integer or "
                                    "null." % key)
+        if (end_clip is not None and start_clip is not None
+                and end_clip < start_clip):
+            raise HandoffError("end_clip must not be below start_clip.")
         if candidate_ordinal is not None:
             if candidate_count is None:
                 raise HandoffError("candidate_ordinal requires "
@@ -504,6 +513,7 @@ class HandoffStore:
             "status": "pending",
             "scene": scene,
             "start_clip": start_clip,
+            "end_clip": end_clip,
             "candidate_batch_id": candidate_batch_id,
             "candidate_ordinal": candidate_ordinal,
             "candidate_count": candidate_count,
@@ -562,7 +572,8 @@ class HandoffStore:
             (current, new_status, _validate_handoff_id(handoff_id)))
 
     def claim(self, run_name: Any, handoff_id: Any,
-              claimant: str | None = None) -> dict[str, Any]:
+              claimant: str | None = None,
+              source_prompt_id: str | None = None) -> dict[str, Any]:
         """Exactly-once claim: the first pending -> claimed wins.
 
         Claiming consumes one attempt (``attempt`` goes 0 -> 1 on the first
@@ -570,6 +581,11 @@ class HandoffStore:
         record raises ``HandoffClaimError`` and changes nothing.  A pending
         record whose budget is already exhausted is marked ``failed`` and
         the claim raises.
+
+        ``source_prompt_id`` (the top-level prompt that produced the
+        checkpoint this handoff resumes from) is written inside the same
+        locked record update as the status change, so it is first-writer-
+        wins with the claim itself and can never be stamped by a duplicate.
         """
         run = _validate_run_name(run_name)
         with _RunLock(self._lock_path(run)):
@@ -589,6 +605,8 @@ class HandoffStore:
                 record["updated_at"] = self._now()
                 if claimant:
                     record["claimant"] = str(claimant)
+                if source_prompt_id:
+                    record["source_prompt_id"] = str(source_prompt_id)
                 self._write_record(run, record)
                 return record
             if current in TERMINAL_HANDOFF_STATUSES:
