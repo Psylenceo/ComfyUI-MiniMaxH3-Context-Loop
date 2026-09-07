@@ -258,8 +258,11 @@ which remains authoritative. Snapshots are written when a review becomes
 pending, marked `decided` (with the decision action) when it resolves, and
 re-surfaced by the review list route with `durable: true` after a browser
 refresh or a ComfyUI crash/restart, so saved candidates stay reviewable
-without a live PromptExecutor. Tensor-like values are rejected on write, and
-the Plan JSON is never touched.
+without a live PromptExecutor. If that executor is lost, a recovered
+snapshot is **read-only recovery inventory** (`actionable: false`): it
+identifies saved candidates/checkpoints for manual resume, but cannot
+approve/retry through a vanished future. Tensor-like values are rejected on
+write, and the Plan JSON is never touched.
 
 ## Top-level scene requeue mode
 

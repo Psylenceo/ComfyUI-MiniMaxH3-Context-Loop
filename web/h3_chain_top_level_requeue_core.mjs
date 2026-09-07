@@ -53,10 +53,17 @@ export function matchingNextSceneHandoff(body, completed) {
     return pendingNextSceneHandoffs(body).find((item) =>
         Number(item.predecessor_scene) === Number(completed?.clipIndex)
         && Number(item.start_clip) === Number(completed?.clipIndex) + 1
+        && Number(item.end_clip) === Number(completed?.endClip)
         && String(item.workflow_fingerprint || "") ===
             String(completed?.workflowFingerprint || "")
-        && (!completed?.sourceRevision || item.source_revision === completed.sourceRevision)
-        && (!completed?.checkpointSha || item.source_checkpoint_sha256 === completed.checkpointSha)
+        // Missing identity is a hard failure, never a wildcard.  The
+        // checkpoint listing supplies these authoritative committed values.
+        && typeof completed?.sourceRevision === "string"
+        && completed.sourceRevision !== ""
+        && item.source_revision === completed.sourceRevision
+        && typeof completed?.checkpointSha === "string"
+        && completed.checkpointSha !== ""
+        && item.source_checkpoint_sha256 === completed.checkpointSha
     ) ?? null;
 }
 

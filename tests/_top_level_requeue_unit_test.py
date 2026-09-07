@@ -212,7 +212,12 @@ def requeue_mode(root):
     assert json.loads(records[0].read_text(encoding="utf-8"))["attempt"] == 0
 
     # A later rerender is new committed work, not a resurrection of the old
-    # terminal/claimed transition.  The old record remains durable history.
+    # terminal/claimed transition. Exercise the owner's consumed-history case.
+    old_id = json.loads(records[0].read_text())["handoff_id"]
+    store = chain._HandoffStore(root)
+    store.claim("requeue_run", old_id)
+    store.transition("requeue_run", old_id, "queued")
+    store.transition("requeue_run", old_id, "consumed")
     state3, images3, latent3, segment3 = make_inputs(plan)
     segment3["revision"] = "cd" * 16
     chain.MiniMaxH3ChainLoopEnd().end(
@@ -220,7 +225,18 @@ def requeue_mode(root):
         execution_mode="top_level_requeue")
     records = list((run_dir / "orchestration").glob("*.json"))
     assert len(records) == 2
-    assert len({json.loads(path.read_text())["transition_key"] for path in records}) == 2
+    by_revision = {json.loads(path.read_text())["source_revision"]:
+                   json.loads(path.read_text()) for path in records}
+    assert by_revision["ab" * 16]["status"] == "consumed"
+    assert by_revision["cd" * 16]["status"] == "pending"
+    assert by_revision["ab" * 16]["handoff_id"] != by_revision["cd" * 16]["handoff_id"]
+    assert len({item["transition_key"] for item in by_revision.values()}) == 2
+    # Exact retry of B remains idempotent.
+    state4, images4, latent4, segment4 = make_inputs(plan)
+    segment4["revision"] = "cd" * 16
+    chain.MiniMaxH3ChainLoopEnd().end(None, state4, images4, latent4, segment4,
+                                      execution_mode="top_level_requeue")
+    assert len(list((run_dir / "orchestration").glob("*.json"))) == 2
 
 
 def legacy_mode(root):

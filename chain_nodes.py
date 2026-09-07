@@ -28023,6 +28023,10 @@ def _saved_checkpoint_listing(
                     "ready": ready,
                     "raw_frames": int(segment.get("raw_frames", 0)),
                     "delivered_frames": int(segment.get("delivered_frames", 0)),
+                    # This is the exact immutable identity used by the
+                    # top-level handoff, not merely "a checkpoint exists".
+                    "metadata_sha256": _file_sha256(os.path.join(
+                        checkpoint_dir, filename)),
                 }
                 if os.path.isfile(segment_path):
                     item["video"] = _video_output_item(segment_path)

@@ -1,9 +1,9 @@
 """Durable review inventory for H3 Chain runs.
 
 Implements the M5 durability contract (REVIEW_GATE_DURABILITY_SPEC): a
-saved candidate batch must remain reviewable after a browser refresh and
-after a ComfyUI crash/restart, without depending on a live PromptExecutor
-or live IMAGE tensors.
+saved candidate batch must remain useful recovery inventory after a browser
+refresh and after a ComfyUI crash/restart, without depending on a live
+PromptExecutor or live IMAGE tensors.
 
 Design (HARD SCOPE: no Plan JSON involvement):
 
@@ -12,8 +12,8 @@ Design (HARD SCOPE: no Plan JSON involvement):
 - Two kinds of records are inventoried:
   1. Durable candidate-batch / handoff records
      (``h3_top_level_handoff_v1`` with action ``next_candidate`` /
-     ``await_review``) — written by the chain layer as each heavyweight
-     candidate ends a top-level prompt.
+     ``await_review``) — written by the chain layer while the live review
+     prompt is still active; candidate retries do not imply a top-level boundary.
   2. Review snapshots (``h3_review_snapshot_v1``) — a lightweight,
      atomic-written copy of the pending-review *identity* (token, run,
      scene, candidate revisions/seeds, deadline). Tensors and media are
@@ -22,12 +22,12 @@ Design (HARD SCOPE: no Plan JSON involvement):
      inventory.
 
 - Snapshots are written when a review becomes pending and are marked
-  ``decided`` when the review resolves (approve/stop/retry/reroll/
-  next_candidate/interrupt).  After a crash, the executor is gone but the
-  snapshot remains: the review route surfaces it with ``durable: true`` so
-  the browser can still list, preview (from saved media) and act on the
-  candidates.  A snapshot whose future no longer exists server-side is
-  explicitly *recoverable*, never silently dropped.
+  ``decided`` when the live review resolves (approve/stop/retry/reroll/
+  next_candidate/interrupt). After a crash, the executor future is gone;
+  the route surfaces the snapshot as ``durable: true`` and
+  ``actionable: false``. It is read-only recovery inventory: inspect saved
+  candidates/checkpoints and resume manually. It is never silently dropped
+  or presented as an actionable approval/retry.
 
 Lightweight-value guarantee: the same rejection rules as
 ``handoff_state._assert_lightweight_value`` apply — no tensors, models,

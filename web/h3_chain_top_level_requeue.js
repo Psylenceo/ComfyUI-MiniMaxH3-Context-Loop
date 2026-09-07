@@ -275,6 +275,9 @@ function onContinuationStart(detail) {
 }
 
 function onTerminalFailure(kind, detail) {
+    // An explicit ComfyUI interruption/error invalidates any pending automatic
+    // continuation before it can claim or submit stale work.
+    requeueEpoch += 1;
     const promptId = String(detail?.prompt_id ?? "");
     sceneRecords.delete(promptId);
     if (continuationWait && continuationWait.promptId === promptId) {
@@ -345,7 +348,7 @@ async function waitForSafeQueue(epoch) {
 }
 
 async function verifyPredecessorCheckpoint(runName, predecessor) {
-    if (predecessor < 1) return;
+    if (predecessor < 1) return null;
     const response = await api.fetchApi(
         `${HANDOFF_API_BASE}/checkpoints?run_name=${encodeURIComponent(runName)}`);
     const body = await safeJson(response);
@@ -354,11 +357,42 @@ async function verifyPredecessorCheckpoint(runName, predecessor) {
             `Cannot verify checkpoint ${predecessor} `
             + `(HTTP ${response.status}).`);
     }
-    if (!checkpointPredecessorReady(body?.checkpoints, predecessor)) {
+    const checkpoint = Array.isArray(body?.checkpoints)
+        ? body.checkpoints.find((item) => item?.ready === true
+            && Number(item.scene) === predecessor) : null;
+    if (!checkpointPredecessorReady(body?.checkpoints, predecessor)
+        || !checkpoint?.revision || !checkpoint?.metadata_sha256) {
         throw new Error(
-            `Checkpoint ${predecessor} is not ready; resume manually once `
-            + "the segment transaction has saved it.");
+            `Checkpoint ${predecessor} is not ready with committed identity; `
+            + "resume manually once the segment transaction has saved it.");
     }
+    return checkpoint;
+}
+
+// ComfyUI frontend 1.51.x app.queuePrompt resolves a boolean and deliberately
+// discards the server response.  Use its underlying public API when available
+// so the prompt_id that /prompt accepted is retained; retain the legacy wrapper
+// fallback only for older frontends which return an object.
+async function queuePromptWithIdentity() {
+    if (typeof app.graphToPrompt === "function"
+        && typeof api.queuePrompt === "function") {
+        const prompt = await app.graphToPrompt(app.graph);
+        const result = await api.queuePrompt(0, prompt);
+        const promptId = String(result?.prompt_id ?? "");
+        if (!promptId) {
+            // A response without prompt_id is a confirmed validation reject.
+            return {accepted: false, promptId: ""};
+        }
+        return {accepted: true, promptId};
+    }
+    const result = await app.queuePrompt(0, 1);
+    if (result === false) return {accepted: false, promptId: ""};
+    const promptId = typeof result === "object"
+        ? String(result.prompt_id ?? result.promptId ?? "") : "";
+    if (promptId) return {accepted: true, promptId};
+    // Boolean true from a frontend without the lower-level API cannot prove
+    // identity and is intentionally delivery-uncertain rather than duplicated.
+    return {accepted: null, promptId: ""};
 }
 
 async function postHandoffTransition(runName, handoffId, status, acceptedPromptId = null) {
@@ -407,6 +441,12 @@ async function processRequeue(record, epoch) {
             throw new Error(
                 `The handoff list is unavailable (HTTP ${listResponse.status}).`);
         }
+        // Resolve revision and digest from the active committed checkpoint;
+        // Current Shot intentionally carries no heavyweight checkpoint data.
+        const checkpoint = await verifyPredecessorCheckpoint(
+            runName, Number(record.clipIndex));
+        record.sourceRevision = String(checkpoint?.revision || "");
+        record.checkpointSha = String(checkpoint?.metadata_sha256 || "");
         const body = await listResponse.json();
         const handoff = matchingNextSceneHandoff(body, record);
         if (!handoff) {
@@ -420,8 +460,7 @@ async function processRequeue(record, epoch) {
             throw new Error(
                 "The handoff has no resume hint; resume the scene manually.");
         }
-        await verifyPredecessorCheckpoint(
-            runName, predecessorScene(resume));
+        // The strict match above already bound the same predecessor identity.
         requireCurrentOperation(epoch);
         const claimResponse = await api.fetchApi(
             `${HANDOFF_API_BASE}/handoffs/claim`, {
@@ -461,18 +500,24 @@ async function processRequeue(record, epoch) {
             showTransient(
                 `Queueing scene ${resume.startClip} as a new top-level prompt…`);
             requireCurrentOperation(epoch);
-            const accepted = await app.queuePrompt(0, 1);
-            // ComfyUI explicitly resolves false for validation rejection.
-            if (accepted === false) throw new Error("ComfyUI rejected the prompt validation.");
-            const acceptedPromptId = typeof accepted === "object"
-                ? String(accepted.prompt_id ?? accepted.promptId ?? "") : "";
-            if (!acceptedPromptId) {
-                // Transport ambiguity is not retryable: release could create
-                // a duplicate if the server accepted before disconnect.
+            let submission;
+            try {
+                submission = await queuePromptWithIdentity();
+            } catch (error) {
+                // A transport exception may be after server acceptance.
+                await postHandoffTransition(runName, handoff.handoff_id, "uncertain");
+                queued = true;
+                throw error;
+            }
+            if (submission.accepted === false) {
+                throw new Error("ComfyUI rejected the prompt validation.");
+            }
+            if (submission.accepted !== true || !submission.promptId) {
                 await postHandoffTransition(runName, handoff.handoff_id, "uncertain");
                 queued = true;
                 throw new Error("Queue delivery is uncertain; recover this handoff manually.");
             }
+            const acceptedPromptId = submission.promptId;
             queued = true;
             continuationWait = {
                 runName,

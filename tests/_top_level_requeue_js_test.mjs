@@ -94,16 +94,36 @@ assert.deepEqual(
 assert.deepEqual(pendingNextSceneHandoffs({handoffs: "nope"}), []);
 assert.deepEqual(pendingNextSceneHandoffs(null), []);
 assert.deepEqual(pendingNextSceneHandoffs({}), []);
+const committed = {clipIndex: 1, endClip: 3, workflowFingerprint: "wf",
+    sourceRevision: "revision-a", checkpointSha: "checkpoint-a"};
 const matching = matchingNextSceneHandoff({handoffs: [
-    {...handoffList.handoffs[0], predecessor_scene: 1, workflow_fingerprint: "wf"},
+    {...handoffList.handoffs[0], predecessor_scene: 1, end_clip: 3,
+        workflow_fingerprint: "wf", source_revision: "revision-a",
+        source_checkpoint_sha256: "checkpoint-a"},
     {handoff_id: "stale", action: "next_scene", status: "pending", start_clip: 2,
-        predecessor_scene: 1, workflow_fingerprint: "old"},
-]}, {clipIndex: 1, workflowFingerprint: "wf"});
+        predecessor_scene: 1, end_clip: 3, workflow_fingerprint: "old",
+        source_revision: "revision-a", source_checkpoint_sha256: "checkpoint-a"},
+]}, committed);
 assert.equal(matching.handoff_id, "next_scene_0002");
 assert.equal(matchingNextSceneHandoff({handoffs: [
     {handoff_id: "old", action: "next_scene", status: "pending", start_clip: 2,
         predecessor_scene: 1, workflow_fingerprint: "old"},
-]}, {clipIndex: 1, workflowFingerprint: "wf"}), null);
+]}, committed), null);
+for (const change of [
+    {source_revision: "wrong"}, {source_checkpoint_sha256: "wrong"},
+    {workflow_fingerprint: "wrong"}, {end_clip: 4},
+]) {
+    assert.equal(matchingNextSceneHandoff({handoffs: [{
+        handoff_id: "wrong", action: "next_scene", status: "pending",
+        start_clip: 2, predecessor_scene: 1, end_clip: 3,
+        workflow_fingerprint: "wf", source_revision: "revision-a",
+        source_checkpoint_sha256: "checkpoint-a", ...change,
+    }]}, committed), null);
+}
+assert.equal(matchingNextSceneHandoff({handoffs: [
+    {handoff_id: "missing", action: "next_scene", status: "pending", start_clip: 2,
+        predecessor_scene: 1, end_clip: 3, workflow_fingerprint: "wf"},
+]}, committed), null, "missing durable identity is never wildcard-matched");
 
 assert.deepEqual(resumeHint(handoffList.handoffs[0]), {
     startClip: 2,
