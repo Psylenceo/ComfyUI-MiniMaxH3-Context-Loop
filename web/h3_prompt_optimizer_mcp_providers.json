@@ -55,6 +55,11 @@
     "note": "Forwarded to comfyui-mcp; that bridge validates installation and authentication live."
   },
   {
+    "value": "unsloth_studio",
+    "label": "Unsloth Studio",
+    "note": "Forwarded to comfyui-mcp; that bridge validates installation and authentication live."
+  },
+  {
     "value": "llamacpp",
     "label": "llama.cpp",
     "note": "Forwarded to comfyui-mcp; that bridge validates installation and authentication live."
