@@ -112,6 +112,7 @@ def main():
                 ("pending", "cancelled"),
                 ("claimed", "queued"),
                 ("claimed", "consumed"),
+                ("claimed", "uncertain"),
                 ("queued", "failed")):
             hop = store.create("film_run", action="next_scene",
                                handoff_id="hop-%s" % target)
@@ -136,6 +137,9 @@ def main():
             elif source == "failed":
                 store.claim(run, hid)
                 store.release(run, hid)
+            elif source == "uncertain":
+                store.claim(run, hid)
+                store.transition(run, hid, "uncertain")
             assert store.load(run, hid)["status"] == source
 
         for source, target in (
@@ -146,7 +150,9 @@ def main():
                 ("consumed", "pending"),
                 ("consumed", "failed"),
                 ("cancelled", "pending"),
-                ("failed", "pending")):
+                ("failed", "pending"),
+                ("uncertain", "pending"),
+                ("uncertain", "queued")):
             hop = store.create("film_run", action="next_scene",
                                handoff_id="bad-%s-%s" % (source, target),
                                max_attempts=1)
@@ -323,7 +329,7 @@ def main():
             assert entry["attempt"] <= entry["max_attempts"]
             assert entry["status"] in (
                 "pending", "claimed", "queued", "consumed",
-                "cancelled", "failed")
+                "cancelled", "failed", "uncertain")
 
     # --- M3 additive: end_clip + claim-time source_prompt_id ----------------
     range_record = store.create(
