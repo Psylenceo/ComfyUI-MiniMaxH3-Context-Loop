@@ -180,7 +180,7 @@ function injectStyles() {
       .h3rp-toolbar .h3rp-guide { min-width:150px; }
       .h3rp-toolbar-spacer { flex:1; }
       .h3rp-status { min-width:0; color:var(--h3rp-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      .h3rp-status-error { color:#ffaaaa; }
+      .h3rp-status-error { color:#ffaaaa; white-space:normal; overflow:visible; text-overflow:clip; }
       .h3rp-status-success { color:#9bdab0; }
       .h3rp-spinner .h3rp-icon { animation:h3rp-spin .9s linear infinite; }
       @keyframes h3rp-spin { to { transform:rotate(360deg); } }
@@ -1645,8 +1645,13 @@ function mount(node) {
         const applyPending = root.querySelector(".h3rp-apply-pending");
         if (applyPending) applyPending.hidden = !state.optimizer.pendingResult;
         if (state.optimizerStatus) {
+            const text = state.optimizer.error || state.optimizer.message || (busy ? "Optimizing…" : "");
             state.optimizerStatus.className = `h3rp-status${state.optimizer.error ? " h3rp-status-error" : state.optimizer.message ? " h3rp-status-success" : ""}`;
-            state.optimizerStatus.textContent = state.optimizer.error || state.optimizer.message || (busy ? "Optimizing…" : "");
+            state.optimizerStatus.textContent = text;
+            // Errors carry actionable detail (setting names, exact origins) that a
+            // single truncated line hides; keep the full text reachable on hover
+            // even though h3rp-status-error already wraps instead of ellipsizing.
+            state.optimizerStatus.title = text;
         }
     }
 
