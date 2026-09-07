@@ -34,6 +34,17 @@ export async function runRequeueLifecycle({current, waitSafe, cleanup, claim, su
     }
 }
 
+// Identity selection is kept in the coordinator boundary so callers cannot
+// accidentally fall back to list order. `match` is the shared strict matcher.
+export async function selectAndClaim({record, handoffs, match, resolveRun, claim}) {
+    const runName = resolveRun(record);
+    if (!runName || runName !== record.runName) return null;
+    const handoff = match(handoffs, record);
+    if (!handoff) return null;
+    await claim(runName, handoff.handoff_id);
+    return handoff;
+}
+
 export function submissionFailure(error) {
     return Number(error?.status) >= 400 && Number(error?.status) < 500
         ? "rejected" : "uncertain";
