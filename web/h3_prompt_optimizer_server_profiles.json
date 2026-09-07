@@ -1,0 +1,56 @@
+[
+  {
+    "value": "custom",
+    "label": "Custom / manual",
+    "api_format": null,
+    "default_url": "",
+    "model_list_path": "",
+    "unload_supported": false,
+    "notes": "No auto-fill. Set Direct API format and Direct API URL yourself."
+  },
+  {
+    "value": "ollama",
+    "label": "Ollama",
+    "api_format": "openai",
+    "default_url": "http://127.0.0.1:11434",
+    "model_list_path": "/v1/models",
+    "unload_supported": true,
+    "notes": "Exposes an OpenAI-compatible /v1/chat/completions shim over its native API. No /v1/responses support."
+  },
+  {
+    "value": "lmstudio",
+    "label": "LM Studio",
+    "api_format": "openai",
+    "default_url": "http://127.0.0.1:1234",
+    "model_list_path": "/v1/models",
+    "unload_supported": true,
+    "notes": "OpenAI-compatible /v1/chat/completions only. No /v1/responses support."
+  },
+  {
+    "value": "llamacpp",
+    "label": "llama.cpp server",
+    "api_format": "openai",
+    "default_url": "http://127.0.0.1:8080",
+    "model_list_path": "/v1/models",
+    "unload_supported": false,
+    "notes": "OpenAI-compatible /v1/chat/completions and /v1/completions. No /v1/responses and no documented model-unload endpoint."
+  },
+  {
+    "value": "vllm",
+    "label": "vLLM",
+    "api_format": "openai",
+    "default_url": "http://127.0.0.1:8000",
+    "model_list_path": "/v1/models",
+    "unload_supported": false,
+    "notes": "Newer vLLM releases also expose /v1/responses, but /v1/chat/completions is kept as the safer default here since Responses support varies by version."
+  },
+  {
+    "value": "unsloth_studio",
+    "label": "Unsloth Studio",
+    "api_format": "openai",
+    "default_url": "",
+    "model_list_path": "/v1/models",
+    "unload_supported": true,
+    "notes": "Also exposes /v1/responses and an Anthropic-style /v1/messages endpoint (that format isn't implemented by this pack yet). Requires an Authorization: Bearer API key on every call. No fixed default port confirmed, so its URL isn't auto-filled -- check your own Unsloth Studio configuration."
+  }
+]

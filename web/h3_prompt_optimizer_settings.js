@@ -7,6 +7,7 @@ import {
 export const PROMPT_OPTIMIZER_SETTING_IDS = Object.freeze({
     backend: "MiniMaxH3ContexLoop.PromptOptimizer.Backend",
     mcpProvider: "MiniMaxH3ContexLoop.PromptOptimizer.McpProvider",
+    serverProfile: "MiniMaxH3ContexLoop.PromptOptimizer.ServerProfile",
     apiFormat: "MiniMaxH3ContexLoop.PromptOptimizer.ApiFormat",
     apiUrl: "MiniMaxH3ContexLoop.PromptOptimizer.ApiUrl",
     apiKey: "MiniMaxH3ContexLoop.PromptOptimizer.ApiKey",
@@ -59,6 +60,7 @@ const CATEGORY_ROOT = ["MiniMax H3 Context Loop", "Prompt optimizer"];
 
 const API_FORMATS_JSON_PATH = "h3_prompt_optimizer_api_formats.json";
 const MCP_PROVIDERS_JSON_PATH = "h3_prompt_optimizer_mcp_providers.json";
+const SERVER_PROFILES_JSON_PATH = "h3_prompt_optimizer_server_profiles.json";
 
 // Kept only as a last resort if the JSON file can't be fetched (moved file,
 // read-only install, etc.) so the settings still register with something.
@@ -80,6 +82,10 @@ const FALLBACK_MCP_PROVIDERS = [
     "codex", "claude", "gemini", "hermes", "kimi", "moonshot", "glm",
     "minimax", "ollama", "openrouter", "lmstudio", "llamacpp", "custom",
 ].map((value) => ({value, label: value}));
+const FALLBACK_SERVER_PROFILES = [
+    {value: "custom", label: "Custom / manual", api_format: null,
+        default_url: "", notes: "No auto-fill. Set Direct API format and Direct API URL yourself."},
+];
 
 async function loadJson(filename, fallback) {
     try {
@@ -114,12 +120,32 @@ function mcpProviderTooltip(entries) {
         "edit that file to add or adjust entries.";
 }
 
+function serverProfileTooltip(entries) {
+    const bullets = entries
+        .filter((entry) => entry.value !== "custom")
+        .map((entry) => `• ${entry.label} (${entry.api_format ?? "manual"}` +
+            `${entry.default_url ? `, default ${entry.default_url}` : ""}) — ${entry.notes}`);
+    return "Picks the right Direct API format (and, where confidently known, a " +
+        "default Direct API URL) for a known local server. Does not overwrite an " +
+        "already-filled Direct API URL. Purely a convenience preset — you can still " +
+        "set Direct API format/URL by hand instead. This does NOT bypass the " +
+        "server's origin allow-list: OpenAI, Gemini, and OpenRouter are permitted " +
+        "by default, so a local server still needs its exact origin added via " +
+        "H3_PROMPT_OPTIMIZER_ALLOWED_ORIGINS before starting ComfyUI, or the call " +
+        "will fail with \"Direct API origin ... is not allowed by this server\" " +
+        "regardless of this setting.\n\n" +
+        bullets.join("\n\n") +
+        `\n\nDefined in web/${SERVER_PROFILES_JSON_PATH} inside this node pack's folder — ` +
+        "edit that file to add or adjust entries.";
+}
+
 app.registerExtension({
     name: "minimax_h3_context_loop.prompt_optimizer_settings",
     async init() {
-        const [apiFormats, mcpProviders] = await Promise.all([
+        const [apiFormats, mcpProviders, serverProfiles] = await Promise.all([
             loadJson(API_FORMATS_JSON_PATH, FALLBACK_API_FORMATS),
             loadJson(MCP_PROVIDERS_JSON_PATH, FALLBACK_MCP_PROVIDERS),
+            loadJson(SERVER_PROFILES_JSON_PATH, FALLBACK_SERVER_PROFILES),
         ]);
         // Every setting needs its own distinct third category segment. The
         // settings panel's default (unsearched) view renders one row per
@@ -192,6 +218,27 @@ app.registerExtension({
             type: "combo",
             defaultValue: "openai",
             options: apiFormats.map((entry) => ({text: entry.label, value: entry.value})),
+        });
+        add("Local server preset", {
+            id: PROMPT_OPTIMIZER_SETTING_IDS.serverProfile,
+            name: "Local server preset",
+            tooltip: serverProfileTooltip(serverProfiles),
+            type: "combo",
+            defaultValue: "custom",
+            options: serverProfiles.map((entry) => ({text: entry.label, value: entry.value})),
+            onChange(value) {
+                const profile = serverProfiles.find((entry) => entry.value === value);
+                if (!profile || profile.value === "custom") return;
+                if (profile.api_format) {
+                    app.ui?.settings?.setSettingValue?.(
+                        PROMPT_OPTIMIZER_SETTING_IDS.apiFormat, profile.api_format);
+                }
+                const currentUrl = String(settingValue(PROMPT_OPTIMIZER_SETTING_IDS.apiUrl, "") ?? "").trim();
+                if (profile.default_url && !currentUrl) {
+                    app.ui?.settings?.setSettingValue?.(
+                        PROMPT_OPTIMIZER_SETTING_IDS.apiUrl, profile.default_url);
+                }
+            },
         });
         add("Backend", {
             id: PROMPT_OPTIMIZER_SETTING_IDS.backend,
