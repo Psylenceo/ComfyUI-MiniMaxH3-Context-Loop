@@ -377,6 +377,8 @@ assert.match(submitSource, /reviewPromptEditorEnabled\(\)/);
 assert.match(submitSource, /planScenePrompt/);
 assert.match(submitSource, /token: submittedToken/);
 assert.match(submitSource, /scene_prompt: submittedPrompt/);
+assert.doesNotMatch(submitSource, /processRequeue\(/,
+    "Review approval must not bypass Loop End; top-level requeue is driven by the Loop End terminal coordinator");
 assert.match(
     submitSource,
     /updatePlan\(\s*node, submittedIndex, acceptedPrompt, body\.seed, body\.length\)/,

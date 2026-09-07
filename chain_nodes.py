@@ -26068,11 +26068,13 @@ async def _submit_review_decision(request):
             return web.json_response({"error": str(exc)}, status=400)
     elif action in ("approve", "stop"):
         candidates = pending.get("candidates")
-        if (isinstance(candidates, list) and candidates
-                and (len(candidates) > 1 or body.get("candidate_revision"))):
-            requested_revision = str(
-                body.get("candidate_revision") or
-                candidates[-1].get("segment", {}).get("revision") or "")
+        if isinstance(candidates, list) and candidates:
+            requested_revision = str(body.get("candidate_revision") or "")
+            if not requested_revision:
+                requested_candidate = secrets.choice(candidates)
+                requested_revision = str(
+                    requested_candidate.get("segment", {}).get("revision")
+                    or requested_candidate.get("revision") or "")
             selected_number = 0
             for number, candidate in enumerate(candidates, start=1):
                 segment = candidate.get("segment") if isinstance(

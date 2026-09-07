@@ -262,7 +262,7 @@ function onExecutionSuccess(detail) {
     }
     if (!record) return;
     sceneRecords.delete(promptId);
-    if (record.loopEndExecuted && settingEnabled()) {
+    if (record.runName && Number(record.clipIndex) < Number(record.endClip || record.clipCount)) {
         enqueueRequeue(record);
     }
 }
@@ -499,8 +499,8 @@ async function checkPendingHandoffs() {
                 `Pending H3 handoff for run "${runName}": scene `
                 + `${resume?.startClip ?? "?"} is resumable. Set Loop Start to `
                 + `scene ${resume?.startClip ?? "?"} and queue manually, or `
-                + "enable top-level auto requeue to let it claim after a `
-                + "terminal success. Nothing auto-runs on startup.",
+                + "enable top-level auto requeue to let it claim after "
+                + "a terminal success. Nothing auto-runs on startup.",
                 true,
             );
         }
