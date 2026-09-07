@@ -238,6 +238,29 @@ def requeue_mode(root):
                                       execution_mode="top_level_requeue")
     assert len(list((run_dir / "orchestration").glob("*.json"))) == 2
 
+    # Terminal/non-pending history never blocks a new committed transition.
+    for status in ("queued", "consumed", "cancelled", "failed"):
+        run = "matrix_%s" % status
+        matrix = chain._HandoffStore(root)
+        a = matrix.create(run, action="next_scene", scene=2, start_clip=2,
+                          end_clip=2, source_revision="rev-a",
+                          workflow_fingerprint="wf-a", transition_key="key-a")
+        if status == "cancelled":
+            matrix.transition(run, a["handoff_id"], "cancelled")
+        else:
+            matrix.claim(run, a["handoff_id"])
+            if status == "failed":
+                matrix.transition(run, a["handoff_id"], "failed")
+            else:
+                matrix.transition(run, a["handoff_id"], "queued")
+                if status == "consumed": matrix.transition(run, a["handoff_id"], "consumed")
+        b = matrix.create(run, action="next_scene", scene=2, start_clip=2,
+                          end_clip=3, source_revision="rev-b",
+                          workflow_fingerprint="wf-b", transition_key="key-b")
+        assert matrix.load(run, a["handoff_id"])["status"] == status
+        assert b["status"] == "pending" and b["handoff_id"] != a["handoff_id"]
+        assert b["transition_key"] != a["transition_key"]
+
 
 def legacy_mode(root):
     """Default mode keeps the recursive GraphBuilder expansion."""
