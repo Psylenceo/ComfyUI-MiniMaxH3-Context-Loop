@@ -387,7 +387,7 @@ async function processRequeue(record, epoch) {
             throw new Error("The active H3 run_name is empty.");
         }
         showTransient("Waiting for a safe queue state…");
-        await runRequeueLifecycle({
+        const lifecycle = await runRequeueLifecycle({
             current: () => requireCurrentOperation(epoch),
             waitSafe: () => waitForSafeQueue(epoch),
             cleanup: async () => {
@@ -395,84 +395,26 @@ async function processRequeue(record, epoch) {
                 const remaining = delay - (Date.now() - startedAt);
                 if (remaining > 0) await sleep(remaining);
             },
-            select: async () => true,
-            claim: async () => true,
-            prepare: async () => {},
-            submit: async () => ({kind: "accepted"}),
-            release: async () => {},
-            uncertain: async () => {},
+            resolveRun: async () => ({...record, ...requireVisibleWorkflow(record)}),
+            loadCheckpoint: (runName, context) => verifyPredecessorCheckpoint(runName, Number(context.clipIndex)),
+            listHandoffs: async runName => { const response = await api.fetchApi(`${HANDOFF_API_BASE}/handoffs?run_name=${encodeURIComponent(runName)}`); if (!response.ok) throw new Error(`The handoff list is unavailable (HTTP ${response.status}).`); return response.json(); },
+            matchHandoff: matchingNextSceneHandoff,
+            claimHandoff: async (runName, handoff) => { const response = await api.fetchApi(`${HANDOFF_API_BASE}/handoffs/claim`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({run_name:runName,handoff_id:handoff.handoff_id,source_prompt_id:record.promptId})}); if (response.status === 409) throw new Error("The handoff was already claimed; nothing was queued."); if (!response.ok) throw new Error(`Claiming the handoff failed (HTTP ${response.status}).`); },
+            prepareResume: async (_runName, handoff, context) => { const resume = resumeHint(handoff); const startWidget = widgetByName(context.startNode, "start_clip"); const rangeWidget = widgetByName(context.startNode, "scene_range"); if (!resume || !startWidget) throw new Error("The handoff has no resume hint or Loop Start widget."); startWidget.value = resume.startClip; startWidget.callback?.(resume.startClip); if (rangeWidget) { rangeWidget.value = resume.sceneRange; rangeWidget.callback?.(resume.sceneRange); } context.startNode.graph?.setDirtyCanvas?.(true, true); showTransient(`Queueing scene ${resume.startClip} as a new top-level prompt…`); },
+            submit: () => queuePromptWithIdentity(),
         });
-        requireCurrentOperation(epoch);
-        showTransient("Checking the workflow and predecessor checkpoint…");
-        const {startNode, runName} = requireVisibleWorkflow(record);
-        const listResponse = await api.fetchApi(
-            `${HANDOFF_API_BASE}/handoffs?run_name=${encodeURIComponent(runName)}`);
-        if (!listResponse.ok) {
-            throw new Error(
-                `The handoff list is unavailable (HTTP ${listResponse.status}).`);
-        }
-        // Resolve revision and digest from the active committed checkpoint;
-        // Current Shot intentionally carries no heavyweight checkpoint data.
-        const checkpoint = await verifyPredecessorCheckpoint(
-            runName, Number(record.clipIndex));
-        record.sourceRevision = String(checkpoint?.revision || "");
-        record.checkpointSha = String(checkpoint?.metadata_sha256 || "");
-        const body = await listResponse.json();
-        const handoff = matchingNextSceneHandoff(body, record);
-        if (!handoff) {
-            // Legacy recursion already handled this scene (or another client
-            // already did). The backend is the source of truth: nothing to do.
-            clearNotifications();
-            return;
-        }
+        if (!lifecycle) { clearNotifications(); return; }
+        const {runName, handoff, context, submission: lifecycleSubmission, submissionError} = lifecycle;
+        const startNode = context.startNode;
         const resume = resumeHint(handoff);
-        if (!resume) {
-            throw new Error(
-                "The handoff has no resume hint; resume the scene manually.");
-        }
-        // The strict match above already bound the same predecessor identity.
-        requireCurrentOperation(epoch);
-        const claimResponse = await api.fetchApi(
-            `${HANDOFF_API_BASE}/handoffs/claim`, {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({
-                    run_name: runName,
-                    handoff_id: handoff.handoff_id,
-                    source_prompt_id: record.promptId,
-                }),
-            });
-        if (claimResponse.status === 409) {
-            showWarning("The handoff was already claimed; nothing was queued.");
-            return;
-        }
-        if (!claimResponse.ok) {
-            const errorBody = await safeJson(claimResponse);
-            throw new Error(errorBody?.error
-                || `Claiming the handoff failed (HTTP ${claimResponse.status}).`);
-        }
+        if (!resume) throw new Error("The handoff has no resume hint; resume the scene manually.");
         let queued = false;
         try {
             requireCurrentOperation(epoch);
-            const startWidget = widgetByName(startNode, "start_clip");
-            const rangeWidget = widgetByName(startNode, "scene_range");
-            if (!startWidget) {
-                throw new Error(
-                    "Loop Start is missing its start_clip widget.");
-            }
-            startWidget.value = resume.startClip;
-            startWidget.callback?.(resume.startClip);
-            if (rangeWidget) {
-                rangeWidget.value = resume.sceneRange;
-                rangeWidget.callback?.(resume.sceneRange);
-            }
-            startNode.graph?.setDirtyCanvas?.(true, true);
-            showTransient(
-                `Queueing scene ${resume.startClip} as a new top-level prompt…`);
-            requireCurrentOperation(epoch);
             let submission;
             try {
-                submission = await queuePromptWithIdentity();
+                if (submissionError) throw submissionError;
+                submission = lifecycleSubmission;
             } catch (error) {
                 // Prompt validation errors are confirmed pre-delivery rejects;
                 // transport failures may instead be after server acceptance.

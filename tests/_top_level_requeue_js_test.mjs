@@ -225,11 +225,12 @@ assert.match(source, /checkpoints\?run_name=/);
 assert.match(source, /Checkpoint \$\{predecessor\} is not ready/);
 // Claim exactly once; duplicate terminal events queue nothing.
 assert.match(source, /handoffs\/claim/);
-assert.match(source, /claimResponse\.status === 409/);
+assert.match(source, /response\.status === 409/);
 assert.match(source, /The handoff was already claimed; nothing was queued/);
 // Existing Loop Start widgets only; the Plan JSON is never rewritten here.
-assert.match(source, /widgetByName\(startNode, "start_clip"\)/);
-assert.match(source, /widgetByName\(startNode, "scene_range"\)/);
+assert.match(source, /prepareResume: async/);
+assert.match(source, /widgetByName\(context\.startNode, "start_clip"\)/);
+assert.match(source, /widgetByName\(context\.startNode, "scene_range"\)/);
 assert.match(source, /startWidget\.callback\?\.\(resume\.startClip\)/);
 assert.doesNotMatch(source, /plan_json/);
 // Same workflow queued as a NEW top-level prompt.

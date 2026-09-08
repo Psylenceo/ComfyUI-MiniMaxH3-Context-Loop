@@ -37,8 +37,23 @@ export async function submitWithPromptIdentity({app, api}) {
 
 // Shared async cancellation boundary.  Browser wiring supplies the concrete
 // queue/checkpoint/workflow adapters; Node tests use deterministic fakes.
-export async function runRequeueLifecycle({current, waitSafe, cleanup, select, claim, prepare, submit, release, uncertain}) {
+export async function runRequeueLifecycle({current, waitSafe, cleanup, resolveRun, loadCheckpoint, listHandoffs, matchHandoff, claimHandoff, prepareResume, select, claim, prepare, submit, release, uncertain}) {
     current(); await waitSafe(); current(); await cleanup(); current();
+    if (resolveRun) {
+        const context = await resolveRun();
+        const runName = context?.runName;
+        if (!runName) return null;
+        const checkpoint = await loadCheckpoint(runName, context);
+        const handoff = matchHandoff(await listHandoffs(runName), {...context, sourceRevision:String(checkpoint?.revision || ""), checkpointSha:String(checkpoint?.metadata_sha256 || "")});
+        if (!handoff) return null;
+        current(); await claimHandoff(runName, handoff, context); current();
+        await prepareResume?.(runName, handoff, context); current();
+        if (submit) {
+            try { return {runName, handoff, checkpoint, context, submission: await submit(runName, handoff, context)}; }
+            catch (submissionError) { return {runName, handoff, checkpoint, context, submissionError}; }
+        }
+        return {runName, handoff, checkpoint, context};
+    }
     const handoff = await select();
     if (!handoff) return null;
     await claim(handoff);
