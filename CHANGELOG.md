@@ -3,6 +3,22 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
+## v0.6.7 — Automatic PNG sequence variants
+
+- VIDEO PNG export now creates numbered sibling folders (`_2`, `_3`, etc.)
+  when rendered pixels, source branches, settings, or existing files conflict.
+  Disabling reuse also starts a fresh sequence without overwriting prior PNGs.
+- Persist the selected destination per upscale pass so recursive scenes and
+  retries stay in the same variant. After restart, the newest exporter-created
+  variant can be reused or resumed when its saved content matches.
+- A changed render midway through a verified sequence copies earlier scenes
+  into the new variant with bounded memory and continuous numbering. Copies
+  are independent files, so edits to older exports cannot alter the new one.
+- Preserve edited/missing prefixes and untracked files without adopting them.
+  Invalid journals, unsafe paths, and filesystem failures still fail safely.
+- Added seven-scene rerender, forced-fresh, prefix-copy interruption, numbered
+  destination binding, and real process-exit recovery regressions.
+
 ## v0.6.6 — Review Gate frame capture and prompt resizing
 
 - Promoted the tested Review Gate frame-capture feature from nightly: scrub a

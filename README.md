@@ -15,6 +15,13 @@ result later—without keeping the whole production in memory.
 
 ## Changelog
 
+### 0.6.7 — Automatic PNG sequence variants
+
+- Conflicting VIDEO PNG exports automatically use `_2`, `_3`, etc. folders,
+  preserving earlier exports and keeping subsequent scenes in one variant.
+- Copy verified earlier scenes safely when a rerender changes mid-sequence;
+  retain bounded memory and interrupted-publication recovery.
+
 ### 0.6.6 — Review Gate capture and resizing
 
 - Capture a still from a saved Review Gate preview into the Project Asset
