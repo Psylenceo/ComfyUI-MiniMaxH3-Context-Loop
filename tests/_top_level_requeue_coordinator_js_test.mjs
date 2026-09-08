@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import {runRequeueLifecycle, selectAndClaim, authoritativeRunName, createContinuationTracker, deliverClaimed, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
+import {runRequeueLifecycle, selectAndClaim, authoritativeRunName, createContinuationTracker, deliverClaimed, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
 import {matchingNextSceneHandoff} from "../web/h3_chain_top_level_requeue_core.mjs";
 
 function gate() { let resolve; return {promise: new Promise(r => { resolve = r; }), resolve}; }
@@ -116,4 +116,7 @@ assert.deepEqual(uncertainFlow,[["list","actual-run"],["claim","actual-run",exac
 let cancelled=false; const cancelCalls=[];
 const cancelledResult=await runRequeueLifecycle({current:()=>{if(cancelled)throw Error("cancelled")},waitSafe:async()=>{},cleanup:async()=>{},resolveRun:async()=>({...record,runName:"run-a"}),loadCheckpoint:async()=>({revision:record.sourceRevision,metadata_sha256:record.checkpointSha}),listHandoffs:async()=>({handoffs:[exact]}),matchHandoff:matchingNextSceneHandoff,claimHandoff:async (run,id)=>{cancelCalls.push(["claim",run,id.handoff_id]);cancelled=true},release:async (handoff,run)=>cancelCalls.push(["release",run,handoff.handoff_id]),prepareResume:async()=>cancelCalls.push(["prepare"]),submit:async()=>cancelCalls.push(["submit"])});
 assert.equal(cancelledResult.kind,"cancelled");assert.deepEqual(cancelCalls,[["claim","run-a",exact.handoff_id],["release","run-a",exact.handoff_id]]);
+for (const [outcome,kind] of [[{prompt_id:"prompt-123"},"accepted"],[false,"rejected"],[true,"uncertain"]]) { const c=[]; assert.equal((await classifySubmissionOutcome({outcome,accepted:async()=>c.push("a"),rejected:async()=>c.push("r"),uncertain:async()=>c.push("u")})).kind,kind); assert.equal(c.length,1); }
+let c=[]; assert.equal((await classifySubmissionOutcome({error:Object.assign(Error(),{status:400}),accepted:async()=>c.push("a"),rejected:async()=>c.push("r"),uncertain:async()=>c.push("u")})).kind,"rejected");
+c=[]; assert.equal((await classifySubmissionOutcome({error:Error("network"),accepted:async()=>c.push("a"),rejected:async()=>c.push("r"),uncertain:async()=>c.push("u")})).kind,"uncertain");
 console.log("top-level requeue coordinator lifecycle: ok");

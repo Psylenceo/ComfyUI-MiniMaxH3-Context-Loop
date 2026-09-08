@@ -1,3 +1,14 @@
+export async function classifySubmissionOutcome({outcome, error, accepted, rejected, uncertain}) {
+    if (error) {
+        if (submissionFailure(error) === "rejected") { await rejected(); return {kind:"rejected"}; }
+        await uncertain(); return {kind:"uncertain"};
+    }
+    const promptId = String(outcome?.promptId ?? outcome?.prompt_id ?? "").trim();
+    if (outcome?.accepted === true && promptId || promptId) { await accepted(promptId); return {kind:"accepted", promptId}; }
+    if (outcome === false || outcome?.accepted === false || outcome?.kind === "rejected") { await rejected(); return {kind:"rejected"}; }
+    await uncertain(); return {kind:"uncertain"};
+}
+
 export async function handleUncertainSubmission({runName, handoffId, markUncertain}) {
     if (!String(runName ?? "").trim() || !String(handoffId ?? "").trim()) throw new Error("Uncertain delivery requires run and handoff identity.");
     await markUncertain(runName, handoffId, "uncertain");

@@ -238,7 +238,7 @@ assert.doesNotMatch(source, /plan_json/);
 assert.match(source, /handoffs\/transition/);
 assert.match(source, /finalizeAcceptedSubmission/);
 assert.match(source, /handleUncertainSubmission/);
-assert.match(source, /accepted === false/);
+assert.match(source, /classifySubmissionOutcome/);
 assert.match(source, /requireCurrentOperation\(epoch\)/);
 assert.match(source, /execution_start/);
 // Failures release the claim for manual recovery.

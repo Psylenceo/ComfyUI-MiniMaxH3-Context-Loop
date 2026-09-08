@@ -13,7 +13,7 @@ import {
     resumeHint,
 } from "./h3_chain_top_level_requeue_core.mjs?v=0.6.5";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.2";
-import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
+import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
 
 // Top-level scene requeue coordinator (M3, candidate_count = 1).
 //
@@ -413,39 +413,12 @@ async function processRequeue(record, epoch) {
         let queued = false;
         try {
             requireCurrentOperation(epoch);
-            let submission;
-            try {
-                if (submissionError) throw submissionError;
-                submission = lifecycleSubmission;
-            } catch (error) {
-                // Prompt validation errors are confirmed pre-delivery rejects;
-                // transport failures may instead be after server acceptance.
-                if (submissionFailure(error) === "rejected") {
-                    throw new Error("ComfyUI rejected the prompt validation.");
-                }
-                await handleUncertainSubmission({runName, handoffId: handoff.handoff_id, markUncertain: postHandoffTransition});
-                queued = true;
-                throw error;
-            }
-            if (submission.accepted === false) {
-                throw new Error("ComfyUI rejected the prompt validation.");
-            }
-            if (submission.accepted !== true || !submission.promptId) {
-                await handleUncertainSubmission({runName, handoffId: handoff.handoff_id, markUncertain: postHandoffTransition});
-                queued = true;
-                throw new Error("Queue delivery is uncertain; recover this handoff manually.");
-            }
-            const acceptedPromptId = submission.promptId;
-            queued = true;
-            continuationTracker ??= createContinuationTracker({
-                transition: postHandoffTransition,
-                reportError: (error) => showError(`Marking the handoff consumed failed: ${error?.message || error}`),
+            const delivery = await classifySubmissionOutcome({outcome:lifecycleSubmission,error:submissionError,
+                accepted: async promptId => { queued=true; continuationTracker ??= createContinuationTracker({transition:postHandoffTransition,reportError:error=>showError(`Marking the handoff consumed failed: ${error?.message || error}`)}); await finalizeAcceptedSubmission({runName,handoffId:handoff.handoff_id,promptId,transitionQueued:postHandoffTransition,trackContinuation:continuationTracker.track.bind(continuationTracker)}); },
+                rejected: async () => { throw new Error("ComfyUI rejected the prompt validation."); },
+                uncertain: async () => { await handleUncertainSubmission({runName,handoffId:handoff.handoff_id,markUncertain:postHandoffTransition}); queued=true; },
             });
-            await finalizeAcceptedSubmission({
-                runName, handoffId: handoff.handoff_id, promptId: acceptedPromptId,
-                transitionQueued: postHandoffTransition,
-                trackContinuation: continuationTracker.track.bind(continuationTracker),
-            });
+            if (delivery.kind === "uncertain") throw new Error("Queue delivery is uncertain; recover this handoff manually.");
         } catch (error) {
             if (!queued) {
                 try {
