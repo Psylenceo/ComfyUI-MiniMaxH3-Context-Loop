@@ -27,7 +27,7 @@ export async function finalizeAcceptedSubmission({runName, handoffId, promptId, 
     const acceptedPromptId = String(promptId ?? "").trim();
     if (!acceptedPromptId) throw new Error("Accepted submission requires a prompt_id.");
     await transitionQueued(runName, handoffId, "queued", acceptedPromptId);
-    trackContinuation(runName, handoffId, acceptedPromptId);
+    await trackContinuation(runName, handoffId, acceptedPromptId);
     return {kind: "accepted", promptId: acceptedPromptId};
 }
 
@@ -144,21 +144,22 @@ export function submissionFailure(error) {
 // the same acceptance/start/failure identity rules.
 export function createContinuationTracker({transition, reportError = () => {}}) {
     let waiting = null;
+    const earlyStarts = new Set();
+    const remember = promptId => { earlyStarts.delete(promptId); earlyStarts.add(promptId); if (earlyStarts.size > 32) earlyStarts.delete(earlyStarts.values().next().value); };
+    const consume = async current => { try { await transition(current.runName, current.handoffId, "consumed"); return true; } catch (error) { reportError(error); return false; } };
     return {
-        track(runName, handoffId, promptId) {
-            waiting = {runName, handoffId, promptId: String(promptId)};
+        async track(runName, handoffId, promptId) {
+            const id = String(promptId); const current = {runName, handoffId, promptId:id};
+            if (earlyStarts.delete(id)) return consume(current);
+            waiting = current;
+            return false;
         },
         async started(promptId) {
-            if (!waiting || waiting.promptId !== String(promptId)) return false;
+            const id = String(promptId);
+            if (!waiting || waiting.promptId !== id) { remember(id); return false; }
             const current = waiting;
             waiting = null;
-            try {
-                await transition(current.runName, current.handoffId, "consumed");
-                return true;
-            } catch (error) {
-                reportError(error);
-                return false;
-            }
+            return consume(current);
         },
         failed(promptId) {
             if (!waiting || waiting.promptId !== String(promptId)) return null;
