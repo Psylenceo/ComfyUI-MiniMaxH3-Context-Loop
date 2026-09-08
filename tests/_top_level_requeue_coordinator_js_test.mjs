@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import {runRequeueLifecycle, selectAndClaim, resolveProjectRun, createContinuationTracker} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
+import {runRequeueLifecycle, selectAndClaim, resolveProjectRun, createContinuationTracker, deliverClaimed} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
 import {matchingNextSceneHandoff} from "../web/h3_chain_top_level_requeue_core.mjs";
 
 function gate() { let resolve; return {promise: new Promise(r => { resolve = r; }), resolve}; }
@@ -58,4 +58,9 @@ assert.equal(await failureTracker.started("prompt-123"), true);
 assert.equal(failureTracker.current(), null);
 assert.equal(failureTracker.failed("prompt-123"), null);
 assert.equal(events.length, 1);
+for (const mode of ["rejected","network","accepted","disabled"]) {
+ let submit=0, release=0, transitions=[], tracked=[];
+ const result=await deliverClaimed({current:()=>{if(mode==="disabled") throw Object.assign(Error(),{preDelivery:true})},handoff:{handoff_id:"h"},prepare:async()=>{},submit:async()=>{submit++;if(mode==="network")throw Error();return mode==="accepted"?{kind:"accepted",promptId:"accepted-123"}:{kind:"rejected"}},release:async()=>release++,transition:async (...x)=>transitions.push(x),track:x=>tracked.push(x)});
+ assert.equal(submit,mode==="disabled"?0:1); if(mode==="rejected"||mode==="disabled")assert.equal(release,1); if(mode==="network")assert.equal(transitions[0][1],"uncertain"); if(mode==="accepted")assert.deepEqual(tracked,["accepted-123"]);
+}
 console.log("top-level requeue coordinator lifecycle: ok");

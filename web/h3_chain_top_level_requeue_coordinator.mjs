@@ -60,6 +60,21 @@ export async function selectAndClaim({current = () => {}, record, loadCheckpoint
     return Object.assign(handoff, {_resolvedRunName: runName, _completed: completed});
 }
 
+export async function deliverClaimed({current, handoff, prepare, submit, release, transition, track}) {
+    try {
+        current(); await prepare(handoff); current();
+        const result = await submit(handoff);
+        if (result?.kind === "accepted" && result.promptId) {
+            await transition(handoff, "queued", result.promptId); track?.(result.promptId); return result;
+        }
+        if (result?.kind === "rejected") { await release(handoff); return result; }
+        await transition(handoff, "uncertain"); return {kind:"uncertain"};
+    } catch (error) {
+        if (error?.preDelivery === true || submissionFailure(error) === "rejected") { await release(handoff); return {kind:"rejected"}; }
+        await transition(handoff, "uncertain"); return {kind:"uncertain"};
+    }
+}
+
 export function submissionFailure(error) {
     return Number(error?.status) >= 400 && Number(error?.status) < 500
         ? "rejected" : "uncertain";
