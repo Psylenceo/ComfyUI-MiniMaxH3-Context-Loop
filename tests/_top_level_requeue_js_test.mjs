@@ -19,11 +19,15 @@ import {
     predecessorScene,
     resumeHint,
     shouldScheduleTopLevelRequeueSuccess,
+    handleTopLevelRequeueSuccessScheduling,
 } from "../web/h3_chain_top_level_requeue_core.mjs";
 
 assert.equal(shouldScheduleTopLevelRequeueSuccess({runName:"run",loopEndExecuted:true,executionMode:REQUEUE_MODE,clipIndex:1,endClip:2}),true);
 assert.equal(shouldScheduleTopLevelRequeueSuccess({runName:"run",loopEndExecuted:false,executionMode:REQUEUE_MODE,clipIndex:1,endClip:2}),false);
 assert.equal(shouldScheduleTopLevelRequeueSuccess({runName:"run",loopEndExecuted:true,executionMode:LEGACY_MODE,clipIndex:1,endClip:2}),false);
+let scheduled=0;
+assert.equal(handleTopLevelRequeueSuccessScheduling({record:{runName:"run",loopEndExecuted:false,executionMode:REQUEUE_MODE,clipIndex:1,endClip:2},scheduleRequeue:()=>scheduled++}),false); assert.equal(scheduled,0);
+assert.equal(handleTopLevelRequeueSuccessScheduling({record:{runName:"run",loopEndExecuted:true,executionMode:REQUEUE_MODE,clipIndex:1,endClip:2},scheduleRequeue:()=>scheduled++}),true); assert.equal(scheduled,1);
 
 // --- behavioral delivery primitive -----------------------------------------
 assert.deepEqual(await submitWithPromptIdentity({app: {graph: {}, graphToPrompt: async () => ({x: 1})}, api: {queuePrompt: async () => ({prompt_id: "accepted-123"})}}), {kind: "accepted", promptId: "accepted-123"});

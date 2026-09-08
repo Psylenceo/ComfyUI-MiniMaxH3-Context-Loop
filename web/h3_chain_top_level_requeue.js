@@ -11,7 +11,7 @@ import {
     pendingNextSceneHandoffs,
     predecessorScene,
     resumeHint,
-    shouldScheduleTopLevelRequeueSuccess,
+    handleTopLevelRequeueSuccessScheduling,
 } from "./h3_chain_top_level_requeue_core.mjs?v=0.6.5";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.2";
 import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
@@ -256,7 +256,7 @@ export function onExecutionSuccess(detail) {
     }
     if (!record) return;
     sceneRecords.delete(promptId);
-    if (shouldScheduleTopLevelRequeueSuccess(record)) enqueueRequeue(record);
+    handleTopLevelRequeueSuccessScheduling({record, scheduleRequeue: enqueueRequeue});
 }
 
 function onContinuationStart(detail) {

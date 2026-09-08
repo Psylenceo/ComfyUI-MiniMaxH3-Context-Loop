@@ -17,6 +17,12 @@ export function shouldScheduleTopLevelRequeueSuccess(record) {
         && record.executionMode === REQUEUE_MODE
         && Number(record.clipIndex) < Number(record.endClip || record.clipCount));
 }
+
+export function handleTopLevelRequeueSuccessScheduling({record, scheduleRequeue}) {
+    if (!shouldScheduleTopLevelRequeueSuccess(record)) return false;
+    scheduleRequeue(record);
+    return true;
+}
 export const EXECUTION_MODES = [LEGACY_MODE, REQUEUE_MODE];
 
 export const HANDOFF_API_BASE = "/minimax_h3_context_loop";
