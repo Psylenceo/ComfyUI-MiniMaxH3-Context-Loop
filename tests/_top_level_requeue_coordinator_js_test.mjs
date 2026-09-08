@@ -35,6 +35,10 @@ calls=[]; selected=await selectAndClaim({record,handoffs:{handoffs:[exact]},matc
 assert.equal(selected,null); assert.deepEqual(calls,[]);
 const projectRecord={...record,runName:"actual-run"}; calls=[]; selected=await selectAndClaim({record:projectRecord,handoffs:{handoffs:[{...exact,workflow_fingerprint:"wf-current"}]},match:matchingNextSceneHandoff,resolveRun:()=>"actual-run",claim:async (...x)=>calls.push(x)});
 assert.equal(selected.handoff_id,"exact"); assert.deepEqual(calls,[["actual-run","exact"]]);
+async function lifecycleClaim(inventory) { const log=[]; const result=await runRequeueLifecycle({current:()=>{},waitSafe:async()=>{},cleanup:async()=>{},resolveRun:async()=>record,loadCheckpoint:async()=>({revision:record.sourceRevision,metadata_sha256:record.checkpointSha}),listHandoffs:async run=>{log.push(["list",run]);return {handoffs:inventory};},matchHandoff:matchingNextSceneHandoff,claimHandoff:async (run,handoff)=>log.push(["claim",run,handoff.handoff_id])}); return {log,result}; }
+let lifecycleCase=await lifecycleClaim(stale); assert.deepEqual(lifecycleCase.log,[["list","run"],["claim","run","exact"]]); assert.equal(lifecycleCase.result.handoff.handoff_id,"exact");
+lifecycleCase=await lifecycleClaim(stale.slice(0,-1)); assert.deepEqual(lifecycleCase.log,[["list","run"]]); assert.equal(lifecycleCase.result,null);
+lifecycleCase=await lifecycleClaim([{...exact,handoff_id:"missing-sha",source_checkpoint_sha256:null}]); assert.deepEqual(lifecycleCase.log,[["list","run"]]); assert.equal(lifecycleCase.result,null);
 for (const mode of ["rejected", "network"]) {
  let claim=0, submit=0, release=0, uncertain=0;
  await runRequeueLifecycle({current:()=>{},waitSafe:async()=>{},cleanup:async()=>{},select:async()=>exact,claim:async()=>claim++,prepare:async()=>{},submit:async()=>{submit++; if(mode==="network") throw Error("network"); return {kind:"rejected"};},release:async()=>release++,uncertain:async()=>uncertain++});
