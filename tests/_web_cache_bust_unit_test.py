@@ -18,6 +18,7 @@ MINIMUM_CACHE_VERSION = {
     "h3_chain_plan_core.mjs": "0.6.5",
     "h3_chain_review_core.mjs": "0.6.5",
     "h3_chain_cancel_reroll_core.mjs": "0.6.5",
+    "h3_notification_stack_core.mjs": "0.6.7",
     "h3_prompt_assistant_core.mjs": "0.6.5",
     "h3_chain_plan_studio_core.mjs": "0.6.3",
     "h3_checkpoint_manager_core.mjs": "0.6.6",
