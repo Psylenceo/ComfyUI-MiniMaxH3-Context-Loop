@@ -53,7 +53,7 @@ export async function runRequeueLifecycle({current, waitSafe, cleanup, resolveRu
     if (resolveRun) {
         const context = await resolveRun();
         const runName = context?.runName;
-        if (!runName) return null;
+        if (!runName || context?.runtimeRunName && context.runtimeRunName !== runName) return null;
         const checkpoint = await loadCheckpoint(runName, context);
         const handoff = matchHandoff(await listHandoffs(runName), {...context, sourceRevision:String(checkpoint?.revision || ""), checkpointSha:String(checkpoint?.metadata_sha256 || "")});
         if (!handoff) return null;

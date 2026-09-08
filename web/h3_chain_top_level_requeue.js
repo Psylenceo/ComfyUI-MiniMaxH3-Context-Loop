@@ -395,7 +395,7 @@ async function processRequeue(record, epoch) {
                 const remaining = delay - (Date.now() - startedAt);
                 if (remaining > 0) await sleep(remaining);
             },
-            resolveRun: async () => ({...record, ...requireVisibleWorkflow(record)}),
+            resolveRun: async () => ({...record, runtimeRunName:record.runName, ...requireVisibleWorkflow(record)}),
             loadCheckpoint: (runName, context) => verifyPredecessorCheckpoint(runName, Number(context.clipIndex)),
             listHandoffs: async runName => { const response = await api.fetchApi(`${HANDOFF_API_BASE}/handoffs?run_name=${encodeURIComponent(runName)}`); if (!response.ok) throw new Error(`The handoff list is unavailable (HTTP ${response.status}).`); return response.json(); },
             matchHandoff: matchingNextSceneHandoff,
