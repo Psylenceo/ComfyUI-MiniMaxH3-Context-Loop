@@ -62,7 +62,11 @@ export async function runRequeueLifecycle({current, waitSafe, cleanup, resolveRu
             await release?.(handoff, runName);
             return {kind: "cancelled", runName, handoff, checkpoint, context, cancellationError: error};
         }
-        await prepareResume?.(runName, handoff, context); current();
+        await prepareResume?.(runName, handoff, context);
+        try { current(); } catch (error) {
+            await release?.(handoff, runName);
+            return {kind: "cancelled", runName, handoff, checkpoint, context, cancellationError: error};
+        }
         if (submit) {
             try { return {runName, handoff, checkpoint, context, submission: await submit(runName, handoff, context)}; }
             catch (submissionError) { return {runName, handoff, checkpoint, context, submissionError}; }
