@@ -13,7 +13,7 @@ import {
     resumeHint,
 } from "./h3_chain_top_level_requeue_core.mjs?v=0.6.5";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.2";
-import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, resolveProjectRun} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
+import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
 
 // Top-level scene requeue coordinator (M3, candidate_count = 1).
 //
@@ -283,10 +283,6 @@ function onTerminalFailure(kind, detail) {
             + "before its scene started. The handoff stays queued; set Loop "
             + `Start to the handoff scene and queue manually to resume.`);
     }
-}
-
-function authoritativeRunName(planNode) {
-    return resolveProjectRun(planNode);
 }
 
 function requireVisibleWorkflow(record) {

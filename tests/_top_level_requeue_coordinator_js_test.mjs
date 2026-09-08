@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import {runRequeueLifecycle, selectAndClaim, resolveProjectRun, createContinuationTracker, deliverClaimed} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
+import {runRequeueLifecycle, selectAndClaim, authoritativeRunName, createContinuationTracker, deliverClaimed} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
 import {matchingNextSceneHandoff} from "../web/h3_chain_top_level_requeue_core.mjs";
 
 function gate() { let resolve; return {promise: new Promise(r => { resolve = r; }), resolve}; }
@@ -42,8 +42,11 @@ for (const mode of ["rejected", "network"]) {
 }
 const manager={comfyClass:"MiniMaxH3ProjectAssetManager",widgets:[{name:"run_name",value:"actual-run"}]};
 const plan={widgets:[{name:"run_name",value:"stale-plan-name"}],inputs:[{name:"project_assets",link:1}],graph:{links:{1:{origin_id:2}},getNodeById:()=>manager}};
-assert.equal(resolveProjectRun(plan),"actual-run");
-assert.equal(resolveProjectRun({widgets:[{name:"run_name",value:"plain-run"}]}),"plain-run");
+assert.equal(authoritativeRunName(plan),"actual-run");
+assert.equal(authoritativeRunName({widgets:[{name:"run_name",value:"plain-run"}]}),"plain-run");
+const emptyManager={comfyClass:"MiniMaxH3ProjectAssetManager",widgets:[{name:"run_name",value:""}]};
+const emptyPlan={widgets:[{name:"run_name",value:"fallback-run"}],inputs:[{name:"project_assets",link:2}],graph:{links:{2:{origin_id:9}},getNodeById:id=>id===9?emptyManager:null}};
+assert.equal(authoritativeRunName(emptyPlan),"fallback-run");
 const events=[];
 const failureTracker = createContinuationTracker({transition: async (...args) => events.push(args)});
 failureTracker.track("run-a", "handoff-a", "prompt-123");
