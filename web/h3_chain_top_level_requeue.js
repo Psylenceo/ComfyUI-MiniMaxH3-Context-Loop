@@ -247,7 +247,7 @@ async function pumpRequeues() {
     }
 }
 
-function onExecutionSuccess(detail) {
+export function onExecutionSuccess(detail) {
     const promptId = String(detail?.prompt_id ?? "");
     const record = sceneRecords.get(promptId);
     if (continuationTracker?.current()?.promptId === promptId
