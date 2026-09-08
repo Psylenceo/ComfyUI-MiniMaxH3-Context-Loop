@@ -442,6 +442,14 @@ assert.match(reviewSource, /setPointerCapture/);
 assert.match(reviewSource, /visualHeight \/ layoutHeight/);
 assert.match(reviewSource, /videoPanel\.offsetHeight, true/);
 assert.doesNotMatch(reviewSource, /\/h3_motion_context\/review/);
+const fallbackStart = reviewSource.indexOf("function reviewFallbackNode");
+const fallbackSource = reviewSource.slice(fallbackStart, reviewSource.indexOf("function routeReview", fallbackStart));
+assert.match(fallbackSource, /matchingRun\.length === 1\) return matchingRun\[0\];[\s\S]*data\?\.durable === true\) return null;[\s\S]*matchingLeaf[\s\S]*gates\.length === 1/,
+    "durable recovery may use only an authoritative run match, not leaf or singleton fallback");
+const routeStart = reviewSource.indexOf("function routeReview(data)");
+const routeSource = reviewSource.slice(routeStart, reviewSource.indexOf("function routeReviewResolved", routeStart));
+assert.match(routeSource, /data\?\.durable !== true[\s\S]*Pending token/,
+    "expected unrelated durable inventory must not warn on every poll");
 const reviewHandlerStart = reviewSource.indexOf("node._h3ReviewHandler =");
 const reviewHandlerSource = reviewSource.slice(reviewHandlerStart);
 assert.match(reviewHandlerSource, /const candidateBatchComplete = Boolean\(current\?\.candidate_generation_complete\) \|\|[\s\S]*current\.candidates\.length >=[\s\S]*candidate_count/);

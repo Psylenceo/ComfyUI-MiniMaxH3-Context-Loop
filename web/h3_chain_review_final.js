@@ -696,6 +696,9 @@ function reviewFallbackNode(data) {
 
         if (matchingRun.length === 1) return matchingRun[0];
     }
+    // Durable recovery inventory has no reliable display-node identity. It
+    // may only route through its authoritative run match above.
+    if (data?.durable === true) return null;
     // GraphBuilder execution ids use dots while subgraph-qualified display
     // ids use colons. The visible LiteGraph node is always the final leaf.
     const leaf = String(data?.node_id ?? "").split(/[.:]/).at(-1);
@@ -715,10 +718,12 @@ function routeReview(data) {
         );
         return true;
     }
-    console.warn(
-        `[H3 Chain Review] Pending token ${data?.token ?? "?"} could not be ` +
-        `routed to display node ${data?.node_id ?? "?"}.`,
-    );
+    if (data?.durable !== true) {
+        console.warn(
+            `[H3 Chain Review] Pending token ${data?.token ?? "?"} could not be ` +
+            `routed to display node ${data?.node_id ?? "?"}.`,
+        );
+    }
     return false;
 }
 
