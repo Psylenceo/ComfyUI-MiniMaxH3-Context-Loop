@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import {runRequeueLifecycle, selectAndClaim, authoritativeRunName, createContinuationTracker, deliverClaimed, finalizeAcceptedSubmission} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
+import {runRequeueLifecycle, selectAndClaim, authoritativeRunName, createContinuationTracker, deliverClaimed, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
 import {matchingNextSceneHandoff} from "../web/h3_chain_top_level_requeue_core.mjs";
 
 function gate() { let resolve; return {promise: new Promise(r => { resolve = r; }), resolve}; }
@@ -79,4 +79,8 @@ assert.deepEqual(await finalizeAcceptedSubmission({runName:"actual-run",handoffI
 assert.deepEqual(acceptedCalls,[["queued","actual-run","handoff-123","queued","prompt-456"],["track","actual-run","handoff-123","prompt-456"]]);
 await assert.rejects(finalizeAcceptedSubmission({runName:"actual-run",handoffId:"handoff-123",promptId:"",transitionQueued:async()=>acceptedCalls.push("bad"),trackContinuation:()=>acceptedCalls.push("bad")}));
 assert.equal(acceptedCalls.length,2);
+const releases=[];
+assert.deepEqual(await handleConfirmedSubmissionRejection({runName:"actual-run",handoffId:"handoff-123",releaseHandoff:async (...x)=>releases.push(x)}),{kind:"rejected",released:true});
+assert.deepEqual(releases,[["actual-run","handoff-123"]]);
+await assert.rejects(handleConfirmedSubmissionRejection({runName:"",handoffId:"handoff-123",releaseHandoff:async()=>releases.push("bad")})); assert.equal(releases.length,1);
 console.log("top-level requeue coordinator lifecycle: ok");

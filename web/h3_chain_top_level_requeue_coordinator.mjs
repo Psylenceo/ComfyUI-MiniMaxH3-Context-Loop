@@ -1,3 +1,11 @@
+export async function handleConfirmedSubmissionRejection({runName, handoffId, releaseHandoff}) {
+    if (!String(runName ?? "").trim() || !String(handoffId ?? "").trim()) {
+        throw new Error("Confirmed rejection requires run and handoff identity.");
+    }
+    await releaseHandoff(runName, handoffId);
+    return {kind: "rejected", released: true};
+}
+
 export async function finalizeAcceptedSubmission({runName, handoffId, promptId, transitionQueued, trackContinuation}) {
     const acceptedPromptId = String(promptId ?? "").trim();
     if (!acceptedPromptId) throw new Error("Accepted submission requires a prompt_id.");

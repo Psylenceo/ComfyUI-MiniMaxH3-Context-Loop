@@ -13,7 +13,7 @@ import {
     resumeHint,
 } from "./h3_chain_top_level_requeue_core.mjs?v=0.6.5";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.2";
-import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
+import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
 
 // Top-level scene requeue coordinator (M3, candidate_count = 1).
 //
@@ -505,16 +505,15 @@ async function processRequeue(record, epoch) {
         } catch (error) {
             if (!queued) {
                 try {
-                    await api.fetchApi(
-                        `${HANDOFF_API_BASE}/handoffs/release`, {
-                            method: "POST",
-                            headers: {"Content-Type": "application/json"},
-                            body: JSON.stringify({
-                                run_name: runName,
-                                handoff_id: handoff.handoff_id,
-                                reason: String(error?.message || error),
+                    await handleConfirmedSubmissionRejection({
+                        runName, handoffId: handoff.handoff_id,
+                        releaseHandoff: async (releasedRun, releasedHandoff) => api.fetchApi(
+                            `${HANDOFF_API_BASE}/handoffs/release`, {
+                                method: "POST", headers: {"Content-Type": "application/json"},
+                                body: JSON.stringify({run_name: releasedRun, handoff_id: releasedHandoff,
+                                    reason: String(error?.message || error)}),
                             }),
-                        });
+                    });
                 } catch (_releaseError) {
                     // Keep the durable claim; manual recovery can release it.
                 }
