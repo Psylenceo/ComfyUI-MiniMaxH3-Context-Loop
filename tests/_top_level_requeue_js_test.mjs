@@ -3,6 +3,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {submitWithPromptIdentity, submissionFailure, createContinuationTracker} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
+import * as coordinator from "../web/h3_chain_top_level_requeue_coordinator.mjs";
+import * as requeueCore from "../web/h3_chain_top_level_requeue_core.mjs";
 import {
     DEFAULT_CLEANUP_DELAY_MS,
     EXECUTION_MODES,
@@ -218,6 +220,53 @@ const source = fs.readFileSync(
     new URL("../web/h3_chain_top_level_requeue.js", import.meta.url),
     "utf8",
 );
+
+async function exerciseProcessRequeue({submission, transitionOk = true, cancelAfterClaim = false}) {
+    const calls={claim:0,queue:0,uncertain:0,queued:0,release:0}, notices=[];
+    let enabled=true;
+    const response = (ok=true, body={}) => ({ok,status:ok?200:500,json:async()=>body});
+    const start={id:1,comfyClass:"MiniMaxH3ChainLoopStart",widgets:[{name:"start_clip",value:1},{name:"scene_range",value:""}]};
+    const plan={id:2,comfyClass:"MiniMaxH3ChainPlan",widgets:[{name:"run_name",value:"run-a"}]};
+    const current={id:3,comfyClass:"MiniMaxH3ChainCurrent",inputs:[{link:1},{link:2}]};
+    const graph={nodes:[start,plan,current],links:{1:{origin_id:1},2:{origin_id:2}},getNodeById:id=>({1:start,2:plan,3:current})[id]};
+    for (const node of graph.nodes) node.graph=graph;
+    globalThis.__h3App={graph,graphToPrompt:async()=>{calls.queue++; if(submission === "network") throw Error("network"); return {};},extensionManager:{setting:{get:id=>id.includes("Cleanup")?0:enabled},workflow:{activeWorkflow:null}},registerExtension:()=>{}};
+    globalThis.__h3Api={addEventListener:()=>{},queuePrompt:async()=>{if(submission === "rejected") throw Object.assign(Error("validation"),{status:400}); return submission === "accepted" ? {prompt_id:"prompt-a"} : (()=>{throw Error("network")})();},fetchApi:async (url, options={})=>{
+        if(url === "/api/queue") return response(true,{queue_running:[],queue_pending:[]});
+        if(url.includes("/checkpoints?")) return response(true,{checkpoints:[{scene:1,ready:true,revision:"rev-a",metadata_sha256:"sha-a"}]});
+        if(url.includes("/handoffs?")) return response(true,{handoffs:[{action:"next_scene",status:"pending",handoff_id:"handoff-a",predecessor_scene:1,start_clip:2,end_clip:2,workflow_fingerprint:"fp-a",source_revision:"rev-a",source_checkpoint_sha256:"sha-a",resume:{start_clip:2,scene_range:"2"}}]});
+        if(url.endsWith("/claim")){calls.claim++; enabled=!cancelAfterClaim; return response();}
+        if(url.endsWith("/release")){calls.release++;return response();}
+        if(url.endsWith("/transition")){const status=JSON.parse(options.body).status; calls[status]++; return response(transitionOk,{error:"transition unavailable"});}
+        throw Error(`unexpected ${url}`);
+    }};
+    globalThis.__h3Notification={createNotificationStack:()=>({show:(_id,message)=>notices.push(message),clear:()=>{},clearAll:()=>{}})};
+    globalThis.__h3Core=requeueCore; globalThis.__h3Coordinator=coordinator;
+    globalThis.window={setTimeout};
+    let moduleSource=source.replace('import {app} from "/scripts/app.js";', 'const app=globalThis.__h3App;')
+        .replace('import {api} from "/scripts/api.js";', 'const api=globalThis.__h3Api;')
+        .replace(/import \{activeSceneFromOutput\} from ".*?";/, 'const activeSceneFromOutput=()=>null;')
+        .replace(/import \{[\s\S]*?\} from "\.\/h3_chain_top_level_requeue_core\.mjs\?v=.*?";/, 'const {DEFAULT_CLEANUP_DELAY_MS,HANDOFF_API_BASE,checkpointPredecessorReady,cleanupDelayMs,isQueueSafe,matchingNextSceneHandoff,pendingNextSceneHandoffs,predecessorScene,resumeHint,handleTopLevelRequeueSuccessScheduling,loopEndMatchesObservedCurrent,topLevelRequeueCompletionMatches}=globalThis.__h3Core;')
+        .replace(/import \{createNotificationStack\} from ".*?";/, 'const {createNotificationStack}=globalThis.__h3Notification;')
+        .replace(/import \{submitWithPromptIdentity,[\s\S]*?\} from "\.\/h3_chain_top_level_requeue_coordinator\.mjs\?v=.*?";/, 'const {submitWithPromptIdentity,submissionFailure,createContinuationTracker,runRequeueLifecycle,authoritativeRunName,finalizeAcceptedSubmission,handleConfirmedSubmissionRejection,handleUncertainSubmission,classifySubmissionOutcome,releaseHandoffChecked}=globalThis.__h3Coordinator;')
+        .replace(/export function /g, 'function ') + '\nglobalThis.__h3ProcessRequeue=processRequeue;';
+    await import(`data:text/javascript,${encodeURIComponent(moduleSource)}#${Math.random()}`);
+    await globalThis.__h3ProcessRequeue({promptId:"source",runName:"run-a",clipIndex:1,endClip:2,workflowFingerprint:"fp-a",displayNode:"3"},0);
+    return {calls,notices};
+}
+let processCase=await exerciseProcessRequeue({submission:"network",transitionOk:true});
+assert.deepEqual(processCase.calls,{claim:1,queue:1,uncertain:1,queued:0,release:0});
+assert.match(processCase.notices.at(-1),/Queue delivery is uncertain/);
+processCase=await exerciseProcessRequeue({submission:"network",transitionOk:false});
+assert.deepEqual(processCase.calls,{claim:1,queue:1,uncertain:1,queued:0,release:0});
+assert.match(processCase.notices.at(-1),/delivery may have occurred[\s\S]*not released[\s\S]*Reconcile/);
+processCase=await exerciseProcessRequeue({submission:"accepted",transitionOk:false});
+assert.deepEqual(processCase.calls,{claim:1,queue:1,uncertain:0,queued:1,release:0});
+assert.match(processCase.notices.at(-1),/delivery may have occurred/);
+processCase=await exerciseProcessRequeue({submission:"rejected"});
+assert.deepEqual(processCase.calls,{claim:1,queue:1,uncertain:0,queued:0,release:1});
+processCase=await exerciseProcessRequeue({submission:"accepted",cancelAfterClaim:true});
+assert.deepEqual(processCase.calls,{claim:1,queue:0,uncertain:0,queued:0,release:1});
 
 // Terminal-success-only trigger; never sampler completion.
 assert.match(source, /api\.addEventListener\("execution_success"/);

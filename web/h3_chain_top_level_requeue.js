@@ -388,6 +388,7 @@ async function postHandoffTransition(runName, handoffId, status, acceptedPromptI
 
 async function processRequeue(record, epoch) {
     const startedAt = Date.now();
+    let deliveryMayHaveOccurred = false;
     try {
         requireCurrentOperation(epoch);
         if (!record.runName) {
@@ -417,16 +418,15 @@ async function processRequeue(record, epoch) {
         const startNode = context.startNode;
         const resume = resumeHint(handoff);
         if (!resume) throw new Error("The handoff has no resume hint; resume the scene manually.");
-        let queued = false;
         try {
             const delivery = await classifySubmissionOutcome({outcome:lifecycleSubmission,error:submissionError,
-                accepted: async promptId => { queued=true; continuationTracker ??= createContinuationTracker({transition:postHandoffTransition,reportError:error=>showError(`Marking the handoff consumed failed: ${error?.message || error}`)}); await finalizeAcceptedSubmission({runName,handoffId:handoff.handoff_id,promptId,transitionQueued:postHandoffTransition,trackContinuation:continuationTracker.track.bind(continuationTracker)}); },
+                accepted: async promptId => { deliveryMayHaveOccurred = true; continuationTracker ??= createContinuationTracker({transition:postHandoffTransition,reportError:error=>showError(`Marking the handoff consumed failed: ${error?.message || error}`)}); await finalizeAcceptedSubmission({runName,handoffId:handoff.handoff_id,promptId,transitionQueued:postHandoffTransition,trackContinuation:continuationTracker.track.bind(continuationTracker)}); },
                 rejected: async () => { throw new Error("ComfyUI rejected the prompt validation."); },
-                uncertain: async () => { await handleUncertainSubmission({runName,handoffId:handoff.handoff_id,markUncertain:postHandoffTransition}); queued=true; },
+                uncertain: async () => { deliveryMayHaveOccurred = true; await handleUncertainSubmission({runName,handoffId:handoff.handoff_id,markUncertain:postHandoffTransition}); },
             });
             if (delivery.kind === "uncertain") throw new Error("Queue delivery is uncertain; recover this handoff manually.");
         } catch (error) {
-            if (!queued) {
+            if (!deliveryMayHaveOccurred) {
                 try {
                     await handleConfirmedSubmissionRejection({
                         runName, handoffId: handoff.handoff_id,
@@ -442,10 +442,13 @@ async function processRequeue(record, epoch) {
             throw error;
         }
     } catch (error) {
-        showError(
-            `Top-level requeue did not queue: ${error?.message || error} `
-            + "The run's checkpoints are intact; set Loop Start to the "
-            + "handoff scene and queue the workflow manually.");
+        showError(deliveryMayHaveOccurred
+            ? `Top-level requeue delivery may have occurred: ${error?.message || error} `
+                + "The claimed handoff was not released because doing so could duplicate "
+                + "the continuation. Reconcile the handoff or queue history manually before retrying."
+            : `Top-level requeue did not queue: ${error?.message || error} `
+                + "The run's checkpoints are intact; set Loop Start to the "
+                + "handoff scene and queue the workflow manually.");
     }
 }
 
