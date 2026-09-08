@@ -97,4 +97,10 @@ await deliverClaimed({current:()=>{}, handoff:claimedProject, prepare:async()=>{
 await finalizeAcceptedSubmission({runName:claimedProject._resolvedRunName,handoffId:claimedProject.handoff_id,promptId:"project-prompt-123",transitionQueued:async (...x)=>projectFlow.push(["queued",...x]),trackContinuation:(...x)=>projectFlow.push(["track",...x])});
 assert.deepEqual(projectFlow,[["list","actual-run"],["claim","actual-run",exact.handoff_id],["queued","actual-run",exact.handoff_id,"queued","project-prompt-123"],["track","actual-run",exact.handoff_id,"project-prompt-123"]]);
 assert.equal(projectSubmits,1);
+const rejectedFlow=[];
+const rejectedClaim = await selectAndClaim({planNode:plan,record:{...record,runName:"actual-run"},match:matchingNextSceneHandoff,
+ loadHandoffs:async run=>{rejectedFlow.push(["list",run]);return {handoffs:[exact]};},claim:async (run,id)=>rejectedFlow.push(["claim",run,id])});
+let rejectedSubmits=0;
+await deliverClaimed({current:()=>{},handoff:rejectedClaim,prepare:async()=>{},submit:async()=>{rejectedSubmits++;return {kind:"rejected"};},release:async ()=>rejectedFlow.push(["release",rejectedClaim._resolvedRunName,rejectedClaim.handoff_id]),transition:async()=>rejectedFlow.push(["transition"]),track:()=>rejectedFlow.push(["track"])});
+assert.deepEqual(rejectedFlow,[["list","actual-run"],["claim","actual-run",exact.handoff_id],["release","actual-run",exact.handoff_id]]);assert.equal(rejectedSubmits,1);
 console.log("top-level requeue coordinator lifecycle: ok");
