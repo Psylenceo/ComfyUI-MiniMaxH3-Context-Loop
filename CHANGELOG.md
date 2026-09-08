@@ -3,6 +3,15 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
+## Unreleased — Max fallback for reference reconstruction
+
+- Upscale reference reconstruction with `inherit` now defaults to `max` when
+  the original take has no recoverable sizing policy. Saved Match/Max policies
+  and explicit overrides still take precedence; semantic-anchor settings are
+  unchanged. Old default-Match rebuilds remain intact and are not reused for
+  the new Max reconstruction. Updated the conditioning tooltip and added
+  pixel/latent recovery and cache-preservation regressions.
+
 ## v0.6.8 — Correct fractional H3 denoise masks
 
 - Bring nightly's native-first ComfyUI PR #15988 correction to main. Masked
