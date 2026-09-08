@@ -36,6 +36,7 @@ assert.equal(handleTopLevelRequeueSuccessScheduling({record:{runName:"run",loopE
 
 // --- behavioral delivery primitive -----------------------------------------
 assert.deepEqual(await submitWithPromptIdentity({app: {graph: {}, graphToPrompt: async () => ({x: 1})}, api: {queuePrompt: async () => ({prompt_id: "accepted-123"})}}), {kind: "accepted", promptId: "accepted-123"});
+assert.deepEqual(await submitWithPromptIdentity({app: {graph: {}, graphToPrompt: async () => ({x: 1})}, api: {queuePrompt: async () => ({})}}), {kind: "uncertain", promptId: ""});
 assert.deepEqual(await submitWithPromptIdentity({app: {queuePrompt: async () => false}, api: {}}), {kind: "rejected", promptId: ""});
 assert.deepEqual(await submitWithPromptIdentity({app: {queuePrompt: async () => true}, api: {}}), {kind: "uncertain", promptId: ""});
 assert.equal(submissionFailure({status: 422}), "rejected");

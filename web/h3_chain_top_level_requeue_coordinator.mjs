@@ -38,7 +38,7 @@ export async function submitWithPromptIdentity({app, api}) {
         const prompt = await app.graphToPrompt(app.graph);
         const result = await api.queuePrompt(0, prompt);
         const promptId = String(result?.prompt_id ?? "");
-        return promptId ? {kind: "accepted", promptId} : {kind: "rejected", promptId: ""};
+        return promptId ? {kind: "accepted", promptId} : {kind: "uncertain", promptId: ""};
     }
     const result = await app.queuePrompt(0, 1);
     if (result === false) return {kind: "rejected", promptId: ""};
