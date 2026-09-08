@@ -496,7 +496,7 @@ app.registerExtension({
         },
         {
             id: DELAY_SETTING_ID,
-            category: ["MiniMax H3 Context Loop", "Interface", "Top-level requeue"],
+            category: ["MiniMax H3 Context Loop", "Interface", "Top-level requeue cleanup"],
             name: "Requeue cleanup interval (ms)",
             tooltip: `Milliseconds to wait after the top-level terminal success before queueing the next scene (default ${DEFAULT_CLEANUP_DELAY_MS}).`,
             type: "number",

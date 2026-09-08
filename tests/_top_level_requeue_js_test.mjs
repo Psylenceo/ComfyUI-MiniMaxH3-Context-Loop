@@ -240,6 +240,17 @@ assert.doesNotMatch(source, /settings\.addSetting/);
 assert.match(source, /extensionManager\?\.setting\?\.get\?\.\(SETTING_ID\) === true/);
 assert.match(source, /extensionManager\?\.setting\?\.get\?\.\(DELAY_SETTING_ID\)/);
 assert.match(source, /onChange\(value\)[\s\S]*value !== true[\s\S]*requeueEpoch \+= 1[\s\S]*clearNotifications/);
+const booleanCategory = ["MiniMax H3 Context Loop", "Interface", "Top-level requeue"];
+const cleanupCategory = ["MiniMax H3 Context Loop", "Interface", "Top-level requeue cleanup"];
+assert.match(source, /category: \["MiniMax H3 Context Loop", "Interface", "Top-level requeue"\],[\s\S]*type: "boolean"/);
+assert.match(source, /category: \["MiniMax H3 Context Loop", "Interface", "Top-level requeue cleanup"\],[\s\S]*type: "number"/);
+assert.equal(booleanCategory[0], cleanupCategory[0]);
+assert.equal(booleanCategory[1], cleanupCategory[1]);
+assert.notEqual(booleanCategory.join("/"), cleanupCategory.join("/"),
+    "complete Settings tree paths must not collide");
+assert.equal(booleanCategory.join("/"),
+    ["MiniMax H3 Context Loop", "Interface", "Top-level requeue"].join("/"),
+    "the old identical cleanup path would have collided with the boolean leaf");
 // Workflow/run identity validation before requeue.
 assert.match(source, /function requireVisibleWorkflow\(record\)/);
 assert.match(source, /workflowIdentity !== record\.workflowIdentity/);
