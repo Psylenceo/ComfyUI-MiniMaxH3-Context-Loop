@@ -36,6 +36,8 @@ assert.equal(handleTopLevelRequeueSuccessScheduling({record:{runName:"run",loopE
 
 // --- behavioral delivery primitive -----------------------------------------
 assert.deepEqual(await submitWithPromptIdentity({app: {graph: {}, graphToPrompt: async () => ({x: 1})}, api: {queuePrompt: async () => ({prompt_id: "accepted-123"})}}), {kind: "accepted", promptId: "accepted-123"});
+const hookOrder=[]; const hookWidget={value:1,beforeQueued:()=>{hookOrder.push("hook");hookWidget.value=2}};
+assert.deepEqual(await submitWithPromptIdentity({app:{graph:{nodes:[{widgets:[hookWidget]}]},graphToPrompt:async()=>{hookOrder.push(`serialize-${hookWidget.value}`);return {} }},api:{queuePrompt:async()=>{hookOrder.push("queue");return {prompt_id:"beforequeued-123"}}}}),{kind:"accepted",promptId:"beforequeued-123"}); assert.deepEqual(hookOrder,["hook","serialize-2","queue"]);
 assert.deepEqual(await submitWithPromptIdentity({app: {graph: {}, graphToPrompt: async () => ({x: 1})}, api: {queuePrompt: async () => ({})}}), {kind: "uncertain", promptId: ""});
 assert.deepEqual(await submitWithPromptIdentity({app: {queuePrompt: async () => false}, api: {}}), {kind: "rejected", promptId: ""});
 assert.deepEqual(await submitWithPromptIdentity({app: {queuePrompt: async () => true}, api: {}}), {kind: "uncertain", promptId: ""});

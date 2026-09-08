@@ -31,10 +31,19 @@ export async function finalizeAcceptedSubmission({runName, handoffId, promptId, 
     return {kind: "accepted", promptId: acceptedPromptId};
 }
 
+export function runBeforeQueuedHooks(graph, {isPartialExecution = false} = {}) {
+    const seenGraphs = new Set(), seenWidgets = new Set();
+    const visit = current => { if (!current || seenGraphs.has(current)) return; seenGraphs.add(current);
+        for (const node of current.nodes ?? current._nodes ?? []) { for (const widget of node.widgets ?? []) { if (!seenWidgets.has(widget)) { seenWidgets.add(widget); widget.beforeQueued?.({isPartialExecution}); } } visit(node.subgraph); }
+    };
+    visit(graph);
+}
+
 // Testable delivery primitive shared by the browser coordinator.  It keeps
 // prompt submission certainty separate from the UI/event wiring.
 export async function submitWithPromptIdentity({app, api}) {
     if (typeof app.graphToPrompt === "function" && typeof api.queuePrompt === "function") {
+        runBeforeQueuedHooks(app.graph);
         const prompt = await app.graphToPrompt(app.graph);
         const result = await api.queuePrompt(0, prompt);
         const promptId = String(result?.prompt_id ?? "");
