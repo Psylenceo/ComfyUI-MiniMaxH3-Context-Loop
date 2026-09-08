@@ -239,7 +239,14 @@ assert.equal((source.match(/"MiniMaxH3ContextLoop\.topLevelRequeueCleanupDelay"/
 assert.doesNotMatch(source, /settings\.addSetting/);
 assert.match(source, /extensionManager\?\.setting\?\.get\?\.\(SETTING_ID\) === true/);
 assert.match(source, /extensionManager\?\.setting\?\.get\?\.\(DELAY_SETTING_ID\)/);
-assert.match(source, /onChange\(value\)[\s\S]*value !== true[\s\S]*requeueEpoch \+= 1[\s\S]*clearNotifications/);
+const terminalFailureBody = source.slice(source.indexOf("function onTerminalFailure"), source.indexOf("async function processRequeue"));
+assert.doesNotMatch(terminalFailureBody, /requeueEpoch \+= 1/);
+assert.match(terminalFailureBody, /sceneRecords\.delete\(promptId\)/);
+assert.match(terminalFailureBody, /continuationTracker\?\.failed\(promptId\)/);
+const settingBody = source.slice(source.indexOf("onChange(value)"), source.indexOf("api.addEventListener"));
+assert.match(settingBody, /value !== true/);
+assert.match(settingBody, /requeueEpoch \+= 1/);
+assert.match(settingBody, /clearNotifications/);
 const booleanCategory = ["MiniMax H3 Context Loop", "Interface", "Top-level requeue"];
 const cleanupCategory = ["MiniMax H3 Context Loop", "Interface", "Top-level requeue cleanup"];
 assert.match(source, /category: \["MiniMax H3 Context Loop", "Interface", "Top-level requeue"\],[\s\S]*type: "boolean"/);

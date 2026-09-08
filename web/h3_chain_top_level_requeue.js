@@ -270,9 +270,9 @@ function onContinuationStart(detail) {
 }
 
 function onTerminalFailure(kind, detail) {
-    // An explicit ComfyUI interruption/error invalidates any pending automatic
-    // continuation before it can claim or submit stale work.
-    requeueEpoch += 1;
+    // Failures only clean exact prompt state. Failed source prompts never
+    // schedule a next scene (scheduling requires execution_success), and an
+    // unrelated failure must not cancel an already-valid continuation.
     const promptId = String(detail?.prompt_id ?? "");
     sceneRecords.delete(promptId);
     const wait = continuationTracker?.failed(promptId);
