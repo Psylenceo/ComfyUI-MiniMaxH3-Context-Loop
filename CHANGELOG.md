@@ -3,6 +3,21 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
+## v0.6.6 — Review Gate frame capture and prompt resizing
+
+- Promoted the tested Review Gate frame-capture feature from nightly: scrub a
+  saved preview and save a still as a tagged Project Asset Carousel picture.
+  Existing tags create numbered takes without replacing the original asset.
+- Capture uses the connected project's current name, requires a choice when
+  the destination is ambiguous, and refreshes only matching Carousels. Stale
+  tag lookups and repeated save clicks cannot redirect or duplicate a capture.
+- Serialized catalog mutations preserve concurrent captures; media paths,
+  timestamps, and destination folders are validated before publication.
+- Added a zoom-aware prompt-editor resize grip with saved height and
+  double-click reset. It is hidden when prompt editing is disabled.
+- Includes PR #46 with the tested capture fixes and PR #50. Nightly-only
+  workflow ownership and deferred-review features remain on nightly.
+
 ## v0.6.5 — Explicit upscale anchor settings and source summaries
 
 - Added semantic-anchor size and presentation-mode overrides to latent, pixel,

@@ -15,6 +15,13 @@ result later—without keeping the whole production in memory.
 
 ## Changelog
 
+### 0.6.6 — Review Gate capture and resizing
+
+- Capture a still from a saved Review Gate preview into the Project Asset
+  Carousel, with safe project selection and numbered tags for new takes.
+- Resize the optional prompt editor using its new drag handle; height is
+  saved with the workflow and double-click resets it.
+
 ### 0.6.5 — Upscale anchor overrides and clear checkpoint sources
 
 - Choose semantic-anchor size and mode for cached, rebuilt, or connected
@@ -141,6 +148,11 @@ upscale packs and example assets are listed in the [workflow catalog](example_wo
 
 For Studio workflows, set the run name in **Project Asset Carousel** instead.
 See [Getting started](docs/GETTING_STARTED.md) for setup and recovery steps.
+
+To reuse a still as a reference, scrub the saved Review Gate preview, click
+**Capture frame…**, check the destination project and tag, then **Save to
+Carousel**. Reusing a tag creates a numbered take without replacing the
+original asset or video. Capture requires `ffmpeg`.
 
 ## Choose a workflow
 
