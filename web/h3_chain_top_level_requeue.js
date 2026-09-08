@@ -153,7 +153,7 @@ function clearNotifications() {
 }
 
 function settingEnabled() {
-    return app.ui?.settings?.getSettingValue?.(SETTING_ID) === true;
+    return app.extensionManager?.setting?.get?.(SETTING_ID) === true;
 }
 
 function operationIsCurrent(epoch) {
@@ -392,7 +392,7 @@ async function processRequeue(record, epoch) {
             current: () => requireCurrentOperation(epoch),
             waitSafe: () => waitForSafeQueue(epoch),
             cleanup: async () => {
-                const delay = cleanupDelayMs(app.ui?.settings?.getSettingValue?.(DELAY_SETTING_ID));
+                const delay = cleanupDelayMs(app.extensionManager?.setting?.get?.(DELAY_SETTING_ID));
                 const remaining = delay - (Date.now() - startedAt);
                 if (remaining > 0) await sleep(remaining);
             },
@@ -481,34 +481,27 @@ async function checkPendingHandoffs() {
 
 app.registerExtension({
     name: "minimax_h3_context_loop.top_level_requeue",
-    init() {
-        app.ui?.settings?.addSetting?.({
+    settings: [
+        {
             id: SETTING_ID,
-            category: [
-                "MiniMax H3 Context Loop", "Interface", "Top-level requeue",
-            ],
+            category: ["MiniMax H3 Context Loop", "Interface", "Top-level requeue"],
             name: "Auto requeue next scene as a new top-level prompt",
             tooltip: "After a successful H3 terminal event, wait for a safe queue and the cleanup interval, claim the next-scene handoff, set Loop Start, and queue the same workflow as a new prompt.",
             type: "boolean",
             defaultValue: false,
-            onChange() {
-                if (!settingEnabled()) {
-                    requeueEpoch += 1;
-                    clearNotifications();
-                }
+            onChange(value) {
+                if (value !== true) { requeueEpoch += 1; clearNotifications(); }
             },
-        });
-        app.ui?.settings?.addSetting?.({
+        },
+        {
             id: DELAY_SETTING_ID,
-            category: [
-                "MiniMax H3 Context Loop", "Interface", "Top-level requeue",
-            ],
+            category: ["MiniMax H3 Context Loop", "Interface", "Top-level requeue"],
             name: "Requeue cleanup interval (ms)",
             tooltip: `Milliseconds to wait after the top-level terminal success before queueing the next scene (default ${DEFAULT_CLEANUP_DELAY_MS}).`,
             type: "number",
             defaultValue: DEFAULT_CLEANUP_DELAY_MS,
-        });
-    },
+        },
+    ],
     setup() {
         api.addEventListener("executed", (event) => onExecuted(event.detail));
         api.addEventListener("execution_start", (event) => onContinuationStart(event.detail));

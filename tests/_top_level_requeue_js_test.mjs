@@ -233,7 +233,13 @@ assert.match(source, /defaultValue:\s*DEFAULT_CLEANUP_DELAY_MS/);
 // Opt-in master switch.
 assert.match(source, /MiniMaxH3ContextLoop\.topLevelRequeue\b/);
 assert.match(source, /defaultValue:\s*false/);
-assert.match(source, /getSettingValue\?\.\(SETTING_ID\) === true/);
+assert.match(source, /settings:\s*\[/);
+assert.equal((source.match(/"MiniMaxH3ContextLoop\.topLevelRequeue"/g) ?? []).length, 1);
+assert.equal((source.match(/"MiniMaxH3ContextLoop\.topLevelRequeueCleanupDelay"/g) ?? []).length, 1);
+assert.doesNotMatch(source, /settings\.addSetting/);
+assert.match(source, /extensionManager\?\.setting\?\.get\?\.\(SETTING_ID\) === true/);
+assert.match(source, /extensionManager\?\.setting\?\.get\?\.\(DELAY_SETTING_ID\)/);
+assert.match(source, /onChange\(value\)[\s\S]*value !== true[\s\S]*requeueEpoch \+= 1[\s\S]*clearNotifications/);
 // Workflow/run identity validation before requeue.
 assert.match(source, /function requireVisibleWorkflow\(record\)/);
 assert.match(source, /workflowIdentity !== record\.workflowIdentity/);
