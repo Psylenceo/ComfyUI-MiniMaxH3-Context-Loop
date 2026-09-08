@@ -349,6 +349,46 @@ def main():
         asyncio.new_event_loop().run_until_complete(live_precedence_scenario())
         chain._ACTIVE_CANDIDATE_BATCHES.clear()
 
+    # Accepting a scene retires only older pending recovery snapshots for that
+    # exact run and scene; files and unrelated recovery inventory survive.
+    with tempfile.TemporaryDirectory() as raw_root:
+        run_dir = os.path.join(raw_root, "h3_chains", "live_run")
+        other_dir = os.path.join(raw_root, "h3_chains", "other_run")
+        os.makedirs(run_dir, exist_ok=True)
+        os.makedirs(other_dir, exist_ok=True)
+        for scene, token in ((1, "tok-old-1"), (1, "tok-old-2"),
+                             (1, "tok-old-3"), (1, "tok-current"),
+                             (2, "tok-scene-2")):
+            review_inv.write_review_snapshot(
+                run_dir, token, "live_run", scene, [], deadline=None,
+                server_now=10.0)
+        review_inv.write_review_snapshot(
+            other_dir, "tok-other", "other_run", 1, [], deadline=None,
+            server_now=10.0)
+        review_inv.mark_review_snapshot_decided(
+            run_dir, "tok-current", "approve", 11.0)
+        review_inv.mark_review_snapshot_decided(
+            run_dir, "tok-old-3", "retry", 11.0)
+        chain._retire_superseded_review_snapshots(
+            run_dir, "live_run", 1, "tok-current")
+        snapshots = {item["token"]: item for item in
+                     review_inv.load_review_snapshots(run_dir)}
+        assert snapshots["tok-current"]["decision_action"] == "approve"
+        assert snapshots["tok-old-1"]["decision_action"] == "superseded"
+        assert snapshots["tok-old-2"]["decision_action"] == "superseded"
+        assert snapshots["tok-old-3"]["decision_action"] == "retry"
+        assert snapshots["tok-scene-2"]["status"] == "pending"
+        assert os.path.exists(os.path.join(
+            run_dir, "orchestration", "review_tok-old-1.json"))
+        chain._output_root = lambda: str(raw_root)
+        chain._PENDING_REVIEWS.clear()
+        async def retired_inventory_scenario():
+            response = await chain._list_pending_reviews(FakeRequest())
+            tokens = {item["token"] for item in json.loads(response.text)["reviews"]}
+            assert "tok-old-1" not in tokens
+            assert "tok-scene-2" in tokens and "tok-other" in tokens
+        asyncio.new_event_loop().run_until_complete(retired_inventory_scenario())
+
     print("M5 durable review: saved candidates survive restart, approve "
           "creates next_scene handoff, approve & stop queues nothing, "
           "Plan unchanged pass")

@@ -21270,8 +21270,12 @@ class MiniMaxH3ChainReview:
                 if isinstance(locals().get("decision"), dict):
                     decided_action = str(
                         locals()["decision"].get("action") or "interrupted")
+                run_dir = _run_dir(plan)
                 _mark_review_snapshot_decided(
-                    _run_dir(plan), token, decided_action, time.time())
+                    run_dir, token, decided_action, time.time())
+                if decided_action in ("approve", "stop"):
+                    _retire_superseded_review_snapshots(
+                        run_dir, str(payload.get("run_name") or ""), index, token)
             except (OSError, TypeError, ValueError) as exc:
                 _LOG.warning(
                     "H3 Chain durable review snapshot update failed: %s", exc)
@@ -27103,6 +27107,23 @@ async def _submit_review_decision(request):
         "kept_candidate_count": len(
             decision.get("kept_candidate_revisions", ())),
     })
+
+
+def _retire_superseded_review_snapshots(
+        run_dir: str, run_name: str, scene: int, accepted_token: str) -> None:
+    """Retire obsolete recovery records after accepting this exact scene."""
+    for snapshot in _load_review_snapshots(run_dir):
+        if (snapshot.get("status") != "pending" or
+                str(snapshot.get("token") or "") == accepted_token or
+                str(snapshot.get("run_name") or "") != run_name):
+            continue
+        try:
+            snapshot_scene = int(snapshot.get("scene"))
+        except (TypeError, ValueError):
+            continue
+        if snapshot_scene == scene:
+            _mark_review_snapshot_decided(
+                run_dir, str(snapshot.get("token") or ""), "superseded", time.time())
 
 
 async def _list_pending_reviews(_request):
