@@ -103,4 +103,10 @@ const rejectedClaim = await selectAndClaim({planNode:plan,record:{...record,runN
 let rejectedSubmits=0;
 await deliverClaimed({current:()=>{},handoff:rejectedClaim,prepare:async()=>{},submit:async()=>{rejectedSubmits++;return {kind:"rejected"};},release:async ()=>rejectedFlow.push(["release",rejectedClaim._resolvedRunName,rejectedClaim.handoff_id]),transition:async()=>rejectedFlow.push(["transition"]),track:()=>rejectedFlow.push(["track"])});
 assert.deepEqual(rejectedFlow,[["list","actual-run"],["claim","actual-run",exact.handoff_id],["release","actual-run",exact.handoff_id]]);assert.equal(rejectedSubmits,1);
+const uncertainFlow=[];
+const uncertainClaim = await selectAndClaim({planNode:plan,record:{...record,runName:"actual-run"},match:matchingNextSceneHandoff,
+ loadHandoffs:async run=>{uncertainFlow.push(["list",run]);return {handoffs:[exact]};},claim:async (run,id)=>uncertainFlow.push(["claim",run,id])});
+let uncertainSubmits=0;
+await deliverClaimed({current:()=>{},handoff:uncertainClaim,prepare:async()=>{},submit:async()=>{uncertainSubmits++;throw Error("network");},release:async()=>uncertainFlow.push(["release"]),transition:async (_handoff,status)=>uncertainFlow.push(["transition",uncertainClaim._resolvedRunName,uncertainClaim.handoff_id,status]),track:()=>uncertainFlow.push(["track"])});
+assert.deepEqual(uncertainFlow,[["list","actual-run"],["claim","actual-run",exact.handoff_id],["transition","actual-run",exact.handoff_id,"uncertain"]]);assert.equal(uncertainSubmits,1);
 console.log("top-level requeue coordinator lifecycle: ok");
