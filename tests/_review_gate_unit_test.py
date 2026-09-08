@@ -305,12 +305,17 @@ def main():
     # recovery snapshot, while unrelated durable recovery remains visible.
     with tempfile.TemporaryDirectory() as raw_root:
         base = os.path.join(raw_root, "h3_chains")
-        for run_name, token in (("live_run", "tok-live"),
-                                ("other_run", "tok-other")):
+        for run_name, scene, token in (
+                ("live_run", 1, "tok-live"),
+                ("live_run", 1, "tok-old-1"),
+                ("live_run", 1, "tok-old-2"),
+                ("live_run", 1, "tok-old-3"),
+                ("live_run", 2, "tok-scene-2"),
+                ("other_run", 1, "tok-other")):
             run_dir = os.path.join(base, run_name)
             os.makedirs(run_dir, exist_ok=True)
             review_inv.write_review_snapshot(
-                run_dir, token, run_name, 1, [], deadline=None,
+                run_dir, token, run_name, scene, [], deadline=None,
                 server_now=10.0)
         chain._output_root = lambda: str(raw_root)
         chain._PENDING_REVIEWS.clear()
@@ -334,9 +339,12 @@ def main():
             assert live[0]["candidate_count"] == 3
             assert live[0]["candidate_generation_complete"] is True
             assert live[0]["candidate_batch_active"] is True
-            other = [item for item in listing if item["token"] == "tok-other"]
-            assert len(other) == 1 and other[0]["durable"] is True
-            assert other[0]["actionable"] is False
+            assert not any(item["token"] in {"tok-old-1", "tok-old-2", "tok-old-3"}
+                           for item in listing)
+            for token in ("tok-scene-2", "tok-other"):
+                recovered = [item for item in listing if item["token"] == token]
+                assert len(recovered) == 1 and recovered[0]["durable"] is True
+                assert recovered[0]["actionable"] is False
 
         asyncio.new_event_loop().run_until_complete(live_precedence_scenario())
         chain._ACTIVE_CANDIDATE_BATCHES.clear()

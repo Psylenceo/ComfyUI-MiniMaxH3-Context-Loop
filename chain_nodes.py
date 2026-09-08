@@ -27108,6 +27108,17 @@ async def _submit_review_decision(request):
 async def _list_pending_reviews(_request):
     reviews = []
     live_tokens = set()
+    live_run_scenes = set()
+
+    def review_run_scene_key(payload: dict[str, Any],
+                             fallback_run_name: str = "") -> tuple[str, int] | None:
+        run_name = str(payload.get("run_name") or fallback_run_name).strip()
+        try:
+            scene = int(payload.get("clip_index", payload.get("scene")))
+        except (TypeError, ValueError):
+            return None
+        return (run_name, scene) if run_name and scene > 0 else None
+
     _review_candidate_batch_cleanup()
     for entry in list(_ACTIVE_CANDIDATE_BATCHES.values()):
         payload = entry.get("public")
@@ -27118,6 +27129,9 @@ async def _list_pending_reviews(_request):
         if token in live_tokens:
             continue
         live_tokens.add(token)
+        key = review_run_scene_key(payload)
+        if key is not None:
+            live_run_scenes.add(key)
         payload["server_now"] = time.time()
         reviews.append(payload)
     # HTTP and execution can run on different threads/loops. Snapshot first so
@@ -27131,6 +27145,9 @@ async def _list_pending_reviews(_request):
         if token in live_tokens:
             continue
         live_tokens.add(token)
+        key = review_run_scene_key(payload)
+        if key is not None:
+            live_run_scenes.add(key)
         payload["server_now"] = time.time()
         reviews.append(payload)
     # M5 durable review: after a browser refresh (or a ComfyUI crash/restart)
@@ -27151,7 +27168,8 @@ async def _list_pending_reviews(_request):
             if snapshot.get("status") != "pending":
                 continue
             token = str(snapshot.get("token") or "")
-            if not token or token in live_tokens:
+            if (not token or token in live_tokens or
+                    review_run_scene_key(snapshot, run_name) in live_run_scenes):
                 continue
             live_tokens.add(token)
             reviews.append({
