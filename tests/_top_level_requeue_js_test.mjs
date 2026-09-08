@@ -275,8 +275,11 @@ assert.match(source, /handleUncertainSubmission/);
 assert.match(source, /classifySubmissionOutcome/);
 assert.match(source, /requireCurrentOperation\(epoch\)/);
 assert.match(source, /execution_start/);
-// Failures release the claim for manual recovery.
-assert.match(source, /handoffs\/release/);
+// Both release paths use the coordinator's checked HTTP helper.
+assert.match(source, /releaseHandoffChecked/);
+assert.match(source, /release: \(handoff, releasedRun\) => releaseHandoffChecked/);
+assert.match(source, /releaseHandoff: \(releasedRun, releasedHandoff\) => releaseHandoffChecked/);
+assert.doesNotMatch(source, /fetchApi\([^\n]*handoffs\/release/);
 assert.match(source, /queue the workflow manually/);
 // Browser/server restart: show pending state, never auto-run.
 assert.match(source, /graphChanged/);

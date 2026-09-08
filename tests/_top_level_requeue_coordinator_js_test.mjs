@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import {runRequeueLifecycle, selectAndClaim, authoritativeRunName, createContinuationTracker, deliverClaimed, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
+import {runRequeueLifecycle, selectAndClaim, authoritativeRunName, createContinuationTracker, deliverClaimed, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome, releaseHandoffChecked} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
 import {matchingNextSceneHandoff} from "../web/h3_chain_top_level_requeue_core.mjs";
 
 const record = {runName:"run", clipIndex:3, endClip:6, workflowFingerprint:"wf-current", sourceRevision:"rev-current", checkpointSha:"sha-current"};
@@ -26,6 +26,9 @@ async function scenario(which) {
 let r = await scenario("poll"); assert.deepEqual(r, {claims:0, submits:0, releases:0});
 r = await scenario("cleanup"); assert.deepEqual(r, {claims:0, submits:0, releases:0});
 r = await scenario("claim"); assert.deepEqual(r, {claims:1, submits:0, releases:1});
+let cancellationClaims=0, cancellationReleases=0, cancellationSubmits=0, cancellationEnabled=true;
+await assert.rejects(() => runRequeueLifecycle({current:()=>{if(!cancellationEnabled) throw Error("disabled");}, waitSafe:async()=>{}, cleanup:async()=>{}, resolveRun:async()=>record, loadCheckpoint:async()=>({revision:record.sourceRevision,metadata_sha256:record.checkpointSha}), listHandoffs:async()=>({handoffs:[exact]}), matchHandoff:matchingNextSceneHandoff, claimHandoff:async()=>{cancellationClaims++; cancellationEnabled=false;}, prepareResume:async()=>{}, submit:async()=>cancellationSubmits++, release:async()=>{cancellationReleases++; throw Error("HTTP 500");}}));
+assert.deepEqual({cancellationClaims,cancellationReleases,cancellationSubmits},{cancellationClaims:1,cancellationReleases:1,cancellationSubmits:0});
 const stale = [
  {...exact,handoff_id:"revision",source_revision:"bad"}, {...exact,handoff_id:"sha",source_checkpoint_sha256:"bad"},
  {...exact,handoff_id:"wf",workflow_fingerprint:"bad"}, {...exact,handoff_id:"range",end_clip:5},
@@ -47,6 +50,20 @@ for (const mode of ["rejected", "network"]) {
  await runRequeueLifecycle({current:()=>{},waitSafe:async()=>{},cleanup:async()=>{},select:async()=>exact,claim:async()=>claim++,prepare:async()=>{},submit:async()=>{submit++; if(mode==="network") throw Error("network"); return {kind:"rejected"};},release:async()=>release++,uncertain:async()=>uncertain++});
  assert.equal(claim,1); assert.equal(submit,1); assert.equal(release,mode==="rejected"?1:0); assert.equal(uncertain,mode==="network"?1:0);
 }
+const releaseCalls=[];
+const releaseApi={fetchApi:async (url, options) => { releaseCalls.push({url,options}); return {ok:true,status:200}; }};
+await releaseHandoffChecked({api:releaseApi,apiBase:"/base",runName:"run",handoffId:"handoff",reason:"cancelled"});
+assert.equal(releaseCalls.length,1); assert.equal(releaseCalls[0].url,"/base/handoffs/release"); assert.equal(releaseCalls[0].options.method,"POST"); assert.deepEqual(JSON.parse(releaseCalls[0].options.body),{run_name:"run",handoff_id:"handoff",reason:"cancelled"});
+for (const [response, expected] of [
+ [{ok:false,status:409,json:async()=>({error:"handoff is not claimed"})},"handoff is not claimed"],
+ [{ok:false,status:500,json:async()=>({error:"backend exploded"})},"backend exploded"],
+ [{ok:false,status:500,json:async()=>{throw Error("bad json");}},"HTTP 500"],
+]) await assert.rejects(() => releaseHandoffChecked({api:{fetchApi:async()=>response},apiBase:"/base",runName:"run",handoffId:"handoff",reason:"x"}), new RegExp(expected));
+await assert.rejects(() => releaseHandoffChecked({api:{fetchApi:async()=>{throw Error("network down");}},apiBase:"/base",runName:"run",handoffId:"handoff",reason:"x"}),/network down/);
+let missingFetches=0;
+await assert.rejects(() => releaseHandoffChecked({api:{fetchApi:async()=>missingFetches++},apiBase:"/base",runName:"",handoffId:"handoff",reason:"x"}),/run name/);
+await assert.rejects(() => releaseHandoffChecked({api:{fetchApi:async()=>missingFetches++},apiBase:"/base",runName:"run",handoffId:"",reason:"x"}),/handoff ID/);
+assert.equal(missingFetches,0);
 const manager={comfyClass:"MiniMaxH3ProjectAssetManager",widgets:[{name:"run_name",value:"actual-run"}]};
 const plan={widgets:[{name:"run_name",value:"stale-plan-name"}],inputs:[{name:"project_assets",link:1}],graph:{links:{1:{origin_id:2}},getNodeById:()=>manager}};
 assert.equal(authoritativeRunName(plan),"actual-run");
@@ -89,6 +106,9 @@ assert.equal(acceptedCalls.length,2);
 const releases=[];
 assert.deepEqual(await handleConfirmedSubmissionRejection({runName:"actual-run",handoffId:"handoff-123",releaseHandoff:async (...x)=>releases.push(x)}),{kind:"rejected",released:true});
 assert.deepEqual(releases,[["actual-run","handoff-123"]]);
+let failedRejectionReleases=0;
+await assert.rejects(() => handleConfirmedSubmissionRejection({runName:"actual-run",handoffId:"handoff-123",releaseHandoff:(runName,handoffId)=>releaseHandoffChecked({api:{fetchApi:async()=>{failedRejectionReleases++; return {ok:false,status:500,json:async()=>({error:"release unavailable"})};}},apiBase:"/base",runName,handoffId,reason:"rejected"})}),/release unavailable/);
+assert.equal(failedRejectionReleases,1);
 await assert.rejects(handleConfirmedSubmissionRejection({runName:"",handoffId:"handoff-123",releaseHandoff:async()=>releases.push("bad")})); assert.equal(releases.length,1);
 const uncertainCalls=[];
 assert.deepEqual(await handleUncertainSubmission({runName:"actual-run",handoffId:"handoff-123",markUncertain:async (...x)=>uncertainCalls.push(x)}),{kind:"uncertain"});

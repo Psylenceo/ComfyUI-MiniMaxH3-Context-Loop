@@ -15,7 +15,7 @@ import {
     loopEndMatchesObservedCurrent,
 } from "./h3_chain_top_level_requeue_core.mjs?v=0.6.5";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.7";
-import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
+import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome, releaseHandoffChecked} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
 
 // Top-level scene requeue coordinator (M3, candidate_count = 1).
 //
@@ -404,7 +404,7 @@ async function processRequeue(record, epoch) {
             claimHandoff: async (runName, handoff) => { const response = await api.fetchApi(`${HANDOFF_API_BASE}/handoffs/claim`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({run_name:runName,handoff_id:handoff.handoff_id,source_prompt_id:record.promptId})}); if (response.status === 409) throw new Error("The handoff was already claimed; nothing was queued."); if (!response.ok) throw new Error(`Claiming the handoff failed (HTTP ${response.status}).`); },
             prepareResume: async (_runName, handoff, context) => { const resume = resumeHint(handoff); const startWidget = widgetByName(context.startNode, "start_clip"); const rangeWidget = widgetByName(context.startNode, "scene_range"); if (!resume || !startWidget) throw new Error("The handoff has no resume hint or Loop Start widget."); startWidget.value = resume.startClip; startWidget.callback?.(resume.startClip); if (rangeWidget) { rangeWidget.value = resume.sceneRange; rangeWidget.callback?.(resume.sceneRange); } context.startNode.graph?.setDirtyCanvas?.(true, true); showTransient(`Queueing scene ${resume.startClip} as a new top-level prompt…`); },
             submit: () => queuePromptWithIdentity(),
-            release: async (handoff, releasedRun) => api.fetchApi(`${HANDOFF_API_BASE}/handoffs/release`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({run_name:releasedRun,handoff_id:handoff.handoff_id,reason:"Automatic requeue was cancelled."})}),
+            release: (handoff, releasedRun) => releaseHandoffChecked({api, apiBase:HANDOFF_API_BASE, runName:releasedRun, handoffId:handoff.handoff_id, reason:"Automatic requeue was cancelled."}),
         });
         if (!lifecycle) { clearNotifications(); return; }
         if (lifecycle.kind === "cancelled") { clearNotifications(); return; }
@@ -425,15 +425,13 @@ async function processRequeue(record, epoch) {
                 try {
                     await handleConfirmedSubmissionRejection({
                         runName, handoffId: handoff.handoff_id,
-                        releaseHandoff: async (releasedRun, releasedHandoff) => api.fetchApi(
-                            `${HANDOFF_API_BASE}/handoffs/release`, {
-                                method: "POST", headers: {"Content-Type": "application/json"},
-                                body: JSON.stringify({run_name: releasedRun, handoff_id: releasedHandoff,
-                                    reason: String(error?.message || error)}),
-                            }),
+                        releaseHandoff: (releasedRun, releasedHandoff) => releaseHandoffChecked({
+                            api, apiBase: HANDOFF_API_BASE, runName: releasedRun, handoffId: releasedHandoff,
+                            reason: String(error?.message || error),
+                        }),
                     });
-                } catch (_releaseError) {
-                    // Keep the durable claim; manual recovery can release it.
+                } catch (releaseError) {
+                    throw new Error(`ComfyUI rejected the prompt, and releasing the claimed H3 handoff also failed: ${releaseError?.message || releaseError}`);
                 }
             }
             throw error;

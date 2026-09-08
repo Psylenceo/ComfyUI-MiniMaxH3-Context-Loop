@@ -9,6 +9,24 @@ export async function classifySubmissionOutcome({outcome, error, accepted, rejec
     await uncertain(); return {kind:"uncertain"};
 }
 
+export async function releaseHandoffChecked({api, apiBase, runName, handoffId, reason}) {
+    const acceptedRunName = String(runName ?? "").trim();
+    const acceptedHandoffId = String(handoffId ?? "").trim();
+    if (!acceptedRunName) throw new Error("Releasing a handoff requires a run name.");
+    if (!acceptedHandoffId) throw new Error("Releasing a handoff requires a handoff ID.");
+    const response = await api.fetchApi(`${apiBase}/handoffs/release`, {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({run_name: acceptedRunName, handoff_id: acceptedHandoffId, reason}),
+    });
+    if (response.ok) return;
+    let detail = "";
+    try {
+        const payload = await response.json();
+        detail = String(payload?.error ?? payload?.message ?? "").trim();
+    } catch (_) { /* HTTP status below is the fallback. */ }
+    throw new Error(`Releasing the claimed H3 handoff failed: ${detail || `HTTP ${response.status}`}. The handoff may remain claimed; recover/release it manually.`);
+}
+
 export async function handleUncertainSubmission({runName, handoffId, markUncertain}) {
     if (!String(runName ?? "").trim() || !String(handoffId ?? "").trim()) throw new Error("Uncertain delivery requires run and handoff identity.");
     await markUncertain(runName, handoffId, "uncertain");
