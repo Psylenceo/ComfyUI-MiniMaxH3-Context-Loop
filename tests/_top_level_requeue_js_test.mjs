@@ -236,7 +236,7 @@ assert.doesNotMatch(source, /plan_json/);
 // queued/consumed lifecycle via the durable routes.
 assert.match(source, /handoffs\/transition/);
 assert.match(source, /finalizeAcceptedSubmission/);
-assert.match(source, /"uncertain"/);
+assert.match(source, /handleUncertainSubmission/);
 assert.match(source, /accepted === false/);
 assert.match(source, /requireCurrentOperation\(epoch\)/);
 assert.match(source, /execution_start/);

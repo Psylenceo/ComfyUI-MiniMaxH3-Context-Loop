@@ -1,3 +1,9 @@
+export async function handleUncertainSubmission({runName, handoffId, markUncertain}) {
+    if (!String(runName ?? "").trim() || !String(handoffId ?? "").trim()) throw new Error("Uncertain delivery requires run and handoff identity.");
+    await markUncertain(runName, handoffId, "uncertain");
+    return {kind: "uncertain"};
+}
+
 export async function handleConfirmedSubmissionRejection({runName, handoffId, releaseHandoff}) {
     if (!String(runName ?? "").trim() || !String(handoffId ?? "").trim()) {
         throw new Error("Confirmed rejection requires run and handoff identity.");

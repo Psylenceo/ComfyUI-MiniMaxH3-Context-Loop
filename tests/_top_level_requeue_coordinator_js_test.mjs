@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import {runRequeueLifecycle, selectAndClaim, authoritativeRunName, createContinuationTracker, deliverClaimed, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
+import {runRequeueLifecycle, selectAndClaim, authoritativeRunName, createContinuationTracker, deliverClaimed, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
 import {matchingNextSceneHandoff} from "../web/h3_chain_top_level_requeue_core.mjs";
 
 function gate() { let resolve; return {promise: new Promise(r => { resolve = r; }), resolve}; }
@@ -83,4 +83,18 @@ const releases=[];
 assert.deepEqual(await handleConfirmedSubmissionRejection({runName:"actual-run",handoffId:"handoff-123",releaseHandoff:async (...x)=>releases.push(x)}),{kind:"rejected",released:true});
 assert.deepEqual(releases,[["actual-run","handoff-123"]]);
 await assert.rejects(handleConfirmedSubmissionRejection({runName:"",handoffId:"handoff-123",releaseHandoff:async()=>releases.push("bad")})); assert.equal(releases.length,1);
+const uncertainCalls=[];
+assert.deepEqual(await handleUncertainSubmission({runName:"actual-run",handoffId:"handoff-123",markUncertain:async (...x)=>uncertainCalls.push(x)}),{kind:"uncertain"});
+assert.deepEqual(uncertainCalls,[["actual-run","handoff-123","uncertain"]]);
+await assert.rejects(handleUncertainSubmission({runName:"",handoffId:"handoff-123",markUncertain:async()=>uncertainCalls.push("bad")})); assert.equal(uncertainCalls.length,1);
+const projectFlow=[];
+const claimedProject = await selectAndClaim({planNode:plan, record:{...record,runName:"actual-run"}, match:matchingNextSceneHandoff,
+ loadHandoffs:async run=>{projectFlow.push(["list",run]); return {handoffs:[exact]};},
+ claim:async (run,id)=>projectFlow.push(["claim",run,id])});
+let projectSubmits=0;
+await deliverClaimed({current:()=>{}, handoff:claimedProject, prepare:async()=>{}, submit:async()=>{projectSubmits++; return {kind:"accepted",promptId:"project-prompt-123"};}, release:async()=>{},
+ transition:async()=>{}, track:()=>{}});
+await finalizeAcceptedSubmission({runName:claimedProject._resolvedRunName,handoffId:claimedProject.handoff_id,promptId:"project-prompt-123",transitionQueued:async (...x)=>projectFlow.push(["queued",...x]),trackContinuation:(...x)=>projectFlow.push(["track",...x])});
+assert.deepEqual(projectFlow,[["list","actual-run"],["claim","actual-run",exact.handoff_id],["queued","actual-run",exact.handoff_id,"queued","project-prompt-123"],["track","actual-run",exact.handoff_id,"project-prompt-123"]]);
+assert.equal(projectSubmits,1);
 console.log("top-level requeue coordinator lifecycle: ok");

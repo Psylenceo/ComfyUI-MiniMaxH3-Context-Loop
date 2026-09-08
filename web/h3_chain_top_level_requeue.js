@@ -13,7 +13,7 @@ import {
     resumeHint,
 } from "./h3_chain_top_level_requeue_core.mjs?v=0.6.5";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.2";
-import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
+import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
 
 // Top-level scene requeue coordinator (M3, candidate_count = 1).
 //
@@ -479,7 +479,7 @@ async function processRequeue(record, epoch) {
                 if (submissionFailure(error) === "rejected") {
                     throw new Error("ComfyUI rejected the prompt validation.");
                 }
-                await postHandoffTransition(runName, handoff.handoff_id, "uncertain");
+                await handleUncertainSubmission({runName, handoffId: handoff.handoff_id, markUncertain: postHandoffTransition});
                 queued = true;
                 throw error;
             }
@@ -487,7 +487,7 @@ async function processRequeue(record, epoch) {
                 throw new Error("ComfyUI rejected the prompt validation.");
             }
             if (submission.accepted !== true || !submission.promptId) {
-                await postHandoffTransition(runName, handoff.handoff_id, "uncertain");
+                await handleUncertainSubmission({runName, handoffId: handoff.handoff_id, markUncertain: postHandoffTransition});
                 queued = true;
                 throw new Error("Queue delivery is uncertain; recover this handoff manually.");
             }
