@@ -59,14 +59,24 @@ export function runBeforeQueuedHooks(graph, {isPartialExecution = false} = {}) {
 
 // Testable delivery primitive shared by the browser coordinator.  It keeps
 // prompt submission certainty separate from the UI/event wiring.
-export async function submitWithPromptIdentity({app, api}) {
+export async function submitWithPromptIdentity({app, api, current = () => {}}) {
+    const checkPreDelivery = () => {
+        try { current(); }
+        catch (error) {
+            const cancellation = error instanceof Error ? error : new Error(String(error));
+            cancellation.preDelivery = true;
+            throw cancellation;
+        }
+    };
     if (typeof app.graphToPrompt === "function" && typeof api.queuePrompt === "function") {
         runBeforeQueuedHooks(app.graph);
         const prompt = await app.graphToPrompt(app.graph);
+        checkPreDelivery();
         const result = await api.queuePrompt(0, prompt);
         const promptId = String(result?.prompt_id ?? "");
         return promptId ? {kind: "accepted", promptId} : {kind: "uncertain", promptId: ""};
     }
+    checkPreDelivery();
     const result = await app.queuePrompt(0, 1);
     if (result === false) return {kind: "rejected", promptId: ""};
     const promptId = typeof result === "object" ? String(result.prompt_id ?? result.promptId ?? "") : "";
@@ -96,7 +106,13 @@ export async function runRequeueLifecycle({current, waitSafe, cleanup, resolveRu
         }
         if (submit) {
             try { return {runName, handoff, checkpoint, context, submission: await submit(runName, handoff, context)}; }
-            catch (submissionError) { return {runName, handoff, checkpoint, context, submissionError}; }
+            catch (submissionError) {
+                if (submissionError?.preDelivery === true) {
+                    await release?.(handoff, runName);
+                    return {kind: "cancelled", runName, handoff, checkpoint, context, cancellationError: submissionError};
+                }
+                return {runName, handoff, checkpoint, context, submissionError};
+            }
         }
         return {runName, handoff, checkpoint, context};
     }

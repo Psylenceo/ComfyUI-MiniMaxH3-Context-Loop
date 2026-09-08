@@ -16,7 +16,7 @@ import {
     topLevelRequeueCompletionMatches,
 } from "./h3_chain_top_level_requeue_core.mjs?v=0.6.6";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.7";
-import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome, releaseHandoffChecked} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
+import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome, releaseHandoffChecked} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.6";
 
 // Top-level scene requeue coordinator (M3, candidate_count = 1).
 //
@@ -361,8 +361,8 @@ async function verifyPredecessorCheckpoint(runName, predecessor) {
 // discards the server response.  Use its underlying public API when available
 // so the prompt_id that /prompt accepted is retained; retain the legacy wrapper
 // fallback only for older frontends which return an object.
-async function queuePromptWithIdentity() {
-    const result = await submitWithPromptIdentity({app, api});
+async function queuePromptWithIdentity(current) {
+    const result = await submitWithPromptIdentity({app, api, current});
     return {accepted: result.kind === "accepted" ? true : result.kind === "rejected" ? false : null,
         promptId: result.promptId};
 }
@@ -409,7 +409,7 @@ async function processRequeue(record, epoch) {
             matchHandoff: matchingNextSceneHandoff,
             claimHandoff: async (runName, handoff) => { const response = await api.fetchApi(`${HANDOFF_API_BASE}/handoffs/claim`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({run_name:runName,handoff_id:handoff.handoff_id,source_prompt_id:record.promptId})}); if (response.status === 409) throw new Error("The handoff was already claimed; nothing was queued."); if (!response.ok) throw new Error(`Claiming the handoff failed (HTTP ${response.status}).`); },
             prepareResume: async (_runName, handoff, context) => { const resume = resumeHint(handoff); const startWidget = widgetByName(context.startNode, "start_clip"); const rangeWidget = widgetByName(context.startNode, "scene_range"); if (!resume || !startWidget) throw new Error("The handoff has no resume hint or Loop Start widget."); startWidget.value = resume.startClip; startWidget.callback?.(resume.startClip); if (rangeWidget) { rangeWidget.value = resume.sceneRange; rangeWidget.callback?.(resume.sceneRange); } context.startNode.graph?.setDirtyCanvas?.(true, true); showTransient(`Queueing scene ${resume.startClip} as a new top-level prompt…`); },
-            submit: () => queuePromptWithIdentity(),
+            submit: () => queuePromptWithIdentity(() => requireCurrentOperation(epoch)),
             release: (handoff, releasedRun) => releaseHandoffChecked({api, apiBase:HANDOFF_API_BASE, runName:releasedRun, handoffId:handoff.handoff_id, reason:"Automatic requeue was cancelled."}),
         });
         if (!lifecycle) { clearNotifications(); return; }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import {runRequeueLifecycle, selectAndClaim, authoritativeRunName, createContinuationTracker, deliverClaimed, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome, releaseHandoffChecked} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
+import {runRequeueLifecycle, submitWithPromptIdentity, selectAndClaim, authoritativeRunName, createContinuationTracker, deliverClaimed, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome, releaseHandoffChecked} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
 import {matchingNextSceneHandoff} from "../web/h3_chain_top_level_requeue_core.mjs";
 
 const record = {runName:"run", clipIndex:3, endClip:6, workflowFingerprint:"wf-current", sourceRevision:"rev-current", checkpointSha:"sha-current"};
@@ -29,6 +29,14 @@ r = await scenario("claim"); assert.deepEqual(r, {claims:1, submits:0, releases:
 let cancellationClaims=0, cancellationReleases=0, cancellationSubmits=0, cancellationEnabled=true;
 await assert.rejects(() => runRequeueLifecycle({current:()=>{if(!cancellationEnabled) throw Error("disabled");}, waitSafe:async()=>{}, cleanup:async()=>{}, resolveRun:async()=>record, loadCheckpoint:async()=>({revision:record.sourceRevision,metadata_sha256:record.checkpointSha}), listHandoffs:async()=>({handoffs:[exact]}), matchHandoff:matchingNextSceneHandoff, claimHandoff:async()=>{cancellationClaims++; cancellationEnabled=false;}, prepareResume:async()=>{}, submit:async()=>cancellationSubmits++, release:async()=>{cancellationReleases++; throw Error("HTTP 500");}}));
 assert.deepEqual({cancellationClaims,cancellationReleases,cancellationSubmits},{cancellationClaims:1,cancellationReleases:1,cancellationSubmits:0});
+const serializationGate=gate(), submissionOrder=[]; let submissionEnabled=true, directQueueCalls=0;
+const pendingSubmission=submitWithPromptIdentity({app:{graph:{nodes:[{widgets:[{beforeQueued:()=>submissionOrder.push("beforeQueued")}]}]},graphToPrompt:async()=>{submissionOrder.push("serialize-start");await serializationGate.promise;submissionOrder.push("serialize-end");return {}; }},api:{queuePrompt:async()=>{directQueueCalls++;submissionOrder.push("queue");return {prompt_id:"never"};}},current:()=>{submissionOrder.push("current");if(!submissionEnabled)throw Error("disabled");}});
+await Promise.resolve(); submissionEnabled=false; serializationGate.resolve();
+await assert.rejects(pendingSubmission,error=>error.preDelivery===true);
+assert.equal(directQueueCalls,0); assert.deepEqual(submissionOrder,["beforeQueued","serialize-start","serialize-end","current"]);
+const enabledOrder=[];
+await submitWithPromptIdentity({app:{graph:{nodes:[{widgets:[{beforeQueued:()=>enabledOrder.push("beforeQueued")}]}]},graphToPrompt:async()=>{enabledOrder.push("serialize-start");enabledOrder.push("serialize-end");return {}; }},api:{queuePrompt:async()=>{enabledOrder.push("queue");return {prompt_id:"ordered"};}},current:()=>enabledOrder.push("current")});
+assert.deepEqual(enabledOrder,["beforeQueued","serialize-start","serialize-end","current","queue"]);
 const stale = [
  {...exact,handoff_id:"revision",source_revision:"bad"}, {...exact,handoff_id:"sha",source_checkpoint_sha256:"bad"},
  {...exact,handoff_id:"wf",workflow_fingerprint:"bad"}, {...exact,handoff_id:"range",end_clip:5},
