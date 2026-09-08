@@ -1775,6 +1775,15 @@ function mount(node) {
             ...data,
             local_deadline: localDeadline,
         };
+        const candidateBatchComplete = Boolean(current?.candidate_generation_complete) ||
+            (Array.isArray(current?.candidates) && current.candidates.length >=
+                Number(current?.candidate_count));
+        if (sameToken && current?.actionable !== false &&
+                Number(current?.candidate_count) > 1 && candidateBatchComplete &&
+                !current?.candidate_batch_command_pending) {
+            root.classList.remove("h3r-busy");
+            setActionsEnabled(true);
+        }
         if (!sameToken) {
             root.classList.remove("h3r-busy");
             setActionsEnabled(true);

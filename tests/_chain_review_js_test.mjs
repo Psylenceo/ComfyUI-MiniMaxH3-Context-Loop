@@ -442,5 +442,11 @@ assert.match(reviewSource, /setPointerCapture/);
 assert.match(reviewSource, /visualHeight \/ layoutHeight/);
 assert.match(reviewSource, /videoPanel\.offsetHeight, true/);
 assert.doesNotMatch(reviewSource, /\/h3_motion_context\/review/);
+const reviewHandlerStart = reviewSource.indexOf("node._h3ReviewHandler =");
+const reviewHandlerSource = reviewSource.slice(reviewHandlerStart);
+assert.match(reviewHandlerSource, /const candidateBatchComplete = Boolean\(current\?\.candidate_generation_complete\) \|\|[\s\S]*current\.candidates\.length >=[\s\S]*candidate_count/);
+assert.match(reviewHandlerSource, /sameToken && current\?\.actionable !== false &&[\s\S]*candidate_count\) > 1 && candidateBatchComplete &&[\s\S]*!current\?\.candidate_batch_command_pending/);
+assert.match(reviewHandlerSource, /candidateBatchComplete &&[\s\S]*root\.classList\.remove\("h3r-busy"\);[\s\S]*setActionsEnabled\(true\)/);
+assert.match(reviewSource, /if \(enabled && current\?\.candidate_batch_active\) \{[\s\S]*retryButton\.disabled = true;[\s\S]*rerollButton\.disabled = true;[\s\S]*stopButton\.disabled = true;/);
 
 console.log("H3 Chain Review editor helpers: ok");
