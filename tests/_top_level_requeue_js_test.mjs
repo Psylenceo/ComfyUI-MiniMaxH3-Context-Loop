@@ -21,6 +21,7 @@ import {
     shouldScheduleTopLevelRequeueSuccess,
     handleTopLevelRequeueSuccessScheduling,
     loopEndMatchesObservedCurrent,
+    topLevelRequeueCompletionMatches,
 } from "../web/h3_chain_top_level_requeue_core.mjs";
 
 assert.equal(shouldScheduleTopLevelRequeueSuccess({runName:"run",loopEndExecuted:true,executionMode:REQUEUE_MODE,clipIndex:1,endClip:2}),true);
@@ -30,6 +31,15 @@ const currentA={}, currentB={};
 assert.equal(loopEndMatchesObservedCurrent({record:{displayNode:"a"},loopEndNode:{},resolveDisplayNode:id=>id==="a"?currentA:null,findUpstreamCurrent:()=>currentA}),true);
 assert.equal(loopEndMatchesObservedCurrent({record:{displayNode:"a"},loopEndNode:{},resolveDisplayNode:()=>currentA,findUpstreamCurrent:()=>currentB}),false);
 assert.equal(loopEndMatchesObservedCurrent({record:{},loopEndNode:{},resolveDisplayNode:()=>currentA,findUpstreamCurrent:()=>currentA}),false);
+const completionRecord={runName:"run-a",clipIndex:1,endClip:2,workflowFingerprint:"fp-a"};
+const completionPayload={run_name:"run-a",predecessor_scene:1,scene:2,end_clip:2,workflow_fingerprint:"fp-a",handoff_id:"handoff-a"};
+assert.equal(topLevelRequeueCompletionMatches(completionRecord,completionPayload),true);
+for (const invalid of [
+    {...completionPayload,run_name:"other"}, {...completionPayload,predecessor_scene:2},
+    {...completionPayload,scene:3}, {...completionPayload,end_clip:3},
+    {...completionPayload,workflow_fingerprint:"other"}, {...completionPayload,handoff_id:""},
+]) assert.equal(topLevelRequeueCompletionMatches(completionRecord,invalid),false);
+assert.equal(topLevelRequeueCompletionMatches(completionRecord,null),false);
 let scheduled=0;
 assert.equal(handleTopLevelRequeueSuccessScheduling({record:{runName:"run",loopEndExecuted:false,executionMode:REQUEUE_MODE,clipIndex:1,endClip:2},scheduleRequeue:()=>scheduled++}),false); assert.equal(scheduled,0);
 assert.equal(handleTopLevelRequeueSuccessScheduling({record:{runName:"run",loopEndExecuted:true,executionMode:REQUEUE_MODE,clipIndex:1,endClip:2},scheduleRequeue:()=>scheduled++}),true); assert.equal(scheduled,1);
@@ -239,6 +249,10 @@ assert.equal((source.match(/"MiniMaxH3ContextLoop\.topLevelRequeueCleanupDelay"/
 assert.doesNotMatch(source, /settings\.addSetting/);
 assert.match(source, /extensionManager\?\.setting\?\.get\?\.\(SETTING_ID\) === true/);
 assert.match(source, /extensionManager\?\.setting\?\.get\?\.\(DELAY_SETTING_ID\)/);
+const executedBody = source.slice(source.indexOf("function onExecuted"), source.indexOf("function enqueueRequeue"));
+assert.match(executedBody, /detail\?\.output\?\.h3_chain_top_level_requeue/);
+assert.match(executedBody, /topLevelRequeueCompletionMatches\(record, payload\)/);
+assert.doesNotMatch(executedBody, /widgetByName\(node, "execution_mode"\)/);
 const terminalFailureBody = source.slice(source.indexOf("function onTerminalFailure"), source.indexOf("async function processRequeue"));
 assert.doesNotMatch(terminalFailureBody, /requeueEpoch \+= 1/);
 assert.match(terminalFailureBody, /sceneRecords\.delete\(promptId\)/);

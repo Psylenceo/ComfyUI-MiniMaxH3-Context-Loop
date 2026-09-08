@@ -24,6 +24,15 @@ export function loopEndMatchesObservedCurrent({record, loopEndNode, resolveDispl
     return Boolean(observed && upstream && observed === upstream);
 }
 
+export function topLevelRequeueCompletionMatches(record, payload) {
+    return Boolean(record?.runName && String(payload?.handoff_id ?? "").trim()
+        && String(payload?.run_name ?? "") === String(record.runName)
+        && Number(payload?.predecessor_scene) === Number(record.clipIndex)
+        && Number(payload?.scene) === Number(record.clipIndex) + 1
+        && Number(payload?.end_clip) === Number(record.endClip)
+        && String(payload?.workflow_fingerprint ?? "") === String(record.workflowFingerprint));
+}
+
 export function handleTopLevelRequeueSuccessScheduling({record, scheduleRequeue}) {
     if (!shouldScheduleTopLevelRequeueSuccess(record)) return false;
     scheduleRequeue(record);
@@ -82,6 +91,7 @@ export function matchingNextSceneHandoff(body, completed) {
         && typeof completed?.checkpointSha === "string"
         && completed.checkpointSha !== ""
         && item.source_checkpoint_sha256 === completed.checkpointSha
+        && (!completed?.handoffId || item.handoff_id === completed.handoffId)
     ) ?? null;
 }
 

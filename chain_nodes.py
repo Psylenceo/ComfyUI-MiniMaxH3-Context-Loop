@@ -22317,9 +22317,16 @@ class MiniMaxH3ChainLoopEnd:
                     "requeue mode; next scene deferred to handoff %s "
                     "(new top-level prompt required).",
                     plan["run_name"], index, handoff["handoff_id"])
-                return (manifest, manifest_json,
-                        next_state["previous_frames"],
-                        next_state["previous_latent"])
+                result = (manifest, manifest_json,
+                          next_state["previous_frames"],
+                          next_state["previous_latent"])
+                completion = {key: handoff[key] for key in (
+                    "run_name", "predecessor_scene", "scene", "end_clip",
+                    "workflow_fingerprint", "handoff_id", "source_revision",
+                    "source_checkpoint_sha256", "transition_key")}
+                return {"result": result, "ui": {
+                    "h3_chain_top_level_requeue": [completion]}}
+
             expansion = self._recurse(
                 flow, next_state, dynprompt, unique_id)
             # The recursive state owns independent CPU clones. Release this

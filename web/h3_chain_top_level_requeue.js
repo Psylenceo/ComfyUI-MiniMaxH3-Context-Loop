@@ -13,7 +13,8 @@ import {
     resumeHint,
     handleTopLevelRequeueSuccessScheduling,
     loopEndMatchesObservedCurrent,
-} from "./h3_chain_top_level_requeue_core.mjs?v=0.6.5";
+    topLevelRequeueCompletionMatches,
+} from "./h3_chain_top_level_requeue_core.mjs?v=0.6.6";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.7";
 import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome, releaseHandoffChecked} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
 
@@ -224,9 +225,13 @@ function onExecuted(detail) {
         record, loopEndNode: node, resolveDisplayNode: findNodeByDisplayId,
         findUpstreamCurrent: end => findUpstreamNode(end, CURRENT_TYPES),
     })) {
-        record.loopEndExecuted = true;
-        record.executionMode = String(widgetByName(node, "execution_mode")?.value
-            ?? "recursive_legacy");
+        const completion = detail?.output?.h3_chain_top_level_requeue;
+        const payload = Array.isArray(completion) ? completion[0] : null;
+        if (topLevelRequeueCompletionMatches(record, payload)) {
+            record.loopEndExecuted = true;
+            record.executionMode = "top_level_requeue";
+            record.handoffId = String(payload.handoff_id);
+        }
     }
 }
 

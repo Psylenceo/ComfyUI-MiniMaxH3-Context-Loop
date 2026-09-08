@@ -2004,6 +2004,17 @@ def main():
                     chain._history_hash(prepared_plan, 2))
             print("review: prompt/seed retry preserves accepted predecessor history")
 
+            requeue_return = chain.MiniMaxH3ChainLoopEnd().end(
+                ["1", 0], dict(state1), images1.clone(), av_latent(), dict(segment1),
+                execution_mode="top_level_requeue")
+            parsed_output, parsed_ui, parsed_subgraph = execution.get_output_from_returns(
+                [requeue_return], chain.MiniMaxH3ChainLoopEnd)
+            assert not parsed_subgraph and parsed_output and parsed_ui
+            completion = parsed_ui.get("h3_chain_top_level_requeue")
+            assert isinstance(completion, list) and len(completion) == 1
+            assert completion[0]["handoff_id"]
+            print("top-level requeue: real ComfyUI return parser emits completion UI")
+
             fake_prompt = {
                 "1": {"class_type": "MiniMaxH3ChainLoopStart", "inputs": {
                     "plan": plan, "start_clip": 1, "source_audio": source,

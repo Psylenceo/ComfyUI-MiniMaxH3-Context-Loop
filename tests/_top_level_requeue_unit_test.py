@@ -7,8 +7,9 @@ Covers Milestone 3 acceptance for the deterministic (model-free) surface:
   ``recursive_legacy`` keeps the old behavior; outputs and required inputs
   are unchanged).
 - In ``top_level_requeue`` mode, a completed scene N writes a lightweight
-  durable ``next_scene`` handoff and returns a plain manifest tuple instead
-  of recursively expanding scene N+1 (no GraphBuilder H3 re-entry).
+  durable ``next_scene`` handoff and returns the existing manifest tuple in a
+  ComfyUI result/UI envelope, enabling an ``executed`` completion event
+  without recursively expanding scene N+1.
 - The Plan JSON is byte-identical before/after (no orchestration fields).
 - The handoff is idempotent per (run, scene): re-running Loop End for the
   same scene never creates a second record.
@@ -155,9 +156,12 @@ def requeue_mode(root):
         chain.MiniMaxH3ChainLoopEnd._recurse = original_recurse
 
     assert calls == [], "top_level_requeue must not recurse into scene 2"
-    assert isinstance(result, tuple) and len(result) == 4, \
-        "requeue mode returns a plain manifest tuple, not an expansion"
-    manifest, manifest_json, _frames, _latent = result
+    assert isinstance(result, dict) and isinstance(result.get("result"), tuple)
+    assert len(result["result"]) == 4, "public result slots stay unchanged"
+    assert set(result.get("ui", {})) == {"h3_chain_top_level_requeue"}
+    completions = result["ui"]["h3_chain_top_level_requeue"]
+    assert len(completions) == 1
+    manifest, manifest_json, _frames, _latent = result["result"]
     assert manifest["format"] == "h3_chain_partial_manifest_v3"
     assert manifest["last_completed_clip"] == 1
     assert manifest["planned_clip_count"] == 2
@@ -167,6 +171,16 @@ def requeue_mode(root):
     assert partial.is_file(), \
         "requeue mode persists a partial through-clip manifest"
     assert json.loads(partial.read_text(encoding="utf-8")) == manifest
+
+    final_state, final_images, final_latent, final_segment = make_inputs(plan)
+    final_state["index"] = 2
+    final_state["segments"] = [chain._public_segment(segment)]
+    final_segment.update({"index": 2, "id": "two", "seed": plan["shots"][1]["seed"]})
+    final_result = chain.MiniMaxH3ChainLoopEnd().end(
+        None, final_state, final_images, final_latent, final_segment,
+        execution_mode="top_level_requeue")
+    assert not (isinstance(final_result, dict) and
+                "h3_chain_top_level_requeue" in final_result.get("ui", {}))
 
     records = list((run_dir / "orchestration").glob("next_scene_0002_*.json"))
     assert len(records) == 1, "next_scene handoff must be durable"
@@ -187,11 +201,16 @@ def requeue_mode(root):
     assert record["source_prompt_id"] is None, \
         "the backend never knows the source prompt id; the frontend " \
         "stamps it at claim time"
+    completion = completions[0]
+    for key in ("run_name", "predecessor_scene", "scene", "end_clip",
+                "workflow_fingerprint", "handoff_id", "source_revision",
+                "source_checkpoint_sha256", "transition_key"):
+        assert completion[key] == record[key]
     # No tensors or Plan internals leaked into the record.
     for forbidden in ("shots", "prompt_prefix", "generation_fingerprint",
                       "scene_prompt", "previous_frames", "samples"):
-        assert forbidden not in record, \
-            "handoff record leaked Plan/tensor data %r" % forbidden
+        assert forbidden not in record and forbidden not in completion, \
+            "handoff completion leaked Plan/tensor data %r" % forbidden
 
     assert json.dumps(plan, sort_keys=True) == plan_before, \
         "the Plan JSON must stay byte-identical"
