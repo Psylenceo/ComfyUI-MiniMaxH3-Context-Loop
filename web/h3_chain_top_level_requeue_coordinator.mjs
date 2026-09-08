@@ -45,13 +45,19 @@ export function resolveProjectRun(planNode) {
     return managed || String(widget(planNode, "run_name") ?? "").trim();
 }
 
-export async function selectAndClaim({record, handoffs, match, resolveRun, claim}) {
-    const runName = resolveRun(record);
+export async function selectAndClaim({current = () => {}, record, loadCheckpoint = async () => ({revision: record.sourceRevision, metadata_sha256: record.checkpointSha}), loadHandoffs, handoffs, match, resolveRun, claim}) {
+    loadHandoffs ??= async () => handoffs;
+    current();
+    const runName = await resolveRun(record);
     if (!runName || runName !== record.runName) return null;
-    const handoff = match(handoffs, record);
+    const checkpoint = await loadCheckpoint(runName, record);
+    const completed = {...record, sourceRevision: String(checkpoint?.revision || ""), checkpointSha: String(checkpoint?.metadata_sha256 || "")};
+    const handoff = match(await loadHandoffs(runName), completed);
     if (!handoff) return null;
+    current();
     await claim(runName, handoff.handoff_id);
-    return handoff;
+    current();
+    return Object.assign(handoff, {_resolvedRunName: runName, _completed: completed});
 }
 
 export function submissionFailure(error) {
