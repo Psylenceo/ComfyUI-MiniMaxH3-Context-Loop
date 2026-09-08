@@ -409,7 +409,6 @@ async function processRequeue(record, epoch) {
         if (!resume) throw new Error("The handoff has no resume hint; resume the scene manually.");
         let queued = false;
         try {
-            requireCurrentOperation(epoch);
             const delivery = await classifySubmissionOutcome({outcome:lifecycleSubmission,error:submissionError,
                 accepted: async promptId => { queued=true; continuationTracker ??= createContinuationTracker({transition:postHandoffTransition,reportError:error=>showError(`Marking the handoff consumed failed: ${error?.message || error}`)}); await finalizeAcceptedSubmission({runName,handoffId:handoff.handoff_id,promptId,transitionQueued:postHandoffTransition,trackContinuation:continuationTracker.track.bind(continuationTracker)}); },
                 rejected: async () => { throw new Error("ComfyUI rejected the prompt validation."); },
