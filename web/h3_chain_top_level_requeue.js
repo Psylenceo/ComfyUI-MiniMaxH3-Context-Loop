@@ -12,6 +12,7 @@ import {
     predecessorScene,
     resumeHint,
     handleTopLevelRequeueSuccessScheduling,
+    loopEndMatchesObservedCurrent,
 } from "./h3_chain_top_level_requeue_core.mjs?v=0.6.5";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.2";
 import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
@@ -218,7 +219,10 @@ function onExecuted(detail) {
             record.workflowFingerprint = String(scene.workflowFingerprint || "");
             record.displayNode = String(detail.display_node);
         }
-    } else if (type === END_TYPE) {
+    } else if (type === END_TYPE && loopEndMatchesObservedCurrent({
+        record, loopEndNode: node, resolveDisplayNode: findNodeByDisplayId,
+        findUpstreamCurrent: end => findUpstreamNode(end, CURRENT_TYPES),
+    })) {
         record.loopEndExecuted = true;
         record.executionMode = String(widgetByName(node, "execution_mode")?.value
             ?? "recursive_legacy");

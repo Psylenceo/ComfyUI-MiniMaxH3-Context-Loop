@@ -20,11 +20,16 @@ import {
     resumeHint,
     shouldScheduleTopLevelRequeueSuccess,
     handleTopLevelRequeueSuccessScheduling,
+    loopEndMatchesObservedCurrent,
 } from "../web/h3_chain_top_level_requeue_core.mjs";
 
 assert.equal(shouldScheduleTopLevelRequeueSuccess({runName:"run",loopEndExecuted:true,executionMode:REQUEUE_MODE,clipIndex:1,endClip:2}),true);
 assert.equal(shouldScheduleTopLevelRequeueSuccess({runName:"run",loopEndExecuted:false,executionMode:REQUEUE_MODE,clipIndex:1,endClip:2}),false);
 assert.equal(shouldScheduleTopLevelRequeueSuccess({runName:"run",loopEndExecuted:true,executionMode:LEGACY_MODE,clipIndex:1,endClip:2}),false);
+const currentA={}, currentB={};
+assert.equal(loopEndMatchesObservedCurrent({record:{displayNode:"a"},loopEndNode:{},resolveDisplayNode:id=>id==="a"?currentA:null,findUpstreamCurrent:()=>currentA}),true);
+assert.equal(loopEndMatchesObservedCurrent({record:{displayNode:"a"},loopEndNode:{},resolveDisplayNode:()=>currentA,findUpstreamCurrent:()=>currentB}),false);
+assert.equal(loopEndMatchesObservedCurrent({record:{},loopEndNode:{},resolveDisplayNode:()=>currentA,findUpstreamCurrent:()=>currentA}),false);
 let scheduled=0;
 assert.equal(handleTopLevelRequeueSuccessScheduling({record:{runName:"run",loopEndExecuted:false,executionMode:REQUEUE_MODE,clipIndex:1,endClip:2},scheduleRequeue:()=>scheduled++}),false); assert.equal(scheduled,0);
 assert.equal(handleTopLevelRequeueSuccessScheduling({record:{runName:"run",loopEndExecuted:true,executionMode:REQUEUE_MODE,clipIndex:1,endClip:2},scheduleRequeue:()=>scheduled++}),true); assert.equal(scheduled,1);

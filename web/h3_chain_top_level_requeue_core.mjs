@@ -18,6 +18,12 @@ export function shouldScheduleTopLevelRequeueSuccess(record) {
         && Number(record.clipIndex) < Number(record.endClip || record.clipCount));
 }
 
+export function loopEndMatchesObservedCurrent({record, loopEndNode, resolveDisplayNode, findUpstreamCurrent}) {
+    const observed = record?.displayNode ? resolveDisplayNode(record.displayNode) : null;
+    const upstream = loopEndNode ? findUpstreamCurrent(loopEndNode) : null;
+    return Boolean(observed && upstream && observed === upstream);
+}
+
 export function handleTopLevelRequeueSuccessScheduling({record, scheduleRequeue}) {
     if (!shouldScheduleTopLevelRequeueSuccess(record)) return false;
     scheduleRequeue(record);
