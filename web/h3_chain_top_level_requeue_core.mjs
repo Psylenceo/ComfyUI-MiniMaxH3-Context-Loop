@@ -11,6 +11,12 @@
 
 export const LEGACY_MODE = "recursive_legacy";
 export const REQUEUE_MODE = "top_level_requeue";
+
+export function shouldScheduleTopLevelRequeueSuccess(record) {
+    return Boolean(record?.runName && record?.loopEndExecuted
+        && record.executionMode === REQUEUE_MODE
+        && Number(record.clipIndex) < Number(record.endClip || record.clipCount));
+}
 export const EXECUTION_MODES = [LEGACY_MODE, REQUEUE_MODE];
 
 export const HANDOFF_API_BASE = "/minimax_h3_context_loop";

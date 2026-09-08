@@ -18,7 +18,12 @@ import {
     pendingNextSceneHandoffs,
     predecessorScene,
     resumeHint,
+    shouldScheduleTopLevelRequeueSuccess,
 } from "../web/h3_chain_top_level_requeue_core.mjs";
+
+assert.equal(shouldScheduleTopLevelRequeueSuccess({runName:"run",loopEndExecuted:true,executionMode:REQUEUE_MODE,clipIndex:1,endClip:2}),true);
+assert.equal(shouldScheduleTopLevelRequeueSuccess({runName:"run",loopEndExecuted:false,executionMode:REQUEUE_MODE,clipIndex:1,endClip:2}),false);
+assert.equal(shouldScheduleTopLevelRequeueSuccess({runName:"run",loopEndExecuted:true,executionMode:LEGACY_MODE,clipIndex:1,endClip:2}),false);
 
 // --- behavioral delivery primitive -----------------------------------------
 assert.deepEqual(await submitWithPromptIdentity({app: {graph: {}, graphToPrompt: async () => ({x: 1})}, api: {queuePrompt: async () => ({prompt_id: "accepted-123"})}}), {kind: "accepted", promptId: "accepted-123"});
