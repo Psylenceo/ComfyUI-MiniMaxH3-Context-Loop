@@ -51,6 +51,7 @@ const QUEUE_POLL_INTERVAL_MS = 500;
 const QUEUE_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_OBSERVED_PROMPTS = 100;
 const TRANSIENT_NOTICE_MS = 5000;
+const WARNING_NOTICE_MS = 10000;
 
 let notifications = null;
 let pumpActive = false;
@@ -140,7 +141,7 @@ function showTransient(message) {
 
 function showWarning(message) {
     ensureNotifications().clear("requeue-transient");
-    ensureNotifications().show("requeue-warning", message, "warning");
+    ensureNotifications().show("requeue-warning", message, "warning", {durationMs: WARNING_NOTICE_MS});
 }
 
 function showError(message) {

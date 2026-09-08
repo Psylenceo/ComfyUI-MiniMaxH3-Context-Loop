@@ -59,6 +59,8 @@ export function createNotificationStack({
                 font:12px/1.35 system-ui,sans-serif; box-sizing:border-box;
                 max-width:${maxWidth}; min-width:0; text-align:right;
                 white-space:pre-wrap; overflow-wrap:anywhere; }
+            .${itemClass}__message { flex:1; min-width:0; }
+            .${itemClass}__dismiss { border:0; background:transparent; color:inherit; cursor:pointer; padding:0 0 0 5px; font:inherit; font-size:16px; line-height:1; }
             .${itemClass}--warning { color:#fff1cb; border-color:#8f7242; }
             .${itemClass}--error { color:#ffd0bc; border-color:#a86148; }
             .${itemClass}--info { color:#d9dce5; }
@@ -160,6 +162,16 @@ export function createNotificationStack({
             item.setAttribute("role", role);
             item.setAttribute("aria-live", live);
             item.setAttribute("aria-atomic", "true");
+            const message = document.createElement("span");
+            message.className = `${itemClass}__message`;
+            const dismiss = document.createElement("button");
+            dismiss.type = "button";
+            dismiss.className = `${itemClass}__dismiss`;
+            dismiss.textContent = "×";
+            dismiss.setAttribute("aria-label", "Dismiss notification");
+            dismiss.addEventListener?.("click", () => clear(key));
+            item.append(message, dismiss);
+            item._h3Message = message;
             items.set(key, item);
             root.appendChild(item);
         } else {
@@ -178,7 +190,7 @@ export function createNotificationStack({
         durationMs = 0,
     } = {}) {
         const item = ensureItem(key, tone, role, live);
-        item.textContent = String(message);
+        item._h3Message.textContent = String(message);
         const priorTimer = dismissTimers.get(key);
         if (priorTimer != null) window?.clearTimeout?.(priorTimer);
         dismissTimers.delete(key);

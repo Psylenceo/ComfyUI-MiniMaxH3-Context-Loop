@@ -29,6 +29,8 @@ function makeElement(tag) {
             if (index >= 0) list.splice(index, 1);
             node.parentNode = null;
         },
+        addEventListener(name, callback) { node._listeners ??= {}; node._listeners[name] = callback; },
+        click() { node._listeners?.click?.(); },
         setAttribute(name, value) {
             node.attributes[name] = String(value);
         },
@@ -98,14 +100,17 @@ assert.equal(dockedBottomOffset({top: 0, width: 0, height: 0}, 1000, 12, 18), 18
 
 stack.show("transient", "Waiting for a safe queue state…", "info");
 assert.equal(stack.root.hidden, false);
+const transient = stack.root.children[0];
+assert.equal(transient.children[1].tagName, "BUTTON");
+assert.equal(transient.children[1].getAttribute("aria-label"), "Dismiss notification");
 assert.equal(stack.root.children.length, 1);
 assert.match(stack.root.children[0].className, /h3mh-notification--info/);
-assert.equal(stack.root.children[0].textContent, "Waiting for a safe queue state…");
+assert.equal(stack.root.children[0].children[0].textContent, "Waiting for a safe queue state…");
 assert.equal(stack.root.style.bottom, "400px");
 
 stack.show("transient", "Checking the workflow and predecessor checkpoint…", "info");
 assert.equal(stack.root.children.length, 1, "transient updates must reuse the same entry");
-assert.equal(stack.root.children[0].textContent,
+assert.equal(stack.root.children[0].children[0].textContent,
     "Checking the workflow and predecessor checkpoint…");
 
 stack.show("warning", "The handoff was already claimed; nothing was queued.", "warning");
