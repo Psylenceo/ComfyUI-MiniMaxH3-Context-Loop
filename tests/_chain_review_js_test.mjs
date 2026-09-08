@@ -297,12 +297,12 @@ assert.match(reviewSource, /preview_revision/);
 assert.match(reviewSource, /sameToken/);
 assert.match(
     reviewSource,
-    /if \(!sameToken\)[\s\S]*setTimeout\(refreshResumeOptions, 0\)/,
+    /if \(!sameToken\)[\s\S]*setTimeout\(\(\) => void refreshResumeOptions\(\{automatic: true\}\), 0\)/,
     "a newly persisted review scene must refresh checkpoint history",
 );
 assert.match(
     reviewSource,
-    /data\.action === "approve" \|\| data\.action === "stop"[\s\S]*setTimeout\(refreshResumeOptions, 0\)/,
+    /data\.action === "approve" \|\| data\.action === "stop"[\s\S]*setTimeout\(\(\) => void refreshResumeOptions\(\{automatic: true\}\), 0\)/,
     "final approval must refresh checkpoint history",
 );
 assert.match(reviewSource, /Checkpoint history/);
@@ -455,6 +455,15 @@ const reviewHandlerSource = reviewSource.slice(reviewHandlerStart);
 assert.match(reviewHandlerSource, /const candidateBatchComplete = Boolean\(current\?\.candidate_generation_complete\) \|\|[\s\S]*current\.candidates\.length >=[\s\S]*candidate_count/);
 assert.match(reviewHandlerSource, /sameToken && current\?\.actionable !== false &&[\s\S]*candidate_count\) > 1 && candidateBatchComplete &&[\s\S]*!current\?\.candidate_batch_command_pending/);
 assert.match(reviewHandlerSource, /candidateBatchComplete &&[\s\S]*root\.classList\.remove\("h3r-busy"\);[\s\S]*setActionsEnabled\(true\)/);
+assert.match(reviewSource, /activeResumeExecutionIds = new Set\(\)/);
+assert.match(reviewSource, /automatic && activeResumeExecutionIds\.size > 0[\s\S]*deferredAutomaticResumeRefresh = true/);
+assert.match(reviewSource, /resumeRefreshPromise[\s\S]*queuedExplicitResumeRefresh[\s\S]*queuedAutomaticResumeRefresh/);
+assert.match(reviewSource, /api\.addEventListener\("execution_start", onResumeExecutionStart\)/);
+assert.match(reviewSource, /api\.addEventListener\("execution_success", onResumeExecutionTerminal\)/);
+assert.match(reviewSource, /api\.addEventListener\("execution_error", onResumeExecutionTerminal\)/);
+assert.match(reviewSource, /api\.addEventListener\("execution_interrupted", onResumeExecutionTerminal\)/);
+assert.match(reviewSource, /nextResumeChoices[\s\S]*resumeSelect\.replaceChildren\(\)/,
+    "resume UI replacement occurs only after the checkpoint response is parsed");
 assert.match(reviewSource, /if \(enabled && current\?\.candidate_batch_active\) \{[\s\S]*retryButton\.disabled = true;[\s\S]*rerollButton\.disabled = true;[\s\S]*stopButton\.disabled = true;/);
 
 console.log("H3 Chain Review editor helpers: ok");

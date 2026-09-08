@@ -1068,6 +1068,11 @@ function mount(node) {
     let revisionChain = [];
     let planClipCount = 0;
     let resumeRefreshToken = 0;
+    let resumeRefreshPromise = null;
+    let queuedAutomaticResumeRefresh = false;
+    let queuedExplicitResumeRefresh = false;
+    let deferredAutomaticResumeRefresh = false;
+    const activeResumeExecutionIds = new Set();
     let activeCandidateRevision = "";
     let keptCandidateRevisions = new Set();
     let previewLoadRevision = 0;
@@ -1410,16 +1415,9 @@ function mount(node) {
         }
     }
 
-    async function refreshResumeOptions() {
+    async function performResumeRefresh() {
         const refreshToken = ++resumeRefreshToken;
         const previousResumeScene = Number(resumeSelect.value);
-        resumeSelect.replaceChildren();
-        resumeChoices = [];
-        checkpointRevisions = [];
-        revisionChain = [];
-        revisionsRows.replaceChildren();
-        revisionsPanel.hidden = true;
-        loadResume.disabled = true;
         try {
             const context = planResumeContext(node);
             planClipCount = context.clipCount;
@@ -1430,9 +1428,15 @@ function mount(node) {
             const body = await response.json();
             if (refreshToken !== resumeRefreshToken) return;
             if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
-            resumeChoices = checkpointResumeOptions(
+            const nextResumeChoices = checkpointResumeOptions(
                 body.checkpoints, context.clipCount);
-            checkpointRevisions = body.revisions ?? [];
+            const nextCheckpointRevisions = body.revisions ?? [];
+            resumeSelect.replaceChildren();
+            revisionsRows.replaceChildren();
+            revisionsPanel.hidden = true;
+            resumeChoices = nextResumeChoices;
+            checkpointRevisions = nextCheckpointRevisions;
+            revisionChain = [];
             for (const option of resumeChoices) {
                 const element = document.createElement("option");
                 element.value = String(option.resumeScene);
@@ -1457,9 +1461,35 @@ function mount(node) {
         }
     }
 
-    refreshResume.addEventListener("click", refreshResumeOptions);
+    function refreshResumeOptions({automatic = false} = {}) {
+        if (automatic && activeResumeExecutionIds.size > 0) {
+            deferredAutomaticResumeRefresh = true;
+            return Promise.resolve();
+        }
+        if (resumeRefreshPromise) {
+            if (automatic) queuedAutomaticResumeRefresh = true;
+            else queuedExplicitResumeRefresh = true;
+            return resumeRefreshPromise;
+        }
+        const request = performResumeRefresh();
+        resumeRefreshPromise = request;
+        void request.finally(() => {
+            if (resumeRefreshPromise !== request) return;
+            resumeRefreshPromise = null;
+            const explicit = queuedExplicitResumeRefresh;
+            const automaticFollowup = queuedAutomaticResumeRefresh;
+            queuedExplicitResumeRefresh = false;
+            queuedAutomaticResumeRefresh = false;
+            if (explicit || automaticFollowup) {
+                void refreshResumeOptions({automatic: !explicit});
+            }
+        });
+        return request;
+    }
+
+    refreshResume.addEventListener("click", () => void refreshResumeOptions());
     resumeSelect.addEventListener("change", renderRevisionChoices);
-    node._h3RefreshResume = refreshResumeOptions;
+    node._h3RefreshResume = () => refreshResumeOptions({automatic: true});
     loadResume.addEventListener("click", async () => {
         const resumeScene = Number(resumeSelect.value);
         if (!Number.isInteger(resumeScene)) return;
@@ -1740,7 +1770,7 @@ function mount(node) {
                     (selected ? ` ${body.kept_candidate_count} take${body.kept_candidate_count === 1 ? "" : "s"} kept.` : "") +
                     (saved ? " The Plan seed was updated." : "") +
                     (prepared ? ` Loop Start is ready at clip ${submittedReview.clip_index + 1}.` : "");
-                setTimeout(refreshResumeOptions, 0);
+                setTimeout(() => void refreshResumeOptions({automatic: true}), 0);
             }
         } catch (error) {
             root.classList.remove("h3r-busy");
@@ -1807,7 +1837,7 @@ function mount(node) {
             // The scene is persisted before Review Gate receives its token.
             // Refresh here so the current (including final) checkpoint appears
             // in history without requiring the user to press Refresh.
-            setTimeout(refreshResumeOptions, 0);
+            setTimeout(() => void refreshResumeOptions({automatic: true}), 0);
         }
         if (!sameToken) {
             prompt.value = data.scene_prompt ?? "";
@@ -1874,9 +1904,26 @@ function mount(node) {
         }
         if (data.action === "approve" || data.action === "stop" ||
                 data.action === "candidate_batch_approve") {
-            setTimeout(refreshResumeOptions, 0);
+            setTimeout(() => void refreshResumeOptions({automatic: true}), 0);
         }
     };
+
+    const onResumeExecutionStart = (event) => {
+        const promptId = String(event.detail?.prompt_id ?? "");
+        if (promptId) activeResumeExecutionIds.add(promptId);
+    };
+    const onResumeExecutionTerminal = (event) => {
+        const promptId = String(event.detail?.prompt_id ?? "");
+        if (!promptId || !activeResumeExecutionIds.delete(promptId) ||
+                activeResumeExecutionIds.size !== 0 ||
+                !deferredAutomaticResumeRefresh) return;
+        deferredAutomaticResumeRefresh = false;
+        void refreshResumeOptions({automatic: true});
+    };
+    api.addEventListener("execution_start", onResumeExecutionStart);
+    api.addEventListener("execution_success", onResumeExecutionTerminal);
+    api.addEventListener("execution_error", onResumeExecutionTerminal);
+    api.addEventListener("execution_interrupted", onResumeExecutionTerminal);
 
     const widget = node.addDOMWidget("h3_chain_review", "h3-chain-review", root, {
         serialize: false,
@@ -1891,6 +1938,10 @@ function mount(node) {
         stopCountdown();
         promptResizeObserver?.disconnect();
         delete this._h3PromptCompanionSetScenePrompt;
+        api.removeEventListener("execution_start", onResumeExecutionStart);
+        api.removeEventListener("execution_success", onResumeExecutionTerminal);
+        api.removeEventListener("execution_error", onResumeExecutionTerminal);
+        api.removeEventListener("execution_interrupted", onResumeExecutionTerminal);
         mountedReviewNodes.delete(this);
         updatePendingPolling();
         return removed?.apply(this, arguments);
@@ -1900,7 +1951,7 @@ function mount(node) {
     delete node._h3QueuedReview;
     if (queuedReview) node._h3ReviewHandler(queuedReview);
     setTimeout(fetchPending, 0);
-    setTimeout(refreshResumeOptions, 0);
+    setTimeout(() => void refreshResumeOptions({automatic: true}), 0);
 }
 
 api.addEventListener("minimax_h3_context_loop_review", (event) => routeReview(event.detail));
