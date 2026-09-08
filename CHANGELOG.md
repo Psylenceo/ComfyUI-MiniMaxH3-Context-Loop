@@ -3,7 +3,13 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
-## Unreleased — Max fallback for reference reconstruction
+## Unreleased — Reference reconstruction and Windows save durability
+
+- Fix Windows DeRoPE/upscale and VIDEO PNG saves failing with bad file
+  descriptor during artifact flush. Use a writable, non-truncating file handle
+  on Windows; retain read-only access on POSIX and propagate real flush errors.
+  Legacy reference-cache conversion uses the same corrected helper. Added
+  descriptor-access, file-preservation, and failure-path regressions.
 
 - Upscale reference reconstruction with `inherit` now defaults to `max` when
   the original take has no recoverable sizing policy. Saved Match/Max policies
