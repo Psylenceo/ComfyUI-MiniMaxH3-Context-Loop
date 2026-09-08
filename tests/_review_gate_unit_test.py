@@ -301,6 +301,46 @@ def main():
 
         asyncio.new_event_loop().run_until_complete(decided_scenario())
 
+    # Live candidate-batch state takes precedence over a same-token durable
+    # recovery snapshot, while unrelated durable recovery remains visible.
+    with tempfile.TemporaryDirectory() as raw_root:
+        base = os.path.join(raw_root, "h3_chains")
+        for run_name, token in (("live_run", "tok-live"),
+                                ("other_run", "tok-other")):
+            run_dir = os.path.join(base, run_name)
+            os.makedirs(run_dir, exist_ok=True)
+            review_inv.write_review_snapshot(
+                run_dir, token, run_name, 1, [], deadline=None,
+                server_now=10.0)
+        chain._output_root = lambda: str(raw_root)
+        chain._PENDING_REVIEWS.clear()
+        chain._ACTIVE_CANDIDATE_BATCHES.clear()
+        chain._ACTIVE_CANDIDATE_BATCHES["tok-live"] = {
+            "updated": chain.time.monotonic(),
+            "public": {
+                "token": "tok-live", "run_name": "live_run", "clip_index": 1,
+                "actionable": True, "candidate_count": 3,
+                "candidate_generation_complete": True,
+                "candidate_batch_active": True, "candidates": [],
+            },
+        }
+
+        async def live_precedence_scenario():
+            response = await chain._list_pending_reviews(FakeRequest())
+            listing = json.loads(response.text)["reviews"]
+            live = [item for item in listing if item["token"] == "tok-live"]
+            assert len(live) == 1
+            assert live[0]["actionable"] is True
+            assert live[0]["candidate_count"] == 3
+            assert live[0]["candidate_generation_complete"] is True
+            assert live[0]["candidate_batch_active"] is True
+            other = [item for item in listing if item["token"] == "tok-other"]
+            assert len(other) == 1 and other[0]["durable"] is True
+            assert other[0]["actionable"] is False
+
+        asyncio.new_event_loop().run_until_complete(live_precedence_scenario())
+        chain._ACTIVE_CANDIDATE_BATCHES.clear()
+
     print("M5 durable review: saved candidates survive restart, approve "
           "creates next_scene handoff, approve & stop queues nothing, "
           "Plan unchanged pass")

@@ -27107,12 +27107,17 @@ async def _submit_review_decision(request):
 
 async def _list_pending_reviews(_request):
     reviews = []
+    live_tokens = set()
     _review_candidate_batch_cleanup()
     for entry in list(_ACTIVE_CANDIDATE_BATCHES.values()):
         payload = entry.get("public")
         if not isinstance(payload, dict):
             continue
         payload = dict(payload)
+        token = str(payload.get("token") or "")
+        if token in live_tokens:
+            continue
+        live_tokens.add(token)
         payload["server_now"] = time.time()
         reviews.append(payload)
     # HTTP and execution can run on different threads/loops. Snapshot first so
@@ -27122,6 +27127,10 @@ async def _list_pending_reviews(_request):
         if item["future"].done():
             continue
         payload = dict(item["public"])
+        token = str(payload.get("token") or "")
+        if token in live_tokens:
+            continue
+        live_tokens.add(token)
         payload["server_now"] = time.time()
         reviews.append(payload)
     # M5 durable review: after a browser refresh (or a ComfyUI crash/restart)
@@ -27129,11 +27138,6 @@ async def _list_pending_reviews(_request):
     # remain reviewable from the durable orchestration snapshots. Surface
     # pending snapshots that have no live entry; media previews come from the
     # saved segment/checkpoint inventory, never from live tensors.
-    live_tokens = {
-        str(item["public"].get("token") or "")
-        for item in list(_PENDING_REVIEWS.values())
-        if not item["future"].done()
-    }
     runs_dir = os.path.join(_output_root(), "h3_chains")
     try:
         run_names = sorted(os.listdir(runs_dir))
