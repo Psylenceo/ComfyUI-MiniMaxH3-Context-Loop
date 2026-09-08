@@ -13,7 +13,7 @@ import {
     resumeHint,
 } from "./h3_chain_top_level_requeue_core.mjs?v=0.6.5";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.2";
-import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
+import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.5";
 
 // Top-level scene requeue coordinator (M3, candidate_count = 1).
 //
@@ -497,9 +497,11 @@ async function processRequeue(record, epoch) {
                 transition: postHandoffTransition,
                 reportError: (error) => showError(`Marking the handoff consumed failed: ${error?.message || error}`),
             });
-            continuationTracker.track(runName, handoff.handoff_id, acceptedPromptId);
-            await postHandoffTransition(
-                runName, handoff.handoff_id, "queued", acceptedPromptId);
+            await finalizeAcceptedSubmission({
+                runName, handoffId: handoff.handoff_id, promptId: acceptedPromptId,
+                transitionQueued: postHandoffTransition,
+                trackContinuation: continuationTracker.track.bind(continuationTracker),
+            });
         } catch (error) {
             if (!queued) {
                 try {

@@ -235,7 +235,7 @@ assert.doesNotMatch(source, /plan_json/);
 // Same workflow queued as a NEW top-level prompt.
 // queued/consumed lifecycle via the durable routes.
 assert.match(source, /handoffs\/transition/);
-assert.match(source, /"queued"/);
+assert.match(source, /finalizeAcceptedSubmission/);
 assert.match(source, /"uncertain"/);
 assert.match(source, /accepted === false/);
 assert.match(source, /requireCurrentOperation\(epoch\)/);

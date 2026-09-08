@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import {runRequeueLifecycle, selectAndClaim, authoritativeRunName, createContinuationTracker, deliverClaimed} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
+import {runRequeueLifecycle, selectAndClaim, authoritativeRunName, createContinuationTracker, deliverClaimed, finalizeAcceptedSubmission} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
 import {matchingNextSceneHandoff} from "../web/h3_chain_top_level_requeue_core.mjs";
 
 function gate() { let resolve; return {promise: new Promise(r => { resolve = r; }), resolve}; }
@@ -74,4 +74,9 @@ await selectAndClaim({planNode:{widgets:[{name:"run_name",value:"plain-run"}]},r
 assert.deepEqual(routed.map(x=>x[1]),["plain-run","plain-run"]);
 routed=[];
 assert.equal(await selectAndClaim({planNode:{...plan,graph:plan.graph},record:{...record,runName:"different-run"},match:matchingNextSceneHandoff,loadHandoffs:async run=>{routed.push(["list",run]);return {handoffs:[exact]}},claim:async run=>routed.push(["claim",run])}),null); assert.equal(routed.length,0);
+const acceptedCalls=[];
+assert.deepEqual(await finalizeAcceptedSubmission({runName:"actual-run",handoffId:"handoff-123",promptId:"prompt-456",transitionQueued:async (...x)=>acceptedCalls.push(["queued",...x]),trackContinuation:(...x)=>acceptedCalls.push(["track",...x])}),{kind:"accepted",promptId:"prompt-456"});
+assert.deepEqual(acceptedCalls,[["queued","actual-run","handoff-123","queued","prompt-456"],["track","actual-run","handoff-123","prompt-456"]]);
+await assert.rejects(finalizeAcceptedSubmission({runName:"actual-run",handoffId:"handoff-123",promptId:"",transitionQueued:async()=>acceptedCalls.push("bad"),trackContinuation:()=>acceptedCalls.push("bad")}));
+assert.equal(acceptedCalls.length,2);
 console.log("top-level requeue coordinator lifecycle: ok");

@@ -1,3 +1,11 @@
+export async function finalizeAcceptedSubmission({runName, handoffId, promptId, transitionQueued, trackContinuation}) {
+    const acceptedPromptId = String(promptId ?? "").trim();
+    if (!acceptedPromptId) throw new Error("Accepted submission requires a prompt_id.");
+    await transitionQueued(runName, handoffId, "queued", acceptedPromptId);
+    trackContinuation(runName, handoffId, acceptedPromptId);
+    return {kind: "accepted", promptId: acceptedPromptId};
+}
+
 // Testable delivery primitive shared by the browser coordinator.  It keeps
 // prompt submission certainty separate from the UI/event wiring.
 export async function submitWithPromptIdentity({app, api}) {
