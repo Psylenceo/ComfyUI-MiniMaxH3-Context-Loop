@@ -15,6 +15,12 @@ result later—without keeping the whole production in memory.
 
 ## Changelog
 
+### 0.6.8 — Fractional H3 mask correction
+
+- Bring nightly's fractional video/audio denoise-mask correction to main,
+  including feathered AV continuity and native-first compatibility.
+- Correct only missing streams; leave native fixes and source latents intact.
+
 ### 0.6.7 — Automatic PNG sequence variants
 
 - Conflicting VIDEO PNG exports automatically use `_2`, `_3`, etc. folders,

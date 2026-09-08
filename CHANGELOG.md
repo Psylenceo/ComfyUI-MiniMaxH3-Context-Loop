@@ -3,6 +3,21 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
+## v0.6.8 — Correct fractional H3 denoise masks
+
+- Bring nightly's native-first ComfyUI PR #15988 correction to main. Masked
+  video velocity now matches each token's noise level; audio keeps the proper
+  carry conversion. This affects fractional masks such as feathered AV tails,
+  not reference-cache recovery or reference-video row-count mismatches.
+- Correct only missing streams and leave native fixes untouched, including
+  upstream's allocating and in-place forms and transparent wrappers. Detect
+  actual assignments rather than examples in comments or unused helpers.
+- Preflight reports a runtime bridge when the conversion is missing. Added
+  CPU regressions for partial native fixes, repeated installation, unmasked
+  and binary masks, fractional masks, audio scaling, and source preservation.
+- The proposed shared model_base follow-up is not yet implemented upstream;
+  its eventual hook must be reviewed before claiming compatibility with it.
+
 ## v0.6.7 — Automatic PNG sequence variants
 
 - VIDEO PNG export now creates numbered sibling folders (`_2`, `_3`, etc.)
