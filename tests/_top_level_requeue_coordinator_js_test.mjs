@@ -66,4 +66,12 @@ for (const mode of ["rejected","network","accepted","disabled"]) {
  const result=await deliverClaimed({current:()=>{if(mode==="disabled") throw Object.assign(Error(),{preDelivery:true})},handoff:{handoff_id:"h"},prepare:async()=>{},submit:async()=>{submit++;if(mode==="network")throw Error();return mode==="accepted"?{kind:"accepted",promptId:"accepted-123"}:{kind:"rejected"}},release:async()=>release++,transition:async (...x)=>transitions.push(x),track:x=>tracked.push(x)});
  assert.equal(submit,mode==="disabled"?0:1); if(mode==="rejected"||mode==="disabled")assert.equal(release,1); if(mode==="network")assert.equal(transitions[0][1],"uncertain"); if(mode==="accepted")assert.deepEqual(tracked,["accepted-123"]);
 }
+let routed=[];
+const projectClaim=await selectAndClaim({planNode:plan,record:{...record,runName:"actual-run"},handoffs:{handoffs:[exact]},match:matchingNextSceneHandoff,loadHandoffs:async run=>{routed.push(["list",run]);return {handoffs:[exact]}},claim:async (run,id)=>routed.push(["claim",run,id])});
+assert.equal(projectClaim._resolvedRunName,"actual-run"); assert.deepEqual(routed.map(x=>x[1]),["actual-run","actual-run"]);
+routed=[];
+await selectAndClaim({planNode:{widgets:[{name:"run_name",value:"plain-run"}]},record:{...record,runName:"plain-run"},handoffs:{handoffs:[exact]},match:matchingNextSceneHandoff,loadHandoffs:async run=>{routed.push(["list",run]);return {handoffs:[exact]}},claim:async run=>routed.push(["claim",run])});
+assert.deepEqual(routed.map(x=>x[1]),["plain-run","plain-run"]);
+routed=[];
+assert.equal(await selectAndClaim({planNode:{...plan,graph:plan.graph},record:{...record,runName:"different-run"},match:matchingNextSceneHandoff,loadHandoffs:async run=>{routed.push(["list",run]);return {handoffs:[exact]}},claim:async run=>routed.push(["claim",run])}),null); assert.equal(routed.length,0);
 console.log("top-level requeue coordinator lifecycle: ok");

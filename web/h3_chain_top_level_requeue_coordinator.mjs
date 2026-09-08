@@ -47,8 +47,9 @@ export function authoritativeRunName(planNode) {
 
 export const resolveProjectRun = authoritativeRunName;
 
-export async function selectAndClaim({current = () => {}, record, loadCheckpoint = async () => ({revision: record.sourceRevision, metadata_sha256: record.checkpointSha}), loadHandoffs, handoffs, match, resolveRun, claim}) {
+export async function selectAndClaim({current = () => {}, planNode, record, loadCheckpoint = async () => ({revision: record.sourceRevision, metadata_sha256: record.checkpointSha}), loadHandoffs, handoffs, match, resolveRun, claim}) {
     loadHandoffs ??= async () => handoffs;
+    resolveRun ??= () => authoritativeRunName(planNode);
     current();
     const runName = await resolveRun(record);
     if (!runName || runName !== record.runName) return null;
