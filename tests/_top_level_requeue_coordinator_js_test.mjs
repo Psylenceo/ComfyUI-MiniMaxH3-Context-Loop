@@ -109,4 +109,7 @@ const uncertainClaim = await selectAndClaim({planNode:plan,record:{...record,run
 let uncertainSubmits=0;
 await deliverClaimed({current:()=>{},handoff:uncertainClaim,prepare:async()=>{},submit:async()=>{uncertainSubmits++;throw Error("network");},release:async()=>uncertainFlow.push(["release"]),transition:async (_handoff,status)=>uncertainFlow.push(["transition",uncertainClaim._resolvedRunName,uncertainClaim.handoff_id,status]),track:()=>uncertainFlow.push(["track"])});
 assert.deepEqual(uncertainFlow,[["list","actual-run"],["claim","actual-run",exact.handoff_id],["transition","actual-run",exact.handoff_id,"uncertain"]]);assert.equal(uncertainSubmits,1);
+let cancelled=false; const cancelCalls=[];
+const cancelledResult=await runRequeueLifecycle({current:()=>{if(cancelled)throw Error("cancelled")},waitSafe:async()=>{},cleanup:async()=>{},resolveRun:async()=>({...record,runName:"run-a"}),loadCheckpoint:async()=>({revision:record.sourceRevision,metadata_sha256:record.checkpointSha}),listHandoffs:async()=>({handoffs:[exact]}),matchHandoff:matchingNextSceneHandoff,claimHandoff:async (run,id)=>{cancelCalls.push(["claim",run,id.handoff_id]);cancelled=true},release:async (handoff,run)=>cancelCalls.push(["release",run,handoff.handoff_id]),prepareResume:async()=>cancelCalls.push(["prepare"]),submit:async()=>cancelCalls.push(["submit"])});
+assert.equal(cancelledResult.kind,"cancelled");assert.deepEqual(cancelCalls,[["claim","run-a",exact.handoff_id],["release","run-a",exact.handoff_id]]);
 console.log("top-level requeue coordinator lifecycle: ok");

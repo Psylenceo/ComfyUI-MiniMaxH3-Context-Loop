@@ -46,7 +46,11 @@ export async function runRequeueLifecycle({current, waitSafe, cleanup, resolveRu
         const checkpoint = await loadCheckpoint(runName, context);
         const handoff = matchHandoff(await listHandoffs(runName), {...context, sourceRevision:String(checkpoint?.revision || ""), checkpointSha:String(checkpoint?.metadata_sha256 || "")});
         if (!handoff) return null;
-        current(); await claimHandoff(runName, handoff, context); current();
+        current(); await claimHandoff(runName, handoff, context);
+        try { current(); } catch (error) {
+            await release?.(handoff, runName);
+            return {kind: "cancelled", runName, handoff, checkpoint, context, cancellationError: error};
+        }
         await prepareResume?.(runName, handoff, context); current();
         if (submit) {
             try { return {runName, handoff, checkpoint, context, submission: await submit(runName, handoff, context)}; }

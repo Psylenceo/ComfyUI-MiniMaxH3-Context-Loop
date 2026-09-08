@@ -402,8 +402,10 @@ async function processRequeue(record, epoch) {
             claimHandoff: async (runName, handoff) => { const response = await api.fetchApi(`${HANDOFF_API_BASE}/handoffs/claim`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({run_name:runName,handoff_id:handoff.handoff_id,source_prompt_id:record.promptId})}); if (response.status === 409) throw new Error("The handoff was already claimed; nothing was queued."); if (!response.ok) throw new Error(`Claiming the handoff failed (HTTP ${response.status}).`); },
             prepareResume: async (_runName, handoff, context) => { const resume = resumeHint(handoff); const startWidget = widgetByName(context.startNode, "start_clip"); const rangeWidget = widgetByName(context.startNode, "scene_range"); if (!resume || !startWidget) throw new Error("The handoff has no resume hint or Loop Start widget."); startWidget.value = resume.startClip; startWidget.callback?.(resume.startClip); if (rangeWidget) { rangeWidget.value = resume.sceneRange; rangeWidget.callback?.(resume.sceneRange); } context.startNode.graph?.setDirtyCanvas?.(true, true); showTransient(`Queueing scene ${resume.startClip} as a new top-level prompt…`); },
             submit: () => queuePromptWithIdentity(),
+            release: async (handoff, releasedRun) => api.fetchApi(`${HANDOFF_API_BASE}/handoffs/release`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({run_name:releasedRun,handoff_id:handoff.handoff_id,reason:"Automatic requeue was cancelled."})}),
         });
         if (!lifecycle) { clearNotifications(); return; }
+        if (lifecycle.kind === "cancelled") { clearNotifications(); return; }
         const {runName, handoff, context, submission: lifecycleSubmission, submissionError} = lifecycle;
         const startNode = context.startNode;
         const resume = resumeHint(handoff);
