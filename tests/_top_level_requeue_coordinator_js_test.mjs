@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {runRequeueLifecycle, selectAndClaim, authoritativeRunName, createContinuationTracker, deliverClaimed, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome} from "../web/h3_chain_top_level_requeue_coordinator.mjs";
 import {matchingNextSceneHandoff} from "../web/h3_chain_top_level_requeue_core.mjs";
 
+const record = {runName:"run", clipIndex:3, endClip:6, workflowFingerprint:"wf-current", sourceRevision:"rev-current", checkpointSha:"sha-current"};
+const exact = {handoff_id:"exact-handoff", action:"next_scene", status:"pending", predecessor_scene:3,start_clip:4,end_clip:6,source_revision:"rev-current",source_checkpoint_sha256:"sha-current",workflow_fingerprint:"wf-current"};
 function gate() { let resolve; return {promise: new Promise(r => { resolve = r; }), resolve}; }
 async function scenario(which) {
   let enabled = true, claims = 0, submits = 0, releases = 0;
@@ -11,18 +13,19 @@ async function scenario(which) {
   const work = runRequeueLifecycle({current,
     waitSafe: async () => { if (which === "poll") await poll.promise; },
     cleanup: async () => { if (which === "cleanup") await delay.promise; },
-    select: async () => "h", claim: async () => { claims++; if (which === "claim") await claimed.promise; return "h"; },
-    prepare: async () => {}, submit: async () => { submits++; return {kind:"accepted"}; }, release: async () => { releases++; }, uncertain: async () => {}}).catch(() => {});
+    resolveRun: async () => record,
+    loadCheckpoint: async () => ({revision:record.sourceRevision,metadata_sha256:record.checkpointSha}),
+    listHandoffs: async () => ({handoffs:[exact]}), matchHandoff: matchingNextSceneHandoff,
+    claimHandoff: async () => { claims++; if (which === "claim") enabled = false; },
+    prepareResume: async () => {}, submit: async () => { submits++; return {prompt_id:"p"}; }, release: async () => { releases++; }}).catch(() => {});
   await Promise.resolve(); await Promise.resolve();
-  enabled = false;
+  if (which !== "claim") enabled = false;
   poll.resolve(); delay.resolve(); claimed.resolve(); await work;
   return {claims, submits, releases};
 }
 let r = await scenario("poll"); assert.deepEqual(r, {claims:0, submits:0, releases:0});
 r = await scenario("cleanup"); assert.deepEqual(r, {claims:0, submits:0, releases:0});
 r = await scenario("claim"); assert.deepEqual(r, {claims:1, submits:0, releases:1});
-const record = {runName:"run", clipIndex:3, endClip:6, workflowFingerprint:"wf-current", sourceRevision:"rev-current", checkpointSha:"sha-current"};
-const exact = {handoff_id:"exact-handoff", action:"next_scene", status:"pending", predecessor_scene:3,start_clip:4,end_clip:6,source_revision:"rev-current",source_checkpoint_sha256:"sha-current",workflow_fingerprint:"wf-current"};
 const stale = [
  {...exact,handoff_id:"revision",source_revision:"bad"}, {...exact,handoff_id:"sha",source_checkpoint_sha256:"bad"},
  {...exact,handoff_id:"wf",workflow_fingerprint:"bad"}, {...exact,handoff_id:"range",end_clip:5},
