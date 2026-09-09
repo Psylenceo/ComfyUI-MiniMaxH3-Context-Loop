@@ -50,18 +50,18 @@ import {
     visualContextDefaultPartition,
     visualContextMaximumBlocks,
     visualContextPartitionFromBoundaries,
-} from "./h3_chain_plan_core.mjs?v=0.6.5";
+} from "./h3_chain_plan_core.mjs?v=0.6.8";
 import {
     promptRevisionHelp,
     promptRevisionLabel,
     promptRevisionNavigation,
-} from "./h3_prompt_history_core.mjs?v=0.6.2";
+} from "./h3_prompt_history_core.mjs?v=0.6.8";
 import {
     availableReferenceRecords,
     convertTaggedPictureReference,
     taggedPictureReferenceMode,
     taggedPictureReferenceToken,
-} from "./h3_reference_preview_core.mjs?v=0.6.2";
+} from "./h3_reference_preview_core.mjs?v=0.6.8";
 import {
     applySceneAudioOverride,
     applySceneLipSync,
@@ -72,16 +72,16 @@ import {
     sceneAudioPolicy,
     sceneTransitionPreset,
     transitionPresetLabel,
-} from "./h3_policy_core.mjs?v=0.6.6";
+} from "./h3_policy_core.mjs?v=0.6.8";
 import {
     resolveAudioContextLength,
     resolveAudioPolicy,
     resolveTransitionPolicy,
-} from "./h3_socket_presentation_core.mjs?v=0.6.6";
+} from "./h3_socket_presentation_core.mjs?v=0.6.8";
 import {
     availableLoRARoutes,
     loraRouteLabel,
-} from "./h3_lora_scheduler_core.mjs?v=0.6.2";
+} from "./h3_lora_scheduler_core.mjs?v=0.6.8";
 import {
     h3StudioGridMarkers,
     locateStudioTimelineSegment,
@@ -112,8 +112,8 @@ import {
     studioRulerTicks,
     studioWaveformIntervalSamples,
     timedLyricAtSecond,
-} from "./h3_chain_plan_studio_core.mjs?v=0.6.4";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.2";
+} from "./h3_chain_plan_studio_core.mjs?v=0.6.8";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.8";
 
 const {
     connectedPromptEditors,
@@ -652,6 +652,7 @@ function mount(node) {
             node.properties[TIMELINE_ZOOM_PROPERTY]),
         checkpoints:new Map(), checkpointSignature:"", checkpointError:"", checkpointToken:0,
         checkpointPromise:null, checkpointRefreshQueued:false, disposed:false,
+        executionPromptIds:new Set(),
         sourcePreview:null, sourceWaveform:null, sourceWaveformToken:"",
         presentationToken:0,
         sourceWaveformPromise:null,
@@ -6201,6 +6202,20 @@ function mount(node) {
         }, 50);
     };
     api.addEventListener("executed", onPromptExecuted);
+    const onExecutionStart = (event) => {
+        const promptId = String(event.detail?.prompt_id ?? "");
+        if (promptId) state.executionPromptIds.add(promptId);
+    };
+    const onExecutionTerminal = (event) => {
+        const promptId = String(event.detail?.prompt_id ?? "");
+        if (!promptId || !state.executionPromptIds.delete(promptId) ||
+                state.executionPromptIds.size !== 0 || state.disposed) return;
+        void refreshCheckpoints();
+    };
+    api.addEventListener("execution_start", onExecutionStart);
+    api.addEventListener("execution_success", onExecutionTerminal);
+    api.addEventListener("execution_error", onExecutionTerminal);
+    api.addEventListener("execution_interrupted", onExecutionTerminal);
     const onLoRARoutesChanged = () => {
         if (!state.disposed && state.plan) {
             renderPanel();
@@ -6221,6 +6236,10 @@ function mount(node) {
         if (state.editorialTimer != null) clearTimeout(state.editorialTimer);
         state.timelineResizeObserver?.disconnect();
         api.removeEventListener("executed", onPromptExecuted);
+        api.removeEventListener("execution_start", onExecutionStart);
+        api.removeEventListener("execution_success", onExecutionTerminal);
+        api.removeEventListener("execution_error", onExecutionTerminal);
+        api.removeEventListener("execution_interrupted", onExecutionTerminal);
         document.removeEventListener(
             "h3-lora-routes-changed", onLoRARoutesChanged);
         document.removeEventListener("keydown", onPlayerKeydown, true);
@@ -6276,7 +6295,9 @@ function mount(node) {
         publishActiveScene();
     };
     state.pollTimer = setInterval(() => loadPlan(false), 500);
-    state.checkpointTimer = setInterval(() => void refreshCheckpoints(), 5000);
+    state.checkpointTimer = setInterval(() => {
+        if (state.executionPromptIds.size === 0) void refreshCheckpoints();
+    }, 5000);
     loadPlan(true);
 }
 

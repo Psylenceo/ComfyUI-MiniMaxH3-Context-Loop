@@ -4,10 +4,12 @@
 import importlib.util
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location("checkpoint_variants", ROOT / "checkpoint_variants.py")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
@@ -34,12 +36,12 @@ class VariantTests(unittest.TestCase):
             "checkpoint_sha256": revision * 2, "width": 960, "height": 544,
             "raw_frames": 175, "delivered_frames": 175,
             "latent_saved": True, "latent_layout": "joint_av",
-            "revision_metadata": str(path.relative_to(self.root)),
+            "revision_metadata": path.relative_to(self.root).as_posix(),
         }
         for name, suffix in (("checkpoint", ".safetensors"), ("segment", ".mp4"), ("generated_audio", ".wav")):
             artifact = parent / (revision + suffix)
             artifact.write_bytes(b"fixture: catalogue must not deserialize or hash tensors")
-            segment[name] = str(artifact.relative_to(self.root))
+            segment[name] = artifact.relative_to(self.root).as_posix()
         value = {"format": "h3_chain_upscale_segment_v1", "run_name": "demo",
                  "profile": profile, "profile_config": {"backend": backend, "recipe": recipe or {}},
                  "segment": segment}
@@ -54,6 +56,23 @@ class VariantTests(unittest.TestCase):
 
     def scan(self):
         return module.saved_checkpoint_variants(self.root, "demo", self.originals)
+
+    def test_windows_legacy_lineage_matches_portable_catalogue_keys(self):
+        path, value = self.save(recipe={"derope": True}, chapter=True)
+        value["processing_lineage"] = module.processing_lineage([value["segment"]])
+        for key in ("revision_metadata", "segment", "checkpoint", "generated_audio"):
+            value["segment"][key] = value["segment"][key].replace("/", "\\")
+        value["processing_lineage"][0]["metadata_path"] = value["segment"]["revision_metadata"]
+        self.write(path, value)
+        before = path.read_bytes()
+        result = self.scan()
+        self.assertEqual(result["warnings"], [])
+        self.assertEqual(len(result["variants"]), 1)
+        item = result["variants"][0]
+        self.assertTrue(item["ready"])
+        self.assertEqual(item["processing_branch"]["lineage"][0]["metadata_path"], item["key"])
+        self.assertNotIn("\\", item["key"] + item["profile_path"] + item["video"]["subfolder"])
+        self.assertEqual(path.read_bytes(), before)
 
     def test_profiles_chapters_stages_and_duplicate_pointers(self):
         self.save(profile="derope_in_name_only")
@@ -186,7 +205,34 @@ class VariantTests(unittest.TestCase):
         surviving = next(v for v in self.scan()["variants"] if v["revision"] == "d" * 32)
         self.assertTrue(surviving["ready"])
         self.assertIsNone(surviving["processing_branch"])
+        history = self.scan()["branches"]
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["stage"], "pixel_upscale")
+        self.assertEqual(history[0]["profile_path"], surviving["profile_path"])
+        self.assertEqual(history[0]["lineage"], second["processing_lineage"])
+        self.assertEqual(history[0]["lineage"][0]["revision"], "c" * 32)
         self.assertEqual(second_path.read_bytes(), before)
+
+    def test_display_histories_include_exact_forks_without_full_latents(self):
+        first_path, first = self.save(backend="pixel", scene=8)
+        second_path, second = self.save(backend="pixel", scene=9, revision="d" * 32)
+        fork_path, fork = self.save(backend="pixel", scene=9, revision="e" * 32)
+        for path, saved, prefix in ((first_path, first, []),
+                                    (second_path, second, [first["segment"]]),
+                                    (fork_path, fork, [first["segment"]])):
+            saved["segment"]["latent_saved"] = False
+            saved["processing_lineage"] = module.processing_lineage(prefix + [saved["segment"]])
+            self.write(path, saved)
+        before = {str(p): p.stat().st_mtime_ns for p in self.root.rglob("*")}
+        result = self.scan()
+        self.assertEqual(len(result["branches"]), 3)
+        self.assertTrue(all(b["stage"] == "pixel_upscale" for b in result["branches"]))
+        shared = next(v for v in result["variants"] if v["revision"] == "c" * 32)
+        self.assertIsNone(shared["processing_branch"], "Ambiguous execution selection stays guarded")
+        self.assertEqual({tuple(ref["revision"] for ref in b["lineage"])
+                          for b in result["branches"]},
+                         {("c" * 32,), ("c" * 32, "d" * 32), ("c" * 32, "e" * 32)})
+        self.assertEqual(before, {str(p): p.stat().st_mtime_ns for p in self.root.rglob("*")})
 
 
 if __name__ == "__main__":

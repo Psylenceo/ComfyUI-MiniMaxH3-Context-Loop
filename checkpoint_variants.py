@@ -8,6 +8,10 @@ import json
 from pathlib import Path
 import re
 
+if __package__:
+    from .artifact_paths import artifact_address
+else:  # Standalone catalogue diagnostics.
+    from artifact_paths import artifact_address
 
 STAGES = ("derope", "latent_upscale", "pixel_upscale", "other")
 
@@ -33,7 +37,7 @@ def validate_processing_lineage(value):
     first = value[0]["scene"]
     if [item["scene"] for item in value] != list(range(first, first + len(value))):
         raise ValueError("Saved processing branch is not contiguous.")
-    return value
+    return [{**item, "metadata_path": artifact_address(item["metadata_path"])} for item in value]
 
 
 def processing_stage(config):
@@ -76,7 +80,7 @@ def saved_checkpoint_variants(output_root, run_name, originals):
 
     def media(path):
         rel = path.relative_to(root)
-        return {"filename": rel.name, "subfolder": str(rel.parent), "type": "output"}
+        return {"filename": rel.name, "subfolder": rel.parent.as_posix(), "type": "output"}
 
     def legacy_branches(profile):
         # Only legacy DeRoPE takes need these larger, embedded-source files.
@@ -98,7 +102,9 @@ def saved_checkpoint_variants(output_root, run_name, originals):
                         "h3_chain_upscale_manifest_v1", "h3_chain_upscale_partial_manifest_v1") or
                         saved.get("run_name") != run_name or saved.get("profile") != profile.name):
                     raise ValueError("Invalid processing branch manifest.")
-                branches.append({"path": str(path.relative_to(root)), "kind": "manifest",
+                branches.append({"path": path.relative_to(root).as_posix(), "kind": "manifest",
+                                 "stage": "derope", "profile": profile.name,
+                                 "profile_path": profile.relative_to(root).as_posix(),
                                  "lineage": validate_processing_lineage(processing_lineage(saved["segments"]))})
             except (OSError, ValueError, TypeError, KeyError) as exc:
                 warnings.append("%s: %s" % (path.name, exc))
@@ -143,14 +149,14 @@ def saved_checkpoint_variants(output_root, run_name, originals):
                     if (scene != int(match[1]) or not re.fullmatch(r"[0-9a-f]{32}", revision)
                             or (match[2] and match[2] != revision)):
                         raise ValueError("Saved processing scene/revision does not match its file.")
-                    canonical = inside(root / segment["revision_metadata"], profile)
+                    canonical = inside(root / artifact_address(segment["revision_metadata"]), profile)
                     if canonical != folder / ("clip_%04d.%s.json" % (scene, revision)):
                         raise ValueError("Saved processing revision address is inconsistent.")
                     # Ignore mutable pointer copies; their immutable revision
                     # file is the authority and is scanned separately.
                     if path != canonical:
                         continue
-                    identity = str(path.relative_to(root))
+                    identity = path.relative_to(root).as_posix()
                     if identity in seen:
                         continue
                     seen.add(identity)
@@ -162,7 +168,7 @@ def saved_checkpoint_variants(output_root, run_name, originals):
                         if not isinstance(address, str) or not address:
                             missing.append(field)
                             continue
-                        artifact = inside(root / address, profile)
+                        artifact = inside(root / artifact_address(address), profile)
                         if not artifact.is_file():
                             missing.append(field)
                             continue
@@ -177,7 +183,7 @@ def saved_checkpoint_variants(output_root, run_name, originals):
                         "key": identity, "metadata_path": identity,
                         "scene": scene, "scene_id": str(segment.get("id") or ""),
                         "revision": revision, "stage": stage, "profile": profile.name,
-                        "profile_path": str(profile.relative_to(root)),
+                        "profile_path": profile.relative_to(root).as_posix(),
                         "source_manifest_hash": str(metadata.get("source_manifest_hash") or ""),
                         "source_revision": str(segment.get("source_revision") or ""),
                         "source_checkpoint_sha256": str(segment.get("source_checkpoint_sha256") or ""),
@@ -197,6 +203,8 @@ def saved_checkpoint_variants(output_root, run_name, originals):
                     records.append(record)
                     if metadata.get("processing_lineage"):
                         branches.append({"path": identity, "kind": "metadata",
+                                         "stage": stage, "profile": profile.name,
+                                         "profile_path": record["profile_path"],
                                          "lineage": validate_processing_lineage(metadata["processing_lineage"])})
                     elif record["stage"] == "derope":
                         legacy_branches(profile)
@@ -251,6 +259,10 @@ def saved_checkpoint_variants(output_root, run_name, originals):
                                for scene, revision in sorted(matches)]
         record["source_status"] = "linked" if matches else "original unavailable or source mismatch"
     records.sort(key=lambda item: (item["scene"], item["created_at"], item["key"]), reverse=True)
+    # Presentation retains the exact history, including deleted/missing takes.
+    # It must not reuse the execution-ready subset below or fill its holes
+    # with unrelated newer versions of the same scene.
+    display_branches = branches
     # Independent pixel cleanup can leave a hole in an immutable historical
     # lineage. Keep every surviving take visible, but don't offer that history
     # as an executable complete branch or silently substitute a newer take.
@@ -275,4 +287,5 @@ def saved_checkpoint_variants(output_root, run_name, originals):
                 if key not in leaves or branch["kind"] == "metadata":
                     leaves[key] = branch
         record["processing_branch"] = next(iter(leaves.values())) if len(leaves) == 1 else None
-    return {"variants": records, "warnings": warnings}
+    return {"variants": records, "warnings": warnings,
+            "branches": display_branches}

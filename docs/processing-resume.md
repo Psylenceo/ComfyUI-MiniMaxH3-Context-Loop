@@ -27,6 +27,27 @@ must be enabled when DeRoPE outputs will later serve as deferred latent sources.
   intact and any newly published immutable take is retained. Check the saved
   versions before deciding whether to rerun the scene.
 
+## Reviewing saved processing branches
+
+Checkpoint Manager's DeRoPE, Latent Upscale, and Pixel Upscale tabs display one
+row per saved processing branch, like Original. Rows follow the exact recorded
+scene/take history, not a combination of each scene's newest version. Shared
+prefix clips have matching colors and `shared ×N` badges. Creation dates are
+shown on the cards; rows are ordered by their newest visible save, with a
+`Latest save` label (ties are marked together). This is not an active-output
+indicator or a guarantee that every planned scene has been processed.
+
+Chapter tabs restrict the displayed history to that chapter. Identical chapter
+prefixes are shown once even when later chapters fork. Deleted or unavailable
+takes remain explicit gaps in surviving histories; another version is never
+silently substituted. Older takes without saved lineage appear as standalone
+takes marked `Branch history unavailable`.
+
+Clicking a processed card or branch heading only changes the preview. It does
+not activate an Original branch or change the downstream output selection.
+The existing explicit `Use DeRoPE branch locally` action retains its integrity
+and unambiguous-lineage checks.
+
 ## VIDEO → PNG passthrough
 
 Keep the same PNG folder/export name and `reuse_existing = true` when resuming.
@@ -50,6 +71,26 @@ earlier unchanged scenes are copied into the new folder with bounded memory,
 preserving continuous numbering. Those copies are independent files, so edits
 to the older sequence cannot change them. Edited/missing prefix frames are
 not copied; that fresh variant begins with the scene being exported.
+
+This also applies when the **original source revisions** change: rerendering
+only scenes 6–7 copies the verified unchanged scenes 1–5 into `_2`, then writes
+the new 6–7 using continuous frame numbers (including `first_frame_number`).
+The earlier folder is untouched. If an earlier source scene, selected upscale
+take, or prefix PNG changed, that prefix is not silently reused. Changing frame
+counts naturally shifts subsequent frame numbers in the new sequence.
+
+New VIDEO exports and upscale saves record their shared per-scene/pass owner.
+Checkpoint Manager's deletion preview includes the take's owned PNG frames,
+including independent copies in numbered variants and registered custom output
+folders. Confirming deletion removes those frames, including hand-edited frames
+in that owned range. Other scenes keep their files and original frame numbers;
+the affected export index is marked incomplete. Later exports use a new variant
+instead of replaying deleted scenes from a saved prefix recipe. Identical PNGs
+shared with another owner/take remain until the last owner is removed.
+
+Legacy exports/takes without exact ownership are kept and reported rather than
+matched by scene number, filename, or source revision alone. Assembled videos
+and unrelated/untracked files are still kept. No folders are recursively deleted.
 
 PNG publication writes a `.png_pending.json` journal after staging a complete
 scene. Normal cancellation rolls back that attempt when it can safely do so.
