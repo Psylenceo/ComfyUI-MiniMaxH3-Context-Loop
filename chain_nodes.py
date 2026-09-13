@@ -21572,6 +21572,24 @@ def _list_deferred_review_records(run_name: Any) -> list[dict[str, Any]]:
     return records
 
 
+class MiniMaxH3ReviewRelay:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {}}
+
+    RETURN_TYPES = ()
+    FUNCTION = "noop"
+    CATEGORY = "conditioning/minimax/context_loop"
+    DESCRIPTION = (
+        "Review a live H3 Gate from any canvas on this server. No connections "
+        "or queueing required. The relay never takes project ownership or "
+        "queues its own workflow. Restarted/deferred jobs require checkpoint "
+        "recovery in the original workflow.")
+
+    def noop(self):
+        return ()
+
+
 class MiniMaxH3PendingReview:
     @classmethod
     def INPUT_TYPES(cls):
@@ -28217,7 +28235,7 @@ async def _submit_review_decision(request):
     if rejection is not None:
         return rejection
     future = pending["future"]
-    if future.done():
+    if future.done() or pending.get("decision_submitted"):
         return web.json_response(
             {"error": "This H3 review already has a decision."}, status=409)
 
@@ -28365,11 +28383,19 @@ async def _submit_review_decision(request):
     try:
         with _project_write_commit_guard(
                 run_name, ownership_proof, "change review state"):
-            if _PENDING_REVIEWS.get(token) is not pending:
+            if (_PENDING_REVIEWS.get(token) is not pending or future.done()
+                    or pending.get("decision_submitted")):
                 return web.json_response(
                     {"error": "This H3 review is no longer pending."},
                     status=409)
-            pending["loop"].call_soon_threadsafe(resolve_on_execution_loop)
+            # Reserve before scheduling across execution loops. Two browsers
+            # (Gate and Relay) must not both report an accepted decision.
+            pending["decision_submitted"] = True
+            try:
+                pending["loop"].call_soon_threadsafe(resolve_on_execution_loop)
+            except RuntimeError:
+                pending.pop("decision_submitted", None)
+                raise
     except ProjectOwnershipError as exc:
         return web.json_response({
             "error": str(exc), "code": "h3_project_read_only",
@@ -28423,6 +28449,112 @@ def _retire_superseded_review_snapshots(
         if snapshot_scene == scene:
             _mark_review_snapshot_decided(
                 run_dir, str(snapshot.get("token") or ""), "superseded", time.time())
+
+
+def _live_relay_reviews():
+    """Memory-only discovery: never scan saved runs or read candidate media."""
+    entries = []
+    waiting = set()
+    for token, entry in list(_PENDING_REVIEWS.items()):
+        if entry["future"].done() or entry.get("decision_submitted"):
+            continue
+        public = entry["public"]
+        if not public.get("pending_decision", True):
+            continue
+        key = (public.get("run_name"), public.get("_branch_id", "main"),
+               public.get("clip_index"), public.get("node_id"))
+        waiting.add(key)
+        entries.append((token, public, True))
+    cutoff = time.monotonic() - 21600.0
+    for token, entry in list(_ACTIVE_CANDIDATE_BATCHES.items()):
+        public = entry.get("public")
+        if not isinstance(public, dict) or entry.get("updated", 0) < cutoff:
+            continue
+        key = (public.get("run_name"), public.get("_branch_id", "main"),
+               public.get("clip_index"), public.get("node_id"))
+        if key not in waiting and public.get("candidate_batch_active"):
+            entries.append((token, public, False))
+    return entries
+
+
+async def _list_review_relay(request):
+    query = getattr(request, "query", {})
+    selected_token = str(query.get("token") or "")
+    revision = str(query.get("candidate_revision") or "")
+    summaries, selected = [], None
+    for token, public, actionable in _live_relay_reviews():
+        summary = {key: public.get(key) for key in (
+            "run_name", "node_id", "clip_index", "shot_id", "candidate_count")}
+        summary.update(token=token, branch_id=public.get("_branch_id", "main"),
+                       actionable=actionable,
+                       generated_count=len(public.get("candidates") or []))
+        summaries.append(summary)
+        if token != selected_token:
+            continue
+        candidates = list(public.get("candidates") or [])
+        candidate = next((item for item in candidates
+                          if item.get("revision") == revision), None)
+        if candidate is None and candidates:
+            candidate = candidates[0]
+        selected = dict(summary, candidates=[
+            {key: item.get(key) for key in ("number", "revision", "seed")}
+            for item in candidates], candidate=candidate,
+            kept_candidate_revisions=public.get("kept_candidate_revisions", []),
+            deadline=public.get("deadline"), server_now=time.time(),
+            preview_pending=bool(public.get("preview_pending")),
+            warning=public.get("warning", ""),
+            review_each_candidate=bool(public.get("review_each_candidate")),
+            candidate_remaining=public.get("candidate_remaining", 0))
+    return web.json_response({"reviews": summaries, "selected": selected},
+                             headers={"Cache-Control": "no-store"})
+
+
+async def _submit_review_relay(request):
+    """Delegate only a live decision, using the original job's ownership fence.
+
+    Access is the same as the host ComfyUI UI/API. A relay cannot claim a
+    project, supply a replacement Plan/proof, or enqueue the current canvas.
+    The original route still validates the candidate and commits the decision.
+    """
+    try:
+        body = await request.json()
+    except (ValueError, TypeError):
+        body = None
+    if not isinstance(body, dict):
+        return web.json_response({"error": "Expected a JSON object."}, status=400)
+    if body.get("action") not in ("approve", "stop", "next_candidate"):
+        return web.json_response({"error": "Unsupported relay action."}, status=400)
+    token = str(body.get("token") or "")
+    pending = _PENDING_REVIEWS.get(token)
+    if (pending is None or pending["future"].done()
+            or pending.get("decision_submitted")):
+        return web.json_response({"error": "This gate is no longer waiting. "
+                                  "Refresh live gates; ended jobs need checkpoint recovery."},
+                                 status=409)
+    public, plan = pending["public"], pending["plan"]
+    if (body.get("run_name") != plan.get("run_name")
+            or body.get("branch_id") != plan.get("_branch_id", "main")
+            or body.get("clip_index") != public.get("clip_index")):
+        return web.json_response({"error": "The selected gate has changed. Refresh before deciding."},
+                                 status=409)
+    if not public.get("pending_decision", True):
+        return web.json_response({"error": "This gate is not awaiting a decision."}, status=409)
+    if body["action"] in ("approve", "stop") and not body.get("candidate_revision"):
+        return web.json_response({"error": "Choose a candidate explicitly."}, status=400)
+    # Do not forward scene edits, caller ownership headers or arbitrary fields.
+    decision = {key: body[key] for key in (
+        "action", "candidate_revision", "candidate_revisions") if key in body}
+    decision["token"] = token
+    proof = plan.get("_project_ownership") or {}
+
+    class RelayDecisionRequest:
+        headers = {"X-H3-Workflow-Owner": str(proof.get("owner_id") or ""),
+                   "X-H3-Ownership-Epoch": str(proof.get("epoch", ""))}
+
+        async def json(self):
+            return decision
+
+    return await _submit_review_decision(RelayDecisionRequest())
 
 
 async def _list_pending_reviews(_request):
@@ -31790,6 +31922,10 @@ if (PromptServer is not None and web is not None and
             _project_ownership_command)
     PromptServer.instance.routes.post(
         "/minimax_h3_context_loop/review")(_submit_review_decision)
+    PromptServer.instance.routes.get(
+        "/minimax_h3_context_loop/review-relay")(_list_review_relay)
+    PromptServer.instance.routes.post(
+        "/minimax_h3_context_loop/review-relay")(_submit_review_relay)
     PromptServer.instance.routes.post(
         "/minimax_h3_context_loop/review-candidate-batch")(
             _submit_candidate_batch_command)
@@ -31974,6 +32110,7 @@ CHAIN_NODE_CLASS_MAPPINGS = {
     "MiniMaxH3ChainSegmentSave": MiniMaxH3ChainSegmentSave,
     "MiniMaxH3PendingReview": MiniMaxH3PendingReview,
     "MiniMaxH3ChainReview": MiniMaxH3ChainReview,
+    "MiniMaxH3ReviewRelay": MiniMaxH3ReviewRelay,
     "MiniMaxH3ChainLoopEnd": MiniMaxH3ChainLoopEnd,
     "MiniMaxH3ChainManifestLoad": MiniMaxH3ChainManifestLoad,
     "MiniMaxH3ChainChapterDelivery": MiniMaxH3ChainChapterDelivery,
@@ -31986,6 +32123,7 @@ CHAIN_NODE_CLASS_MAPPINGS = {
 scope_nodes(CHAIN_NODE_CLASS_MAPPINGS)
 
 CHAIN_NODE_DISPLAY_NAME_MAPPINGS = {
+    "MiniMaxH3ReviewRelay": "MiniMax H3 Review Gate Relay",
     "MiniMaxH3LipSyncOptions": "MiniMax H3 Lip-Sync Options",
     "MiniMaxH3GenerationProfile": "MiniMax H3 Generation Profile",
     "MiniMaxH3ChainPolicy": "MiniMax H3 Manual Chain Policy (Legacy)",

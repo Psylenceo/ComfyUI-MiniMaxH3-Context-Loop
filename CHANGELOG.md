@@ -4,6 +4,12 @@ Newest first. This file keeps release history out of the onboarding README.
 
 ## Unreleased — Deferred checkpoint upscaling
 
+- Add a standalone Review Gate Relay for inspecting live candidate batches
+  and sending an explicit selection from another canvas on the same server.
+  No wiring, queueing, project takeover or chain-folder scanning is required.
+  Load only the selected preview, preserve keep marks, and reject duplicate
+  decisions across browsers. See [Review Gate Relay](docs/REVIEW_RELAY.md).
+
 - Allow H3 Chain Assemble to deliver a verified partial upscale (for example,
   scene 1 of 2) without requiring the unfinished tail. Preserve resume
   manifests, chapter numbering/audio offsets and generated audio sidecars;
