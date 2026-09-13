@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import * as promptCompanionSync from "../web/h3_prompt_companion_sync.mjs";
 import {
     MAX_SHOTS, calculatePlanTiming, duplicateShot, parsePlanJson, planToJson,
     promptTextToLines, promptValueToText, renamePlanShot, sceneVisualContextSource,
@@ -172,12 +171,10 @@ for (const linked of [false, true]) for (const implicitIds of [false, true]) {
     const local = makePlan("implicit"), live = structuredClone(local);
     if (implicitIds) for (const plan of [local, live]) plan.shots.forEach(shot => { delete shot.id; });
     live.shots[5].prompt = ["Latest source prompt"];
-    live.shots[5].basic_prompt = "Latest basic draft";
     const state = {plan:local, active:5, promptEditors:linked ? [{}] : [],
         planWidget:{value:JSON.stringify(live)}, planNode:{}, activeChapterId:"chapter", planNotifyTimer:null};
     const published = [], callbacks = [];
     const context = vm.createContext({state, node:{}, MAX_SHOTS, duplicateShot,
-        promptCompanionSync,
         parsePlanJson, planToJson, promptTextToLines, promptValueToText,
         button:(_label, _title, action) => action, flushHistoryDraft:async () => {},
         widget:() => null, setTimeout:action => { callbacks.push(action); return 1; }, clearTimeout() {},
@@ -189,7 +186,6 @@ for (const linked of [false, true]) for (const implicitIds of [false, true]) {
     const expected = linked ? "Latest source prompt" : "Prompt 6";
     const saved = JSON.parse(state.planWidget.value);
     assert.deepEqual(saved.shots[6].prompt, [expected]);
-    assert.equal(saved.shots[6].basic_prompt, "Latest basic draft");
     assert.deepEqual(saved.shots[5].prompt, [expected]);
     assert.deepEqual(saved.shots[7].prompt, ["Prompt 7"]);
     assert.deepEqual(saved.shots[8].prompt, ["Prompt 8"]);

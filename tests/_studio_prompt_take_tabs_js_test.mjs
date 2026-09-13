@@ -11,8 +11,8 @@ const helper = source.match(/^    function promptTakeTabs\([^]*?^    }$/m)?.[0];
 assert.ok(helper, "Exercise the production tab controller");
 assert.equal((source.match(/promptTakeTabs\(original, alternate, String\(row.id\)/g) ?? []).length, 2,
     "Both built-in and delegated prompt editors use the same tabs");
-assert.match(source, /original.append\(basicPromptLabel, prompt, tools, tray, history\)/);
-assert.match(source, /original.append\(basicPromptLabel, delegated\)/);
+assert.match(source, /original.append\(prompt, tools, tray, history\)/);
+assert.match(source, /original.append\(delegated\)/);
 assert.match(source, /\.h3studio-prompt-takes > \[role="tabpanel"\]\[hidden\] \{ display:none; \}/);
 
 class Element {

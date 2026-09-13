@@ -4,12 +4,6 @@ Newest first. This file keeps release history out of the onboarding README.
 
 ## Unreleased — Deferred checkpoint upscaling
 
-- Port PR #56's optional basic scene drafts and checkpoint/history preservation.
-  Fix cross-editor synchronization so an H3 edit cannot restore a stale basic
-  draft, including clears and delayed notifications. Keep executed revisions
-  immutable and carry drafts through Review retries. The PR's Review Gate
-  routing changes are excluded. See [Basic prompts](docs/BASIC_PROMPTS.md).
-
 - Add a standalone Review Gate Relay for inspecting live candidate batches
   and sending an explicit selection from another canvas on the same server.
   No wiring, queueing, project takeover or chain-folder scanning is required.
