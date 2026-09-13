@@ -13,6 +13,9 @@ import {
     moveShot,
     removePlanShot,
     parsePlanJson,
+    planDefaultSteps,
+    setPlanDefaultSteps,
+    clearSceneStepOverrides,
     planToJson,
     promptTextToLines,
     promptValueToText,
@@ -32,7 +35,7 @@ import {
     shotLengthMode,
     sharedPrompt,
     visualContextCompositions,
-} from "./h3_chain_plan_core.mjs?v=0.6.8";
+} from "./h3_chain_plan_core.mjs?v=0.6.9";
 import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.6.8";
 import {
     applySceneAudioOverride,
@@ -374,6 +377,17 @@ function collapseModernBackingWidgets(node) {
     if ((node.comfyClass ?? node.type) !== MODERN_NODE_NAME) return;
     for (const name of MODERN_BACKING_WIDGETS) {
         const widget = node.widgets?.find((item) => item.name === name);
+        if (widget && node.inputs?.some((input) => input.widget?.name === name)) {
+            // A converted widget owns a real socket. Hiding it also hides or
+            // mispositions that socket in the frontend (notably fingerprints).
+            if (widget.type === "hidden") {
+                widget.type = widget._h3OriginalType ?? "converted-widget";
+                widget.computeSize = widget._h3OriginalComputeSize;
+                widget.draw = widget._h3OriginalDraw;
+            }
+            widget.hidden = false;
+            continue;
+        }
         if (widget) collapseWidget(widget);
     }
 }
@@ -632,8 +646,9 @@ function mountEditor(node) {
         );
         setProjectAssetManagedWidget(
             node.widgets?.find((item) => item.name === "generation_fingerprint"),
-            managed,
+            managed && !inputConnected(node, "generation_fingerprint"),
         );
+        collapseModernBackingWidgets(node);
         root.classList.toggle("h3c-project-assets-managed", managed);
         root.title = managed
             ? "Run name and reference fingerprint are managed by the connected Project Assets node."
@@ -685,6 +700,8 @@ function mountEditor(node) {
     function updateTiming() {
         if (!state.plan) return;
         const result = timing();
+        const defaultSteps = planDefaultSteps(
+            state.plan, widgetValue(node, "default_steps", 20));
         const summary = root.querySelector(".h3c-summary");
         if (summary) {
             summary.textContent = `${result.shots.length} scenes · ${result.totalFrames} delivered frames · ${formatClock(result.totalSeconds)}`;
@@ -699,6 +716,8 @@ function mountEditor(node) {
                     `Generation starts at delivered frame ${row.generationStartFrame}. ` +
                     `The incoming assembly boundary blends ${row.videoBlendFrames} frame(s).`;
             }
+            const steps = card.querySelector(".h3c-steps");
+            if (steps) steps.placeholder = String(defaultSteps);
             card.classList.toggle("h3c-invalid", row.errors.length > 0);
         }
         const errors = root.querySelector(".h3c-errors");
@@ -1100,13 +1119,16 @@ function mountEditor(node) {
 
         const advanced = element("div", "h3c-advanced-fields");
         const steps = numberInput(shot.steps ?? "", {min: "1", max: "10000", step: "1"});
-        steps.placeholder = String(widgetValue(node, "default_steps", 20));
-        steps.title = "Optional sampler-step override for only this scene. Leave blank to inherit the Plan node default.";
+        steps.classList.add("h3c-steps");
+        steps.placeholder = String(planDefaultSteps(
+            state.plan, widgetValue(node, "default_steps", 20)));
+        steps.title = "An entered value overrides the default for this scene. Clear it to inherit the displayed Plan default.";
         steps.addEventListener("input", () => {
             if (steps.value) shot.steps = Number(steps.value);
             else delete shot.steps;
             syncPlan();
         });
+        steps.addEventListener("change", () => render());
         const context = element("select", "h3c-context");
         const resolvedPlanSettings = currentSettings();
         const planContextLength = Number(resolvedPlanSettings.contextLength);
@@ -1573,7 +1595,6 @@ function mountEditor(node) {
             field("Lock source audio", lockSourceAudio),
         );
         advanced.append(
-            field("Steps (blank = default)", steps),
             field("Advanced visual context", context),
             field("Visual context source", visualSource),
             field("Context block 1 source", visualLeadSource),
@@ -1589,6 +1610,7 @@ function mountEditor(node) {
             promptTools(prompt, index + 1),
             field("Prompt alternatives", promptSeedControl),
             field("Scene seed", seedControl),
+            field("Steps override (blank = Plan default)", steps),
             field("Scene LoRA route", loraRoute),
             boundary,
             audioFields,
@@ -1657,7 +1679,10 @@ function mountEditor(node) {
         }
 
         function numberSetting(name, label, options) {
-            const control = numberInput(widgetValue(node, name, options.fallback), {
+            const value = () => name === "default_steps"
+                ? planDefaultSteps(state.plan, widgetValue(node, name, options.fallback))
+                : widgetValue(node, name, options.fallback);
+            const control = numberInput(value(), {
                 min: options.min,
                 max: options.max,
                 step: options.step,
@@ -1665,9 +1690,12 @@ function mountEditor(node) {
             control.title = options.title ?? "";
             control.addEventListener("change", () => {
                 if (!control.validity.valid || control.value === "") {
-                    control.value = String(widgetValue(
-                        node, name, options.fallback));
+                    control.value = String(value());
                     return;
+                }
+                if (name === "default_steps") {
+                    setPlanDefaultSteps(state.plan, control.value);
+                    syncPlan();
                 }
                 setWidgetValue(node, name, Number(control.value));
                 updateTiming();
@@ -1693,8 +1721,10 @@ function mountEditor(node) {
         });
         const fingerprint = textSetting(
             "generation_fingerprint", "Generation fingerprint", {
-                fallback: "", disabled: managed, wide: true,
-                title: managed
+                fallback: "", disabled: managed || inputConnected(node, "generation_fingerprint"), wide: true,
+                title: inputConnected(node, "generation_fingerprint")
+                    ? "Supplied by the connected generation_fingerprint socket. Edit the upstream node."
+                    : managed
                     ? "Project Assets contributes the active reference lineage."
                     : "Change this when model, VAE, LoRA, CFG, sampler, scheduler, or global references change.",
             },
@@ -1740,6 +1770,13 @@ function mountEditor(node) {
                 fallback:"0", numeric:true, wide:true,
                 title:"Stable uint64 base used to derive one seed per scene.",
             }),
+        );
+        const overrides = state.plan.shots.filter((shot) => shot.steps != null).length;
+        if (overrides) defaults.append(
+            element("div", "h3c-help", `${overrides} scene(s) override the default steps.`),
+            button("Use default steps for all scenes",
+                "Clear only per-scene step overrides. Prompts, seeds, and all other settings stay unchanged.",
+                () => { clearSceneStepOverrides(state.plan); syncPlan(); render(); }),
         );
         const delivery = group(
             "Delivery",
