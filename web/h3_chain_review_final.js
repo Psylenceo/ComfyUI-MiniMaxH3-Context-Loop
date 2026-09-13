@@ -8,7 +8,7 @@ import {
     planToJson,
     promptValueToText,
 } from "./h3_chain_plan_core.mjs?v=0.7.8";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.2";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.20";
 import {
     refreshRestoredPlanEditors,
     restoreConnectedPolicyInputs,
@@ -25,7 +25,7 @@ import {
     reviewLocalDeadline,
     reviewPlanScenePrompt,
     reviewSeed,
-} from "./h3_chain_review_core.mjs?v=0.7.7";
+} from "./h3_chain_review_core.mjs?v=0.7.20";
 import {projectMutationOptions} from "./h3_project_ownership.mjs?v=0.7.4";
 
 const NODE_NAME = "MiniMaxH3ChainReview";
@@ -139,6 +139,10 @@ function reviewPromptEditorEnabled() {
 // prompt synchronization becomes a no-op until the module cache refreshes.
 function publishCompanionPrompt(...args) {
     return promptCompanionSync.publishCompanionPrompt?.(...args) ?? 0;
+}
+
+function publishCompanionBasicPrompt(...args) {
+    return promptCompanionSync.publishCompanionBasicPrompt?.(...args) ?? 0;
 }
 
 function publishPlanCompanionScene(...args) {
@@ -256,6 +260,8 @@ function injectStyles() {
             width:40px; height:2px; border-top:1px solid #7e899f;
             border-bottom:1px solid #4f586b; }
         .h3r-prompt-grip:hover { background:linear-gradient(180deg,#313848,#1d212b); }
+        .h3r-basic-prompt { width:100%; min-height:70px; resize:vertical; padding:7px;
+            border:1px solid #56637e; border-radius:5px; background:#101218; color:#eef1f7; }
         .h3r-prompt-notice { padding:8px 9px; border:1px solid #56637e;
             border-radius:6px; background:#202431; color:#cbd3e5; white-space:pre-wrap; }
         .h3r-row { display:flex; align-items:flex-end; gap:7px; }
@@ -415,13 +421,14 @@ function requireReviewBranch(reviewNode, review) {
     }
 }
 
-function updatePlan(reviewNode, index, prompt, seed, length) {
+function updatePlan(reviewNode, index, prompt, seed, length, basicPrompt = undefined) {
     const planNode = upstreamPlanNode(reviewNode);
     const widget = planNode?.widgets?.find((item) => item.name === "plan_json");
     if (!widget) return false;
     const sceneIndex = Number(index) - 1;
     const plan = applyReviewEdit(
         parsePlanJson(String(widget.value ?? "")), index, prompt, seed, length,
+        basicPrompt,
     );
     const value = planToJson(plan);
     widget.value = value;
@@ -434,6 +441,11 @@ function updatePlan(reviewNode, index, prompt, seed, length) {
         sceneIndex,
         promptValueToText(plan.shots[sceneIndex]?.prompt),
     );
+    if (typeof basicPrompt === "string") {
+        publishCompanionBasicPrompt(
+            reviewNode, planNode, sceneIndex, plan.shots[sceneIndex]?.basic_prompt,
+        );
+    }
     return true;
 }
 
@@ -597,7 +609,8 @@ async function activateAcceptedCandidate(reviewNode, submittedReview, body) {
         };
     }
     const saved = updatePlan(
-        reviewNode, clipIndex, body.scene_prompt, body.seed, body.length);
+        reviewNode, clipIndex, body.scene_prompt, body.seed, body.length,
+        body.basic_prompt);
     if (!saved) {
         return {
             immediate: false,
@@ -1184,6 +1197,16 @@ function mount(node) {
     prefix.hidden = true;
     prefix.title = "Shared prompt prepended to every scene. It is shown for context and is not changed by retrying this scene.";
 
+    const basicPromptLabel = document.createElement("label");
+    basicPromptLabel.className = "h3r-label";
+    basicPromptLabel.append("Basic prompt (plain language draft)");
+    const basicPrompt = document.createElement("textarea");
+    basicPrompt.className = "h3r-basic-prompt";
+    basicPrompt.title = "A simple, non-H3-formatted scene idea kept alongside the scene prompt. Retrying sends this along; optimizing it into the scene prompt happens in Rich Scene Prompt Editor.";
+    basicPromptLabel.append(basicPrompt);
+    let basicPromptEditedInGate = false;
+    basicPrompt.addEventListener("input", () => { basicPromptEditedInGate = true; });
+
     const promptLabel = document.createElement("label");
     promptLabel.className = "h3r-label";
     promptLabel.append("Scene prompt (used when retrying)");
@@ -1209,6 +1232,8 @@ function mount(node) {
 
     function refreshPromptEditorSetting() {
         const enabled = reviewPromptEditorEnabled();
+        basicPromptLabel.hidden = !enabled;
+        basicPrompt.disabled = !enabled;
         promptLabel.hidden = !enabled;
         prompt.disabled = !enabled;
         promptGrip.hidden = !enabled;
@@ -1446,7 +1471,7 @@ function mount(node) {
     resume.append(resumeTitle, resumeRow, resumeStatus, revisionsPanel);
 
     root.append(
-        head, videoPanel, captureRow, prefix, promptNotice, promptLabel,
+        head, videoPanel, captureRow, prefix, promptNotice, basicPromptLabel, promptLabel,
         seedRow, candidateRow, actions, status, deferred, resume,
     );
 
@@ -2228,6 +2253,9 @@ function mount(node) {
                 : (planScenePrompt(node, submittedReview)
                     ?? submittedReview.scene_prompt
                     ?? prompt.value);
+            const submittedBasicPrompt = reviewPromptEditorEnabled() && basicPromptEditedInGate
+                ? basicPrompt.value
+: basicPrompt.value;
             const normalizedSeed = action === "retry" ? reviewSeed(seed.value) : seed.value;
             const normalizedDuration = action === "retry" || action === "reroll"
                 ? reviewDuration(duration.value) : null;
@@ -2252,6 +2280,7 @@ function mount(node) {
                     token: submittedToken,
                     action: candidateBatchAction || action,
                     scene_prompt: submittedPrompt,
+                    basic_prompt: submittedBasicPrompt,
                     seed: normalizedSeed,
                     length: normalizedDuration?.length,
                     candidate_revision: (candidateBatchAction === "accept" ||
@@ -2309,12 +2338,19 @@ function mount(node) {
             } else if (action === "retry" || action === "reroll") {
                 const acceptedPrompt = typeof body.scene_prompt === "string"
                     ? body.scene_prompt : submittedPrompt.trim();
+                const acceptedBasicPrompt = typeof body.basic_prompt === "string"
+                    ? body.basic_prompt : undefined;
                 const acceptedDuration = reviewDurationText(body.length);
                 const saved = updatePlan(
-                    node, submittedIndex, acceptedPrompt, body.seed, body.length);
+                    node, submittedIndex, acceptedPrompt, body.seed, body.length,
+                    acceptedBasicPrompt);
                 if (current?.token === submittedToken) {
                     prompt.value = acceptedPrompt;
                     promptEditedInGate = false;
+                    if (acceptedBasicPrompt !== undefined) {
+                        basicPrompt.value = acceptedBasicPrompt;
+                    }
+                    basicPromptEditedInGate = false;
                     seed.value = body.seed;
                     duration.value = acceptedDuration;
                 }
@@ -2411,6 +2447,8 @@ function mount(node) {
         }
         if (!sameToken) {
             prompt.value = data.scene_prompt ?? "";
+            basicPrompt.value = data.basic_prompt ?? "";
+            basicPromptEditedInGate = false;
             promptEditedInGate = false;
             seed.value = data.seed ?? "";
             duration.value = reviewDurationText(data.raw_frames);
@@ -2449,6 +2487,17 @@ function mount(node) {
         }
         prompt.value = String(text ?? "").replace(/\r\n?/g, "\n");
         promptEditedInGate = false;
+        return true;
+    };
+
+    node._h3PromptCompanionSetBasicPrompt = (planNode, index, text) => {
+        if (root.classList.contains("h3r-busy")
+                || planNode !== upstreamPlanNode(node)
+                || Number(index) !== Number(current?.clip_index) - 1) {
+            return false;
+        }
+        basicPrompt.value = String(text ?? "").replace(/\r\n?/g, "\n");
+        basicPromptEditedInGate = false;
         return true;
     };
 
@@ -2507,6 +2556,7 @@ function mount(node) {
     node.onRemoved = function () {
         stopCountdown();
         delete this._h3PromptCompanionSetScenePrompt;
+        delete this._h3PromptCompanionSetBasicPrompt;
         api.removeEventListener("execution_start", onResumeExecutionStart);
         api.removeEventListener("execution_success", onResumeExecutionTerminal);
         api.removeEventListener("execution_error", onResumeExecutionTerminal);

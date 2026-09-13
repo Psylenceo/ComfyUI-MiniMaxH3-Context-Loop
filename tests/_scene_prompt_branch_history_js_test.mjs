@@ -5,7 +5,7 @@ import {workingBranchId} from '../web/h3_working_branches.mjs';
 import {parsePlanJson, promptValueToText, promptTextToLines} from '../web/h3_chain_plan_core.mjs';
 import {promptRevisionLabel, promptRevisionNavigation} from '../web/h3_prompt_history_core.mjs';
 import {PromptUndoHistory} from '../web/h3_rich_prompt_editor_core.mjs';
-import {rebaseScenePrompt} from '../web/h3_prompt_companion_sync.mjs';
+import {rebaseScenePrompt, markShotFieldEdited} from '../web/h3_prompt_companion_sync.mjs';
 
 const filename=process.argv.includes('--rich')?'h3_chain_rich_scene_prompt_editor.js':'h3_chain_scene_prompt_editor.js';
 const source=fs.readFileSync(new URL(`../web/${filename}`,import.meta.url),'utf8');
@@ -26,7 +26,7 @@ function fixture(branch=id) {
         ...(selected==='main'?{}:{executed_at:'2026-09-11T10:55:32.321Z',execution_count:1}),
     }]});
     const context=vm.createContext({state,node:{},URLSearchParams,workingBranchId,
-        parsePlanJson,promptValueToText,promptTextToLines,PromptUndoHistory,rebaseScenePrompt,
+        parsePlanJson,promptValueToText,promptTextToLines,PromptUndoHistory,rebaseScenePrompt,markShotFieldEdited,
         ACTIVE_SCENE_PROPERTY:'active',
         renderHistory(){},renderRichEditorText(){},renderEditorText(){},recordPromptReplacement(){},writePlan(){writes++;},
         projectMutationOptions:async(_node,_run,options)=>options,
