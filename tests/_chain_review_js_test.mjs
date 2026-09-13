@@ -57,11 +57,17 @@ const plan = {
         {id: "two", prompt: ["Old two."], seed: "2"},
     ],
 };
-applyReviewEdit(plan, 2, "New two.\n\nCAMERA: Close-up.", "9007199254740993", 56);
+applyReviewEdit(
+    plan, 2, "New two.\n\nCAMERA: Close-up.", "9007199254740993", 56,
+    "a simple plain-language idea",
+);
 assert.deepEqual(plan.shots[0].prompt, ["Old one."]);
 assert.deepEqual(plan.shots[1].prompt, ["New two.", "", "CAMERA: Close-up."]);
 assert.equal(plan.shots[1].seed, "9007199254740993");
 assert.equal(plan.shots[1].length, 56);
+assert.equal(plan.shots[1].basic_prompt, "a simple plain-language idea");
+assert.equal(plan.shots[0].basic_prompt, undefined,
+    "an untouched scene must not gain a basic_prompt field");
 applyReviewEdit(plan, 1, "", "3");
 assert.deepEqual(plan.shots[0].prompt, [""]);
 assert.equal(plan.shots[0].seed, "3");
@@ -381,10 +387,13 @@ assert.doesNotMatch(submitSource, /processRequeue\(/,
     "Review approval must not bypass Loop End; top-level requeue is driven by the Loop End terminal coordinator");
 assert.match(
     submitSource,
-    /updatePlan\(\s*node, submittedIndex, acceptedPrompt, body\.seed, body\.length\)/,
+    /updatePlan\(\s*node, submittedIndex, acceptedPrompt, body\.seed, body\.length,\s*acceptedBasicPrompt\)/,
 );
 assert.match(reviewSource, /publishCompanionPrompt/);
+assert.match(reviewSource, /publishCompanionBasicPrompt/);
 assert.match(reviewSource, /publishPlanCompanionScene/);
+assert.match(reviewSource, /basic_prompt: submittedBasicPrompt/);
+assert.match(reviewSource, /_h3PromptCompanionSetBasicPrompt/);
 assert.match(reviewSource, /_h3PromptCompanionSetScenePrompt/);
 assert.match(reviewSource, /reviewDurationText\(data\.raw_frames\)/);
 assert.match(reviewSource, /h3r-video-panel/);

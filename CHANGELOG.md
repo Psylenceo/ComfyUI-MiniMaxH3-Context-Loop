@@ -3,6 +3,14 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
+## Unreleased
+
+- Port PR #56's optional basic scene drafts and checkpoint/history preservation.
+  Fix cross-editor synchronization so an H3 edit cannot restore a stale basic
+  draft, including clears and delayed notifications. Keep executed revisions
+  immutable and carry drafts through Review retries. The PR's Review Gate
+  routing changes are excluded. See [Basic prompts](docs/BASIC_PROMPTS.md).
+
 ## v0.6.9 — Plan controls, workflow loading and save durability
 
 - Coalesce repeated Plan editor and Studio refreshes during workflow restore,
