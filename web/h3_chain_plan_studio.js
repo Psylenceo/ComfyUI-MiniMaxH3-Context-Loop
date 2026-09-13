@@ -1,5 +1,6 @@
 import {app} from "/scripts/app.js";
 import {api} from "/scripts/api.js";
+import {coalescedRefresh} from "./h3_coalesced_refresh.mjs";
 import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId} from "./h3_working_branches.mjs?v=0.7.23";
 import {browserBranchRecoveryStorage} from "./h3_branch_recovery_storage.mjs?v=0.7.23";
 import {branchPolicyNodes, captureBranchPolicyInputs, restoreBranchPolicyInputs} from "./h3_plan_restore_core.mjs?v=0.7.19";
@@ -6656,10 +6657,17 @@ function mount(node) {
     });
     domWidget.serialize = false;
     restoreStudioNodeSize(node);
+    const refreshStudio = coalescedRefresh(() => {
+        loadPlan(true);
+        publishActiveScene();
+    }, {
+        isConfiguring:() => app.configuringGraph,
+        isAlive:() => Boolean(node.graph) && !state.disposed,
+    });
     const connectionsChanged = node.onConnectionsChange;
     node.onConnectionsChange = function () {
         const result = connectionsChanged?.apply(this, arguments);
-        setTimeout(() => { loadPlan(true); publishActiveScene(); }, 0);
+        refreshStudio();
         return result;
     };
     const onPromptExecuted = (event) => {
@@ -6738,6 +6746,7 @@ function mount(node) {
         window.removeEventListener("pagehide", onBranchPageHide);
         const finalFlush = flushProjectWrites(runName());
         state.disposed = true;
+        refreshStudio.cancel();
         unsubscribeOwnership();
         state.checkpointToken += 1;
         state.presentationToken += 1;
@@ -6802,10 +6811,7 @@ function mount(node) {
         if (livePlanParsed) state.lastValue = liveValue;
         return true;
     };
-    node._h3PlanStudioRefresh = () => {
-        loadPlan(true);
-        publishActiveScene();
-    };
+    node._h3PlanStudioRefresh = () => refreshStudio();
     const saveLocalBranchDraft = async () => {
         if (state.disposed || !state.plan) return;
         await branches.observe();
@@ -6817,11 +6823,14 @@ function mount(node) {
     window.addEventListener("pagehide", onBranchPageHide);
     root.addEventListener("input", saveLocalBranchDraft);
     root.addEventListener("change", saveLocalBranchDraft);
-    state.pollTimer = setInterval(() => { loadPlan(false); saveLocalBranchDraft(); }, 500);
+    state.pollTimer = setInterval(() => {
+        if (app.configuringGraph) return;
+        loadPlan(false); saveLocalBranchDraft();
+    }, 500);
     state.checkpointTimer = setInterval(() => {
         if (state.executionPromptIds.size === 0) void refreshCheckpoints();
     }, 5000);
-    loadPlan(true);
+    refreshStudio();
 }
 
 app.registerExtension({

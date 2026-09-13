@@ -1,5 +1,6 @@
 import {app} from "/scripts/app.js";
 import {api} from "/scripts/api.js";
+import {coalescedRefresh} from "./h3_coalesced_refresh.mjs";
 import {
     H3_CONTEXT_LENGTHS,
     MAX_SHOTS,
@@ -2049,30 +2050,29 @@ function mountEditor(node) {
         widget._h3TimingWrapped = true;
     }
 
-    node._h3ChainEditorRefresh = () => {
-        collapseWidget(planWidget);
-        collapseModernBackingWidgets(node);
+    const refreshEditor = coalescedRefresh((reload) => {
+        if (reload) {
+            collapseWidget(planWidget);
+            collapseModernBackingWidgets(node);
+            const layout = planLayout(node);
+            state.advanced = Boolean(layout.advanced);
+            state.jsonOpen = Boolean(layout.jsonOpen);
+            state.settingsOpen = modern && layout.settingsOpen !== false;
+        }
         syncProjectAssetManagedWidgets();
-        const layout = planLayout(node);
-        state.advanced = Boolean(layout.advanced);
-        state.jsonOpen = Boolean(layout.jsonOpen);
-        state.settingsOpen = modern && layout.settingsOpen !== false;
-        loadFromWidget(true);
+        if (reload) loadFromWidget(true);
+        else render();
         scheduleResponsiveSize();
-    };
-    node._h3ChainEditorConnectionRefresh = () => {
-        syncProjectAssetManagedWidgets();
-        scheduleResponsiveSize();
-        render();
-    };
+    }, {isConfiguring:() => app.configuringGraph, isAlive:() => Boolean(node.graph)});
+    node._h3ChainEditorRefresh = () => refreshEditor(true);
+    node._h3ChainEditorConnectionRefresh = () => refreshEditor();
     node._h3ChainEditorFit = applyResponsiveSize;
-    syncProjectAssetManagedWidgets();
-    loadFromWidget(true);
-    scheduleResponsiveSize();
+    refreshEditor(true);
     const onLoRARoutesChanged = () => render();
     document.addEventListener("h3-lora-routes-changed", onLoRARoutesChanged);
     const removed = node.onRemoved;
     node.onRemoved = function () {
+        refreshEditor.cancel();
         disconnectResizeObservers();
         document.removeEventListener(
             "h3-lora-routes-changed", onLoRARoutesChanged);
