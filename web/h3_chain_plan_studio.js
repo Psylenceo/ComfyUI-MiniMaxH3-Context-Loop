@@ -1,6 +1,6 @@
 import {app} from "/scripts/app.js";
 import {api} from "/scripts/api.js";
-import {coalescedRefresh} from "./h3_coalesced_refresh.mjs";
+import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.6.9";
 import {
     CONTINUATION_MODES,
     FPS,
@@ -59,13 +59,13 @@ import {
     promptRevisionHelp,
     promptRevisionLabel,
     promptRevisionNavigation,
-} from "./h3_prompt_history_core.mjs?v=0.6.8";
+} from "./h3_prompt_history_core.mjs?v=0.6.9";
 import {
     availableReferenceRecords,
     convertTaggedPictureReference,
     taggedPictureReferenceMode,
     taggedPictureReferenceToken,
-} from "./h3_reference_preview_core.mjs?v=0.6.8";
+} from "./h3_reference_preview_core.mjs?v=0.6.9";
 import {
     applySceneAudioOverride,
     applySceneLipSync,
@@ -76,16 +76,16 @@ import {
     sceneAudioPolicy,
     sceneTransitionPreset,
     transitionPresetLabel,
-} from "./h3_policy_core.mjs?v=0.6.8";
+} from "./h3_policy_core.mjs?v=0.6.9";
 import {
     resolveAudioContextLength,
     resolveAudioPolicy,
     resolveTransitionPolicy,
-} from "./h3_socket_presentation_core.mjs?v=0.6.8";
+} from "./h3_socket_presentation_core.mjs?v=0.6.9";
 import {
     availableLoRARoutes,
     loraRouteLabel,
-} from "./h3_lora_scheduler_core.mjs?v=0.6.8";
+} from "./h3_lora_scheduler_core.mjs?v=0.6.9";
 import {
     h3StudioGridMarkers,
     locateStudioTimelineSegment,
@@ -116,8 +116,8 @@ import {
     studioRulerTicks,
     studioWaveformIntervalSamples,
     timedLyricAtSecond,
-} from "./h3_chain_plan_studio_core.mjs?v=0.6.8";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.8";
+} from "./h3_chain_plan_studio_core.mjs?v=0.6.9";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.9";
 
 const {
     connectedPromptEditors,

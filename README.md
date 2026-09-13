@@ -15,6 +15,13 @@ result later—without keeping the whole production in memory.
 
 ## Changelog
 
+### 0.6.9 — Plan controls and workflow loading fixes
+
+- Combine repeated Plan refreshes during workflow loading.
+- Fix default steps and fingerprint input visibility; keep deliberate scene
+  overrides, with an explicit option to clear them.
+- Add a separate-loader source-audio example without the Carousel.
+
 ### 0.6.8 — Fractional H3 mask correction
 
 - Bring nightly's fractional video/audio denoise-mask correction to main,
