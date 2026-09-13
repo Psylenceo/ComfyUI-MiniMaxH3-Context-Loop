@@ -512,6 +512,11 @@ SeedVR2 therefore chunks a continuous timeline rather than restarting at H3
 scene boundaries. A chain with Existing Video Context also streams its saved
 prelude into the same movie.
 
+Plan Studio's editorial trim/slip window is not applied to this upscale source.
+The complete delivered scenes remain available for processing and context; cuts
+are applied when assembling or exporting the final result. See
+[editorial trim and slip](EDITORIAL_TRIM_AND_SLIP.md).
+
 `decode_buffer=disk-backed` is the recommended default. MiniMax H3's VAE keeps
 its native temporal chunking but writes the decoded float scene into a
 temporary mmap. The adapter converts and encodes one frame at a time, retaining

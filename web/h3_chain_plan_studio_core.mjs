@@ -179,9 +179,10 @@ export function studioLatentSafeOutFrames(rawFrames, deliveredFrames) {
 }
 
 export function studioNearestLatentSafeOutFrame(
-    rawFrames, deliveredFrames, requestedFrames,
+    rawFrames, deliveredFrames, requestedFrames, inFrame = 0,
 ) {
-    const options = studioLatentSafeOutFrames(rawFrames, deliveredFrames);
+    const options = studioLatentSafeOutFrames(rawFrames, deliveredFrames)
+        .filter((frame) => frame > inFrame);
     if (!options.length) return Math.max(1, Math.round(Number(deliveredFrames) || 1));
     const requested = Number(requestedFrames);
     return options.reduce((best, candidate) => (
@@ -190,7 +191,18 @@ export function studioNearestLatentSafeOutFrame(
     ), options[0]);
 }
 
-function editorialOutFrame(row, trims) {
+// Slip never changes duration. Both edges must remain on legal boundaries;
+// the original delivered start/end are allowed without cutting a latent.
+export function studioLatentSafeSlipStarts(rawFrames, deliveredFrames, durationFrames) {
+    const ends = studioLatentSafeOutFrames(rawFrames, deliveredFrames);
+    const validEnds = new Set(ends);
+    const duration = Number(durationFrames);
+    if (!Number.isInteger(duration) || duration < 1) return [];
+    return [0, ...ends.filter((frame) => frame < deliveredFrames)]
+        .filter((start) => validEnds.has(start + duration));
+}
+
+export function studioEditorialWindow(row, trims) {
     const sceneId = String(row?.id ?? "");
     const full = Math.max(
         0, Math.round(Number(row?.deliveredFrames)
@@ -200,8 +212,13 @@ function editorialOutFrame(row, trims) {
         (item) => String(item?.scene_id ?? "") === sceneId,
     );
     const requested = Math.round(Number(trim?.out_frame));
-    return Number.isInteger(requested) && requested > 0 && requested <= full
-        ? requested : full;
+    const start = Math.round(Number(trim?.in_frame ?? 0));
+    const valid = Number.isInteger(requested) && requested > 0 && requested <= full
+        && Number.isInteger(start) && start >= 0 && start < requested;
+    const sourceInFrame = valid ? start : 0;
+    const sourceOutFrame = valid ? requested : full;
+    return {sourceInFrame, sourceOutFrame,
+        durationFrames:sourceOutFrame - sourceInFrame};
 }
 
 export function studioTimelineSegments(
@@ -219,10 +236,11 @@ export function studioTimelineSegments(
     let naturalStartFrame = 0;
     scenes.forEach((row, sceneIndex) => {
         const sceneId = String(row?.id ?? "");
-        const durationFrames = editorialOutFrame(row, trims);
+        const window = studioEditorialWindow(row, trims);
+        const {durationFrames} = window;
         const explicit = bySceneId.has(sceneId);
         orderedScenes.push({
-            row, sceneIndex, sceneId, durationFrames, explicit,
+            row, sceneIndex, sceneId, ...window, explicit,
             requestedStart:explicit
                 ? bySceneId.get(sceneId) : naturalStartFrame,
         });
@@ -256,6 +274,7 @@ export function studioTimelineSegments(
         segments.push({
             kind:"scene", key:`scene:${sceneIndex}`, sceneIndex,
             sceneId, startFrame, durationFrames,
+            sourceInFrame:item.sourceInFrame, sourceOutFrame:item.sourceOutFrame,
             endFrame:startFrame + durationFrames,
             startSeconds:startFrame / 24,
             durationSeconds:durationFrames / 24,
@@ -419,7 +438,8 @@ export function studioPlayerSegmentClock(
         (candidate) => candidate?.key === segmentKey,
     );
     if (!segment || segment.kind !== "scene") return null;
-    const localSeconds = Math.max(0, Number(mediaSeconds) || 0);
+    const localSeconds = Math.max(0, (Number(mediaSeconds) || 0)
+        - (Number(segment.sourceInFrame) || 0) / fps);
     const durationSeconds = Math.max(0, Number(segment.durationSeconds) || 0);
     const tolerance = 1 / Math.max(1, (Number(fps) || 24) * 8);
     return {

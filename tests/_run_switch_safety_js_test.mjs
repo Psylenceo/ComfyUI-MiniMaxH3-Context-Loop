@@ -102,7 +102,7 @@ function studioContext() {
         }},
     });
     const names = ["normalizedEditorial", "editorialPayload", "applyEditorialPayload", "syncAlternateTakeWidget", "scheduleEditorialSave",
-        "sceneLocked", "setSceneTrim", "flushProjectWrites"];
+        "sceneLocked", "trimForScene", "setSceneTrim", "flushProjectWrites"];
     if (studio.includes("function editorialSignature(")) names.push("editorialSignature", "persistEditorial");
     vm.runInContext(names.map(name => handler(studio, name)).join("\n"), context);
     return {context, writes, async flush() {
@@ -118,6 +118,18 @@ const incoming = {
     trims:[{scene:1, scene_id:"scene_b", out_frame:90}], locked_scene_ids:["scene_b"],
     subtitles:{mode:"off", asset_id:"", offset_seconds:0}, alternate_draft:null, replacements:[],
 };
+{
+    const fixture = studioContext();
+    fixture.context.state.plan.shots[0].id = "scene_b";
+    fixture.context.applyEditorialPayload({...incoming, trims:[], locked_scene_ids:[]});
+    fixture.context.setSceneTrim(0, 102, 51);
+    await fixture.flush();
+    assert.equal(fixture.writes[0].trims[0].in_frame, 51);
+    assert.equal(fixture.writes[0].trims[0].out_frame, 102);
+    const restored = fixture.context.normalizedEditorial(fixture.writes[0]);
+    assert.equal(restored.trims[0].in_frame, 51, "reload preserves the slipped source window");
+    assert.equal(restored.trims[0].out_frame, 102);
+}
 {
     const fixture = studioContext();
     fixture.context.applyEditorialPayload(incoming);

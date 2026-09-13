@@ -8733,15 +8733,19 @@ def _normalize_run_editorial(value: Any, run_name: Any) -> dict[str, Any]:
                 "Scene %s has more than one editorial trim." % scene_id)
         trimmed_ids.add(scene_id)
         out_frame = int(item.get("out_frame", 0))
+        in_frame = int(item.get("in_frame", 0))
         if out_frame < 1 or out_frame > MAX_H3_FRAMES:
             raise ValueError(
                 "Editorial trim out_frame must be between 1 and %d."
                 % MAX_H3_FRAMES)
+        if in_frame < 0 or in_frame >= out_frame:
+            raise ValueError("Editorial trim requires 0 <= in_frame < out_frame.")
         trims.append({
             "scene_id": scene_id,
             "scene": int(scene_by_id.get(
                 scene_id, item.get("scene", offset + 1))),
             "out_frame": out_frame,
+            **({"in_frame": in_frame} if in_frame else {}),
         })
     trims.sort(key=lambda item: int(item["scene"]))
 
@@ -9185,7 +9189,7 @@ def _require_alternate_hard_cut_boundaries(
 def _editorial_trimmed_segment(
         segment: dict[str, Any], editorial: dict[str, Any]
 ) -> dict[str, Any]:
-    """Return a transient segment view with one validated latent-safe out."""
+    """Return an output-only window; never feed this view into generation."""
     scene_id = str(segment.get("id") or "")
     trim = next((
         item for item in editorial.get("trims", [])
@@ -9197,6 +9201,7 @@ def _editorial_trimmed_segment(
     raw_frames = int(segment.get("raw_frames", 0))
     delivered_frames = int(segment.get("delivered_frames", 0))
     out_frames = int(trim.get("out_frame", 0))
+    in_frames = int(trim.get("in_frame", 0))
     if (raw_frames < 1 or delivered_frames < 1
             or delivered_frames > raw_frames):
         raise ValueError(
@@ -9208,21 +9213,31 @@ def _editorial_trimmed_segment(
             "%d delivered frames." % (scene_id, delivered_frames))
     # A full-length value is normalized to no cut. This lets older editors
     # safely round-trip a reset without changing continuation state.
-    if out_frames == delivered_frames:
+    if in_frames < 0 or in_frames >= out_frames:
+        raise ValueError("Editorial trim requires 0 <= in_frame < out_frame.")
+    if in_frames and (
+            _h3_prefix_frame_boundary_step(
+                raw_frames - delivered_frames + in_frames) is None
+            or (in_frames * int(AUDIO_HZ)) % FPS):
+        raise ValueError(
+            "Editorial trim scene %s in_frame must be on the shared H3 "
+            "video/audio-latent grid." % scene_id)
+    if in_frames == 0 and out_frames == delivered_frames:
         return segment
     raw_out_frames = raw_frames - delivered_frames + out_frames
     video_steps = _h3_prefix_frame_boundary_step(raw_out_frames)
-    if video_steps is None:
+    if video_steps is None and out_frames != delivered_frames:
         raise ValueError(
             "Editorial trim scene %s ends at raw frame %d, which is between "
             "H3 video-latent steps." % (scene_id, raw_out_frames))
-    if (out_frames * int(AUDIO_HZ)) % FPS:
+    if out_frames != delivered_frames and (out_frames * int(AUDIO_HZ)) % FPS:
         raise ValueError(
             "Editorial trim scene %s uses %d delivered frames, which does "
             "not end on the shared 24 fps / 40 Hz audio-latent grid." %
             (scene_id, out_frames))
     result = dict(segment)
     result.update({
+        **({"_editorial_in_frames": in_frames} if in_frames else {}),
         "_editorial_out_frames": out_frames,
         "_editorial_raw_out_frames": raw_out_frames,
         "_editorial_video_steps": video_steps,
@@ -9236,7 +9251,8 @@ def _editorial_segment_delivered_frames(
         segment: dict[str, Any], fallback: int = 0) -> int:
     return int(segment.get(
         "_editorial_out_frames",
-        segment.get("delivered_frames", fallback)))
+        segment.get("delivered_frames", fallback))) - int(
+            segment.get("_editorial_in_frames", 0))
 
 
 def _editorial_segment_raw_frames(
@@ -9475,13 +9491,6 @@ def _editorial_timeline_records(
             "H3 Chain ignored stale editorial selection(s) after base "
             "regeneration: %s. Alternate artifacts remain available.",
             "; ".join(cleared_editorial))
-    base_editorial_segments = {
-        int(segment.get("index", offset)):
-            _editorial_trimmed_segment(segment, editorial)
-        for offset, segment in enumerate(segments, start=1)
-    }
-    _require_current_editorial_dependencies(
-        base_editorial_segments, "H3 editorial assembly")
     presentation_segments = _editorial_presentation_segments(
         run_name, segments, editorial)
     editorial_segments = {
@@ -9509,7 +9518,9 @@ def _editorial_timeline_records(
             "scene_id": scene_id,
             "frame_count": delivered,
             "source_frame_count": int(segment["delivered_frames"]),
-            "source_start_frame": source_cursor,
+            "source_start_frame": source_cursor + int(
+                editorial_segment.get("_editorial_in_frames", 0)),
+            "source_in_frame": int(editorial_segment.get("_editorial_in_frames", 0)),
             "requested_start_frame": int(
                 requested[scene_id] if explicit else natural_start),
             "explicit": explicit,
@@ -9541,6 +9552,7 @@ def _editorial_timeline_records(
             "frame_count": int(item["frame_count"]),
             "source_frame_count": int(item["source_frame_count"]),
             "source_start_frame": int(item["source_start_frame"]),
+            "source_in_frame": int(item["source_in_frame"]),
             "segment": item["segment"],
         })
         cursor = start + int(item["frame_count"])
@@ -11354,7 +11366,6 @@ def _load_resume_state(
     if start_clip <= len(plan["shots"]):
         _validate_scene_resolution_boundary(plan, start_clip)
     consumed_predecessors = set(context_sources["scenes"])
-    editorial = _load_run_editorial(plan.get("run_name"))
     segments = []
     previous_meta = None
     if not bool(verify_history):
@@ -11422,23 +11433,9 @@ def _load_resume_state(
         restored = _public_segment(segment)
         for key, value in _prompt_fields(plan, index).items():
             restored.setdefault(key, value)
-        segments.append(_editorial_trimmed_segment(restored, editorial))
+        # Cuts are editorial only. Resume from the complete saved checkpoint.
+        segments.append(restored)
         previous_meta = metadata
-
-    editorial_segments = {
-        int(segment.get("index", offset)): segment
-        for offset, segment in enumerate(segments, start=1)
-    }
-    stale_dependencies = _editorial_stale_dependencies(editorial_segments)
-    if stale_dependencies:
-        saved_index = min(stale_dependencies)
-        raise ValueError(
-            "Cannot resume clip %d: saved scene %d used an older editorial "
-            "continuation endpoint (%s). Resume at scene %d and regenerate "
-            "downstream continuity; the original complete checkpoints "
-            "remain available." %
-            (start_clip, saved_index,
-             "; ".join(stale_dependencies[saved_index]), saved_index))
 
     if previous_meta is None:
         raise RuntimeError("Internal resume error: predecessor metadata unavailable.")
@@ -23488,20 +23485,8 @@ class MiniMaxH3ChainLoopEnd:
                     selected_frames[-context_length:]),
                 _compact_latent(selected_latent),
             )
-        editorial = _load_run_editorial(plan.get("run_name"))
-        next_segment = _editorial_trimmed_segment(
-            _public_segment(segment), editorial)
-        if "_editorial_out_frames" in next_segment:
-            selected_frames = selected_frames[
-                :int(next_segment["_editorial_out_frames"])]
-            selected_latent = _editorial_trim_latent(
-                selected_latent, next_segment)
-            _LOG.info(
-                "H3 Chain scene %d continuation now ends at latent-safe "
-                "editorial frame %d/%d; the complete checkpoint remains "
-                "unchanged.", index,
-                int(next_segment["_editorial_out_frames"]),
-                int(next_segment["delivered_frames"]))
+        # Editorial trim/slip must not change the next scene's context.
+        next_segment = _public_segment(segment)
         context_length = min(
             _plan_context_storage_length(plan), int(selected_frames.shape[0]))
         next_state = {
@@ -24686,6 +24671,7 @@ def _apply_editorial_timeline_records(
         item for item in records if item.get("kind") == "prelude"
     ]
     gap_before_scene = False
+    previous_endpoint_cut = False
     for item in timeline_records:
         if item.get("kind") == "gap":
             gap_frames = int(item.get("frame_count", 0))
@@ -24713,17 +24699,19 @@ def _apply_editorial_timeline_records(
                 "Editorial timeline targets missing scene %d." % scene)
         record = dict(record)
         used_frames = int(item["frame_count"])
-        if reordered or gap_before_scene:
+        source_in = int(item.get("source_in_frame", 0))
+        if reordered or gap_before_scene or source_in or previous_endpoint_cut:
             # Saved incoming overlap belongs to the scene's generation
             # predecessor. It is invalid after an editorial reorder, and a
-            # black gap also establishes a hard boundary. Use the complete
-            # delivered clip without resampling or touching its checkpoint.
+            # black gap, changed outgoing endpoint or slipped incoming edge
+            # also establishes a hard boundary. Do not reintroduce discarded
+            # source frames via saved overlap; use the delivered clip window.
             record.update({
                 "path": _absolute_output_path(source["segment"]),
                 "input_frames": used_frames,
                 "delivered_frames": used_frames,
                 "blend_frames": 0,
-                "skip_frames": 0,
+                "skip_frames": source_in,
             })
             record.pop("tone_match", None)
             record.pop("tone_match_prefix", None)
@@ -24737,6 +24725,8 @@ def _apply_editorial_timeline_records(
             })
         result.append(record)
         gap_before_scene = False
+        previous_endpoint_cut = (
+            source_in + used_frames != int(source["delivered_frames"]))
     return result
 
 
@@ -25417,6 +25407,9 @@ def _pyav_blend_video(
                     raise ValueError(
                         "H3 blend input ended before its scheduled overlap.") \
                         from exc
+            # A saved file can be longer than its editorial window. Bound
+            # decoding after the source-in skip, just like FFmpeg's trim.
+            iterator = itertools.islice(iterator, expected_input)
             if record_index == 0:
                 for array in iterator:
                     pending.append(array)
@@ -25825,6 +25818,8 @@ def _png_export_incremental_identity(
             "audio": (_png_export_source_identity(sources[int(item["index"])])
                       if audio_vae is not None else None),
             "frames": _editorial_segment_delivered_frames(item),
+            **({"in_frame": int(item["_editorial_in_frames"])}
+               if item.get("_editorial_in_frames") else {}),
             "index": int(item["index"]),
             "placement": placements.get(str(item.get("id") or "")),
         } for item in editorial_segments],
@@ -26086,7 +26081,8 @@ def _png_export_packed_audio_records(
             "start_frame": target_cursor,
             "frame_count": frames,
             "source_frame_count": int(segment["delivered_frames"]),
-            "source_start_frame": source_starts[index],
+            "source_start_frame": source_starts[index] + int(
+                segment.get("_editorial_in_frames", 0)),
         })
         target_cursor += frames
     return records, target_cursor
@@ -26235,14 +26231,6 @@ class MiniMaxH3ChainExportPNG:
                 "Connect only audio_vae for an audio-only export.")
         segments = _checkpoint_export_segments(manifest)
         editorial = _manifest_editorial(manifest)
-        editorial_segments = [
-            _editorial_trimmed_segment(segment, editorial)
-            for segment in segments
-        ]
-        _require_current_editorial_dependencies({
-            int(segment.get("index", offset)): segment
-            for offset, segment in enumerate(editorial_segments, start=1)
-        }, "H3 PNG export")
         editorial_segments = [
             _editorial_trimmed_segment(segment, editorial)
             for segment in _editorial_presentation_segments(
@@ -26430,9 +26418,10 @@ class MiniMaxH3ChainExportPNG:
                         "manifest requires %d raw frames before trimming %d "
                         "overlap frames." %
                         (int(images.shape[0]), index, raw_frames, trim_frames))
+                source_in = int(segment.get("_editorial_in_frames", 0))
                 images = images[
-                    technical_trim_frames:
-                    technical_trim_frames + delivered_frames]
+                    technical_trim_frames + source_in:
+                    technical_trim_frames + source_in + delivered_frames]
                 progress_done += delivered_frames
                 _png_export_update_progress(
                     progress_bar, progress_done, progress_total)
@@ -26454,6 +26443,8 @@ class MiniMaxH3ChainExportPNG:
                     "raw_frames": raw_frames,
                     "delivered_frames": delivered_frames,
                     "trim_frames": trim_frames,
+                    "source_in_frame": source_in,
+                    "source_out_frame": source_in + delivered_frames,
                 }, ensure_ascii=False, separators=(",", ":"))
                 conversion_seconds = 0.0
                 save_seconds = 0.0
@@ -26537,6 +26528,8 @@ class MiniMaxH3ChainExportPNG:
                     "seed": segment.get("seed"),
                     "trim_frames": trim_frames,
                     "delivered_frames": delivered_frames,
+                    "source_in_frame": source_in,
+                    "source_out_frame": source_in + delivered_frames,
                     "first_frame_number": clip_first,
                     "last_frame_number": frame_number - 1,
                 })
@@ -26684,6 +26677,8 @@ class MiniMaxH3ChainExportPNG:
                                    - delivered_frames,
                     "delivered_frames": delivered_frames,
                     "timeline_first_frame": timeline_cursor,
+                    "source_in_frame": int(segment.get("_editorial_in_frames", 0)),
+                    "source_out_frame": int(segment.get("_editorial_in_frames", 0)) + delivered_frames,
                     "timeline_last_frame": (
                         timeline_cursor + delivered_frames - 1),
                 })
@@ -27172,19 +27167,10 @@ class MiniMaxH3ChainLatentVideoAdapter:
                 **(manifest.get("compatibility") or {}), **geometry}}
         prelude = _validate_prelude(manifest)
         editorial = _manifest_editorial(manifest)
-        editorial_segments = [
-            _editorial_trimmed_segment(segment, editorial)
-            for segment in segments
-        ]
-        _require_current_editorial_dependencies({
-            int(segment.get("index", offset)): segment
-            for offset, segment in enumerate(editorial_segments, start=1)
-        }, "H3 Full-Chain Latent Video")
-        editorial_segments = [
-            _editorial_trimmed_segment(segment, editorial)
-            for segment in _editorial_presentation_segments(
-                manifest.get("run_name"), segments, editorial)
-        ]
+        # Upscale the complete source, including frames outside the final cut.
+        # ALT selection changes the picture source, not its temporal extent.
+        editorial_segments = _editorial_presentation_segments(
+            manifest.get("run_name"), segments, editorial)
         schedule = _full_chain_blend_schedule(
             manifest, editorial_segments, prelude, blend_schedule)
         selected_audio = str(audio_source or "plan").strip().lower()
@@ -27202,11 +27188,7 @@ class MiniMaxH3ChainLatentVideoAdapter:
         total_frames = prelude_frames + editorial_frames
         digest, identity = _full_chain_cache_identity(
             manifest, editorial_segments, prelude, schedule, selected_audio,
-            video_vae,
-            editorial_trims=[{
-                "scene_id": str(item.get("scene_id") or ""),
-                "out_frame": int(item.get("out_frame", 0)),
-            } for item in editorial.get("trims", [])])
+            video_vae)
         cache_dir = os.path.join(
             _chapter_delivery_root(manifest), "upscaled", "seedvr2", "source")
         os.makedirs(cache_dir, exist_ok=True)
@@ -29906,23 +29888,14 @@ def _saved_checkpoint_listing(
                 active_item["presentation_revision"] = selected["revision"]
                 active_item["presentation_video"] = selected.get("video")
                 active_item["presentation_media_mode"] = "picture_only"
-    editorial_segments: dict[int, dict[str, Any]] = {}
     for index, segment in active_segments.items():
         try:
-            editorial_segments[index] = _editorial_trimmed_segment(
-                segment, editorial)
+            _editorial_trimmed_segment(segment, editorial)
         except (TypeError, ValueError) as exc:
-            editorial_segments[index] = segment
             for item in checkpoints:
                 if int(item["scene"]) == index:
                     item["editorial_error"] = str(exc)
                     break
-    stale_dependencies = _editorial_stale_dependencies(editorial_segments)
-    for item in checkpoints:
-        reasons = stale_dependencies.get(int(item["scene"]))
-        if reasons:
-            item["continuation_stale"] = True
-            item["continuation_stale_reason"] = "; ".join(reasons)
     payload: dict[str, Any] = {
         "run_name": run_name,
         "working_branch_id": current_branch(run_name),

@@ -208,12 +208,22 @@ def main():
             trimmed_video, trimmed_path, trimmed_status = node().adapt(
                 manifest, trimmed_vae, "none", "plan", "memory", False, 256)
             assert trimmed_video == trimmed_path
-            assert trimmed_path != path
+            assert trimmed_path == path, "editorial cuts do not change upscale input"
             assert trimmed_vae.calls == 2
-            assert "8 frames" in trimmed_status
+            assert "10 frames" in trimmed_status
             with av.open(trimmed_path, mode="r") as container:
                 assert sum(1 for _frame in container.decode(
-                    container.streams.video[0])) == 8
+                    container.streams.video[0])) == 10
+            # A head trim/slip also leaves the full source and cache untouched.
+            editorial = chain._read_json(editorial_path)
+            editorial["trims"] = [{"scene": 2, "scene_id": "two",
+                                   "in_frame": 3, "out_frame": 5}]
+            chain._atomic_json(editorial_path, editorial)
+            no_decode = FakeVAE()
+            no_decode.fail = True
+            _, slipped_path, slipped_status = node().adapt(
+                manifest, no_decode, "none", "plan", "memory", True, 256)
+            assert slipped_path == path and "reused" in slipped_status
             chain._atomic_json(editorial_path, chain._normalize_run_editorial({
                 "format": "h3_chain_editorial_v1",
                 "run_name": "seedvr_test",
