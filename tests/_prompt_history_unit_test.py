@@ -112,5 +112,58 @@ def main():
     print("H3 prompt history: labels, safe archive/delete and executed branches pass")
 
 
+def basic_draft_matching():
+    with tempfile.TemporaryDirectory() as temporary:
+        store = PromptHistoryStore(temporary)
+
+        # A different basic draft on the same H3 text must fork a new
+        # revision rather than mutate an already-executed one.
+        old = store.mark_executed(
+            "project", "scene_one", "same H3 result", "original basic draft")
+        old_id = old["revision"]["id"]
+        new = store.save_draft(
+            "project", "scene_one", "same H3 result", old_id,
+            "different basic draft")
+        new_id = new["revision"]["id"]
+        assert new_id != old_id, (
+            "a different basic draft on executed H3 text must fork, not "
+            "overwrite the executed revision")
+        assert new["revision"]["parent_id"] == old_id
+        assert new["revision"]["executed_at"] is None
+        reread_old = store.get("project", "scene_one", old_id)
+        assert reread_old["basic_prompt"] == "original basic draft", (
+            "the original executed revision's basic draft must survive")
+        assert new["revision"]["basic_prompt"] == "different basic draft"
+
+        # The same fork-on-difference rule applies to mark_executed: calling
+        # it with the same H3 text but a new basic draft against an already
+        # executed revision must not silently rewrite that revision either.
+        reexecuted = store.mark_executed(
+            "project", "scene_one", "same H3 result", "yet another basic")
+        assert reexecuted["revision"]["id"] not in (old_id,)
+        reread_old_again = store.get("project", "scene_one", old_id)
+        assert reread_old_again["basic_prompt"] == "original basic draft"
+
+        # Re-executing with the *same* basic draft as an executed revision
+        # is not a fork - it is the same take running again.
+        rerun = store.mark_executed(
+            "project", "scene_one", "same H3 result", "original basic draft")
+        assert rerun["revision"]["id"] == old_id
+        assert rerun["revision"]["execution_count"] == 2
+
+        # An unexecuted draft's basic_prompt stays mutable in place.
+        draft = store.save_draft(
+            "project", "scene_two", "draft text", None, "draft A")
+        draft_id = draft["revision"]["id"]
+        updated = store.save_draft(
+            "project", "scene_two", "draft text", draft_id, "draft B")
+        assert updated["revision"]["id"] == draft_id, (
+            "an unexecuted draft must remain mutable in place")
+        assert updated["revision"]["basic_prompt"] == "draft B"
+
+    print("H3 prompt history: basic-draft matching against executed revisions pass")
+
+
 if __name__ == "__main__":
     main()
+    basic_draft_matching()

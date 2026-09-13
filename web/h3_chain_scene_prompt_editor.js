@@ -51,6 +51,7 @@ import {
 const {
     publishCompanionScene,
     rebaseScenePrompt,
+    markShotFieldEdited,
 } = promptCompanionSync;
 const activeSceneIndexAfterRefresh =
     typeof promptCompanionSync.activeSceneIndexAfterRefresh === "function"
@@ -1323,6 +1324,7 @@ function mount(node) {
             });
             renderRichEditorText(history.textarea.value);
             shot.prompt = promptTextToLines(history.textarea.value);
+            markShotFieldEdited(shot, "prompt");
             writePlan(history.status);
             if (history.status) history.status.textContent = "Loaded prompt version";
             renderHistory();
@@ -2707,6 +2709,7 @@ function mount(node) {
         const status = element("span", "h3sp-footer-status", "Synchronized with Plan");
         basicPromptTextarea.addEventListener("input", () => {
             shot.basic_prompt = basicPromptTextarea.value;
+            markShotFieldEdited(shot, "basic_prompt");
             writePlan(status, {deferEffects:true});
         });
         const historyHost = element("div", "h3sp-history");
@@ -2724,6 +2727,7 @@ function mount(node) {
                 ? selectionTextOffset(richEditor) : null;
             textarea.value = text;
             shot.prompt = promptTextToLines(text);
+            markShotFieldEdited(shot, "prompt");
             writePlan(status);
             scheduleHistoryDraft(shotId, text);
             renderRichEditorText(
@@ -2757,6 +2761,7 @@ function mount(node) {
                 inputType:event.inputType || state.richInputType,
             });
             shot.prompt = promptTextToLines(textarea.value);
+            markShotFieldEdited(shot, "prompt");
             writePlan(status, {deferEffects:true});
             scheduleHistoryDraft(shotId, textarea.value);
             if (document.activeElement !== richEditor) renderRichEditorText(textarea.value);

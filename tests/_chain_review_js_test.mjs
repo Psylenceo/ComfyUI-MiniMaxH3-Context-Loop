@@ -287,7 +287,7 @@ assert.match(reviewSource, /_h3QueuedReview/);
 assert.match(reviewSource, /setInterval[\s\S]*fetchPending/);
 assert.match(reviewSource, /addEventListener\("status", fetchPending\)/);
 assert.match(reviewSource, /async nodeCreated\(node\)/);
-assert.match(reviewSource, /gates\.length === 1/);
+assert.match(reviewSource, /candidates\.length === 1/);
 assert.match(reviewSource, /data\?\.run_name/);
 assert.match(reviewSource, /mountedReviewNodes/);
 assert.match(reviewSource, /split\(\/\[\.:\]\//);
@@ -455,8 +455,34 @@ assert.match(reviewSource, /videoPanel\.offsetHeight, true/);
 assert.doesNotMatch(reviewSource, /\/h3_motion_context\/review/);
 const fallbackStart = reviewSource.indexOf("function reviewFallbackNode");
 const fallbackSource = reviewSource.slice(fallbackStart, reviewSource.indexOf("function routeReview", fallbackStart));
-assert.match(fallbackSource, /matchingRun\.length === 1\) return matchingRun\[0\];[\s\S]*data\?\.durable === true\) return null;[\s\S]*matchingLeaf[\s\S]*gates\.length === 1/,
+assert.match(fallbackSource, /matchingRun\.length === 1\) return matchingRun\[0\];[\s\S]*data\?\.durable === true\) return null;[\s\S]*matchingLeaf[\s\S]*candidates\.length === 1/,
     "durable recovery may use only an authoritative run match, not leaf or singleton fallback");
+assert.match(fallbackSource,
+    /const candidates = expectedRun[\s\S]*actualRun !== expectedRun|const candidates = expectedRun[\s\S]*!actualRun \|\| actualRun === expectedRun/,
+    "a gate whose connected Plan is known to belong to a different, named run " +
+    "must be excluded from leaf-id and singleton fallback - a same-leaf-id or " +
+    "lone gate is not sufficient proof it belongs to the reviewed project, " +
+    "or a review can be delivered to the wrong project's gate");
+assert.doesNotMatch(
+    fallbackSource.slice(fallbackSource.indexOf("matchingLeaf")),
+    /gates\.filter\(\(item\) => String\(item\.id\) === leaf\)/,
+    "leaf-id fallback must filter the run-identity-checked candidates list, " +
+    "not the raw, unfiltered gates list");
+assert.match(reviewSource,
+    /function forgetRoutedNode\(node\) \{[\s\S]*routedReviewNodes\.delete\(token\)/,
+    "cached routing decisions must be revalidated (forgotten) when a gate " +
+    "node's identity can no longer be trusted");
+assert.match(reviewSource,
+    /mountedReviewNodes\.delete\(this\);\s*forgetRoutedNode\(this\);/,
+    "a removed Review Gate node must drop any cached routing pointing at it");
+assert.match(reviewSource,
+    /nodeType\.prototype\.onConfigure = function \(\) \{[\s\S]{0,400}forgetRoutedNode\(this\)/,
+    "reconfiguring a gate (e.g. rewiring it to a different Plan) must " +
+    "invalidate any cached routing decision for that node");
+assert.match(reviewSource,
+    /nodeType\.prototype\.onGraphConfigured = function \(\) \{[\s\S]{0,400}routedReviewNodes\.clear\(\)/,
+    "loading/pasting a graph must drop the entire routing cache, since ids " +
+    "and Plan wiring can be remapped wholesale");
 assert.match(reviewSource, /function appRootGraph\(\)/);
 assert.match(reviewSource, /app\.graph\?\.rootGraph \?\? app\.graph/);
 for (const fn of [
