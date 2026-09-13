@@ -51,7 +51,7 @@ import {bindPromptMarkerInteractions} from "./h3_prompt_marker_ui.mjs?v=0.6.9";
 import {isWorkflowSaveShortcut, promptEditorRichText} from "./h3_prompt_editor_settings_core.mjs?v=0.6.9";
 import {promptEditorPreferences} from "./h3_prompt_editor_settings.js";
 import {createH3PromptSchemaController} from "./h3_prompt_schema_ui.mjs?v=0.6.9";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.10";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.9";
 import {
     PROJECT_ASSET_CATALOG_CHANGED_EVENT,
 } from "./h3_project_asset_sync_core.mjs?v=0.6.9";
@@ -59,9 +59,6 @@ import {
 const {
     publishCompanionScene,
     rebaseScenePrompt,
-    markShotFieldEdited,
-    clearShotFieldEdits,
-    reconcileBasicPrompts,
 } = promptCompanionSync;
 const activeSceneIndexAfterRefresh =
     typeof promptCompanionSync.activeSceneIndexAfterRefresh === "function"
@@ -159,19 +156,6 @@ function injectStyles() {
         outline:none; white-space:pre-wrap; overflow-wrap:anywhere; caret-color:var(--h3rp-text);
         font:var(--h3rp-font-size)/1.58 ui-monospace,SFMono-Regular,Consolas,monospace; }
       .h3rp-editor:empty::before { content:attr(data-placeholder); color:var(--h3rp-muted); pointer-events:none; }
-      .h3rp-basic-prompt-label { display:flex; flex-direction:column; gap:4px;
-        color:var(--h3rp-muted); font-size:12px; }
-      .h3rp-basic-prompt {
-        width:100%; min-height:64px; resize:vertical; padding:8px 10px;
-        border:1px solid var(--h3rp-border); border-radius:8px;
-        outline:none; background:var(--comfy-input-bg,#11141a); color:var(--h3rp-text);
-        font:13px/1.4 inherit;
-      }
-      .h3rp-basic-prompt:focus { border-color:var(--h3rp-accent);
-        box-shadow:0 0 0 1px color-mix(in srgb,var(--h3rp-accent) 40%,transparent); }
-      .h3rp-history-tree-basic-prompt { margin-top:3px; padding:4px 6px;
-        border-left:2px solid var(--h3rp-border); color:var(--h3rp-muted);
-        font-size:12px; white-space:pre-wrap; }
       .h3rp-editor[contenteditable="false"] { opacity:.68; cursor:wait; }
       .h3rp-token { display:inline-flex; align-items:center; gap:3px; max-width:320px; margin:0 1px;
         padding:1px 4px 1px 2px; border:1px solid currentColor; border-radius:5px; vertical-align:1px;
@@ -792,7 +776,6 @@ function mount(node) {
         const value = planToJson(state.plan);
         state.lastValue = value;
         state.planWidget.value = value;
-        clearShotFieldEdits(state.plan.shots[state.active]);
         const pending = {
             value,
             sceneIndex:state.active,
@@ -931,14 +914,6 @@ function mount(node) {
                 remove.className = "h3rp-history-tree-action";
                 rowHost.append(remove);
             }
-            if (String(row.revision.basic_prompt ?? "").trim()) {
-                const original = element(
-                    "div", "h3rp-history-tree-basic-prompt",
-                    `Original: ${row.revision.basic_prompt}`,
-                );
-                original.title = "The plain-language basic prompt that produced this revision.";
-                rowHost.append(original);
-            }
             panel.append(rowHost);
         }
         if (!tree.rows.length) panel.append(element("div", "h3rp-history-tree-tools", "No visible revisions"));
@@ -1017,15 +992,12 @@ function mount(node) {
         }
     }
 
-    function scheduleHistoryDraft(shotId, prompt, basicPrompt = undefined) {
+    function scheduleHistoryDraft(shotId, prompt) {
         if (state.disposed) return;
-        basicPrompt ??= state.plan?.shots?.find(shot => shot.id === shotId)?.basic_prompt ?? "";
         const runName = planRunName();
         if (!runName) return;
         const history = state.history;
-        history.pendingDraft = {
-            key:historySceneKey(runName, shotId), runName, shotId, prompt, basicPrompt,
-        };
+        history.pendingDraft = {key:historySceneKey(runName, shotId), runName, shotId, prompt};
         if (history.saveTimer != null) window.clearTimeout(history.saveTimer);
         history.saveTimer = window.setTimeout(() => { history.saveTimer = null; void flushHistoryDraft(); }, 650);
     }
@@ -1043,7 +1015,7 @@ function mount(node) {
         if (history.loadPromise && history.sceneKey === draft.key) await history.loadPromise;
         const parent = history.sceneKey === draft.key ? history.revisionId : null;
         const request = historyRequest({}, {action:"save", run_name:draft.runName, scene_id:draft.shotId,
-            prompt:draft.prompt, parent_revision:parent, basic_prompt:draft.basicPrompt});
+            prompt:draft.prompt, parent_revision:parent});
         history.savePromise = request;
         try {
             const payload = await request;
@@ -1075,13 +1047,6 @@ function mount(node) {
             const text = String(payload.revision.prompt ?? "");
             recordPromptReplacement(state.active, shot, text);
             shot.prompt = promptTextToLines(text);
-            markShotFieldEdited(shot, "prompt");
-            if (typeof payload.revision.basic_prompt === "string") {
-                shot.basic_prompt = payload.revision.basic_prompt;
-                markShotFieldEdited(shot, "basic_prompt");
-                const basicPromptTextarea = root.querySelector(".h3rp-basic-prompt");
-                if (basicPromptTextarea) basicPromptTextarea.value = shot.basic_prompt;
-            }
             renderEditorText(text);
             writePlan("Loaded prompt version");
             renderHistory();
@@ -1441,7 +1406,6 @@ function mount(node) {
         const text = editorPlainText(state.editor);
         state.promptUndo?.record(text, {inputType:event?.inputType});
         shot.prompt = promptTextToLines(text);
-        markShotFieldEdited(shot, "prompt");
         writePlan("Saved to connected Plan", {deferEffects:true});
         scheduleHistoryDraft(shotId, text);
         // Keep the browser's live DOM intact while the user types. Existing
@@ -1717,12 +1681,11 @@ function mount(node) {
                 } else {
                     recordPromptReplacement(meta.sceneIndex, shot, result);
                     shot.prompt = promptTextToLines(result);
-                    markShotFieldEdited(shot, "prompt");
                     state.optimizer.origins.set(meta.sceneKey, {source:meta.source, result});
                     writePlan("Optimized prompt saved to Plan");
                     if (state.active === meta.sceneIndex) {
                         renderEditorText(result);
-                        scheduleHistoryDraft(meta.sceneId, result, shot.basic_prompt);
+                        scheduleHistoryDraft(meta.sceneId, result);
                         void flushHistoryDraft();
                     }
                     state.optimizer.message = frame.message || "Optimized prompt saved as a new revision.";
@@ -1762,7 +1725,6 @@ function mount(node) {
         }
         recordPromptReplacement(pending.sceneIndex, shot, pending.result);
         shot.prompt = promptTextToLines(pending.result);
-        markShotFieldEdited(shot, "prompt");
         state.optimizer.origins.set(pending.sceneKey, {source:pending.source, result:pending.result});
         state.optimizer.pendingResult = null;
         state.optimizer.error = "";
@@ -1770,13 +1732,13 @@ function mount(node) {
         writePlan("Optimized prompt saved to Plan");
         if (state.active === pending.sceneIndex) {
             renderEditorText(pending.result);
-            scheduleHistoryDraft(pending.sceneId, pending.result, shot.basic_prompt);
+            scheduleHistoryDraft(pending.sceneId, pending.result);
             void flushHistoryDraft();
         }
         refreshOptimizerUi();
     }
 
-    function optimizerInstruction(mode, refs, basicPrompt = "") {
+    function optimizerInstruction(mode, refs) {
         const referenceSummary = refs.records.length
             ? refs.records.map((record) => {
                 const mapping = record.label && record.label !== record.token
@@ -1784,11 +1746,7 @@ function mount(node) {
                 return `${record.token}${mapping} (${record.kind}, ${record.active ? "active" : "inactive"})`;
             }).join(", ")
             : "none discovered";
-        const basic = String(basicPrompt ?? "").trim();
-        const contentDirective = basic
-            ? `Base the rewrite on this plain-language scene idea, expressed in the required H3 style: ${basic} `
-            : "";
-        return `${contentDirective}${richGuideInstruction(state.guide, mode)} Connected scene references: ${referenceSummary}.`;
+        return `${richGuideInstruction(state.guide, mode)} Connected scene references: ${referenceSummary}.`;
     }
 
     function optimizerMeta(sceneIndex, sceneId, sceneKey, source, current) {
@@ -1818,12 +1776,11 @@ function mount(node) {
         }
         recordPromptReplacement(meta.sceneIndex, shot, result);
         shot.prompt = promptTextToLines(result);
-        markShotFieldEdited(shot, "prompt");
         state.optimizer.origins.set(meta.sceneKey, {source:meta.source, result});
         writePlan("Optimized prompt saved to Plan");
         if (state.active === meta.sceneIndex) {
             renderEditorText(result);
-            scheduleHistoryDraft(meta.sceneId, result, shot.basic_prompt);
+            scheduleHistoryDraft(meta.sceneId, result);
             void flushHistoryDraft();
         }
         state.optimizer.message = message || "Optimized prompt saved as a new revision.";
@@ -1924,7 +1881,7 @@ function mount(node) {
         });
         context.generation_mode = mode;
         const requestId = `rich-${globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
-        const instruction = optimizerInstruction(mode, refs, shot.basic_prompt);
+        const instruction = optimizerInstruction(mode, refs);
         const meta = optimizerMeta(sceneIndex, sceneId, sceneKey, source, current);
         state.optimizer.error = "";
         state.optimizer.pendingResult = null;
@@ -2127,20 +2084,6 @@ function mount(node) {
             optimize, stop, applyPending, optimizerStatus,
         );
 
-        const basicPromptLabel = element("label", "h3rp-basic-prompt-label", "Basic prompt (plain language)");
-        const basicPromptTextarea = element("textarea", "h3rp-basic-prompt");
-        basicPromptTextarea.value = String(shot.basic_prompt ?? "");
-        basicPromptTextarea.placeholder = "Optional plain-language scene idea, kept separate from the H3-formatted prompt. Optimize turns this into the prompt below, combined with the selected Prompt Guide's style rules.";
-        basicPromptTextarea.title = "A simple draft description, not H3-formatted. Optimize sends this as content alongside the Prompt Guide's style rules.";
-        basicPromptTextarea.spellcheck = true;
-        basicPromptTextarea.addEventListener("input", () => {
-            shot.basic_prompt = basicPromptTextarea.value;
-            markShotFieldEdited(shot, "basic_prompt");
-            writePlan("Basic prompt saved to Plan", {deferEffects:true});
-            scheduleHistoryDraft(shotId, promptValueToText(shot.prompt), shot.basic_prompt);
-        });
-        basicPromptLabel.append(basicPromptTextarea);
-
         const refs = element("div", "h3rp-ref-tray");
         state.refs = refs;
         const editorShell = element("div", "h3rp-editor-shell");
@@ -2190,7 +2133,6 @@ function mount(node) {
             const caret = selectionTextOffset(editor);
             renderEditorText(text, Math.min(caret, text.length));
             shot.prompt = promptTextToLines(text);
-            markShotFieldEdited(shot, "prompt");
             writePlan(direction === "undo" ? "Undo saved to Plan" : "Redo saved to Plan");
             scheduleHistoryDraft(shotId, text);
             state.schema?.refresh();
@@ -2234,7 +2176,6 @@ function mount(node) {
             }
             state.promptUndo?.record(text, {inputType:"insertReplacementText"});
             shot.prompt = promptTextToLines(text);
-            markShotFieldEdited(shot, "prompt");
             renderEditorText(text, result.caret, result);
             writePlan(message);
             scheduleHistoryDraft(shotId, text);
@@ -2305,7 +2246,7 @@ function mount(node) {
         );
         toolbar.append(completionHint);
         if (state.schema) identity.append(document.createTextNode(" · "), state.schema.counts);
-        root.append(head, nav, basicPromptLabel, toolbar);
+        root.append(head, nav, toolbar);
         if (state.schema) root.append(state.schema.panel);
         root.append(refs, editorShell, footer);
         refreshOptimizerUi();
@@ -2454,7 +2395,6 @@ function mount(node) {
         state.completion = null;
         delete node._h3PromptCompanionSetActiveScene;
         delete node._h3PromptCompanionSetScenePrompt;
-        delete node._h3PromptCompanionSetBasicPrompt;
         return removed?.apply(this, arguments);
     };
     node._h3PromptCompanionSetActiveScene = (planNode, index) => {
@@ -2473,9 +2413,6 @@ function mount(node) {
                 loadPlan(true);
                 return true;
             }
-            reconcileBasicPrompts(state.plan, livePlan);
-            node._h3PromptCompanionSetBasicPrompt?.(
-                planNode, state.active, state.plan.shots[state.active]?.basic_prompt ?? "");
         } catch (_error) {
             // Leave lastValue untouched so normal polling reports invalid JSON.
         }
@@ -2499,17 +2436,6 @@ function mount(node) {
             }
         }
         if (livePlanParsed) state.lastValue = liveValue;
-        return true;
-    };
-    node._h3PromptCompanionSetBasicPrompt = (planNode, index, text) => {
-        if (planNode !== state.planNode || !state.plan?.shots?.[index]) return false;
-        state.plan.shots[index].basic_prompt = text;
-        if (index === state.active) {
-            const basicPromptTextarea = root.querySelector(".h3rp-basic-prompt");
-            if (basicPromptTextarea && basicPromptTextarea.value !== text) {
-                basicPromptTextarea.value = text;
-            }
-        }
         return true;
     };
     node._h3RichPromptRefresh = () => loadPlan(true);

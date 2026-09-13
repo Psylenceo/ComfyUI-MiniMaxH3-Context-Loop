@@ -134,7 +134,6 @@ class RetryRequest:
             "token": self.token,
             "action": "retry",
             "scene_prompt": "Route retry.",
-            "basic_prompt": "Plain-language retry draft.",
             "seed": "123",
             "length": self.length,
         }
@@ -165,11 +164,9 @@ async def check_route_validation():
         accepted_body = json.loads(accepted.text)
         assert accepted_body["length"] == 73
         assert accepted_body["scene_prompt"] == "Route retry."
-        assert accepted_body["basic_prompt"] == "Plain-language retry draft."
         await asyncio.sleep(0)
         assert future.result()["raw_frames"] == 73
         assert future.result()["scene_prompt"] == "Route retry."
-        assert future.result()["basic_prompt"] == "Plain-language retry draft."
     finally:
         chain._PENDING_REVIEWS.pop(token, None)
 

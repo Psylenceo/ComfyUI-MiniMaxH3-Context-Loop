@@ -19,7 +19,6 @@ read the implementation references to run a normal workflow.
 | I need to… | Read this |
 |---|---|
 | Write or reorder scenes | [Scene authoring](SCENE_AUTHORING.md) |
-| Keep plain-language drafts beside H3 prompts | [Basic prompts](BASIC_PROMPTS.md) |
 | Manage pictures, video, audio, and Source-track assets | [Project Asset Carousel](PROJECT_ASSETS.md) |
 | Choose continuity or audio behavior | [Audio and continuity](AUDIO_AND_CONTINUITY.md) |
 | Use image, video, motion, or audio references | [Scheduled references](SCHEDULED_REFERENCES.md) |
