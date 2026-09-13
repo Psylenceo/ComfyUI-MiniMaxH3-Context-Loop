@@ -59,6 +59,7 @@ import {
 const {
     publishCompanionScene,
     rebaseScenePrompt,
+    markShotFieldEdited,
 } = promptCompanionSync;
 const activeSceneIndexAfterRefresh =
     typeof promptCompanionSync.activeSceneIndexAfterRefresh === "function"
@@ -1070,8 +1071,10 @@ function mount(node) {
             const text = String(payload.revision.prompt ?? "");
             recordPromptReplacement(state.active, shot, text);
             shot.prompt = promptTextToLines(text);
+            markShotFieldEdited(shot, "prompt");
             if (typeof payload.revision.basic_prompt === "string") {
                 shot.basic_prompt = payload.revision.basic_prompt;
+                markShotFieldEdited(shot, "basic_prompt");
                 const basicPromptTextarea = root.querySelector(".h3rp-basic-prompt");
                 if (basicPromptTextarea) basicPromptTextarea.value = shot.basic_prompt;
             }
@@ -1434,6 +1437,7 @@ function mount(node) {
         const text = editorPlainText(state.editor);
         state.promptUndo?.record(text, {inputType:event?.inputType});
         shot.prompt = promptTextToLines(text);
+        markShotFieldEdited(shot, "prompt");
         writePlan("Saved to connected Plan", {deferEffects:true});
         scheduleHistoryDraft(shotId, text);
         // Keep the browser's live DOM intact while the user types. Existing
@@ -1709,6 +1713,7 @@ function mount(node) {
                 } else {
                     recordPromptReplacement(meta.sceneIndex, shot, result);
                     shot.prompt = promptTextToLines(result);
+                    markShotFieldEdited(shot, "prompt");
                     state.optimizer.origins.set(meta.sceneKey, {source:meta.source, result});
                     writePlan("Optimized prompt saved to Plan");
                     if (state.active === meta.sceneIndex) {
@@ -1753,6 +1758,7 @@ function mount(node) {
         }
         recordPromptReplacement(pending.sceneIndex, shot, pending.result);
         shot.prompt = promptTextToLines(pending.result);
+        markShotFieldEdited(shot, "prompt");
         state.optimizer.origins.set(pending.sceneKey, {source:pending.source, result:pending.result});
         state.optimizer.pendingResult = null;
         state.optimizer.error = "";
@@ -1808,6 +1814,7 @@ function mount(node) {
         }
         recordPromptReplacement(meta.sceneIndex, shot, result);
         shot.prompt = promptTextToLines(result);
+        markShotFieldEdited(shot, "prompt");
         state.optimizer.origins.set(meta.sceneKey, {source:meta.source, result});
         writePlan("Optimized prompt saved to Plan");
         if (state.active === meta.sceneIndex) {
@@ -2124,6 +2131,7 @@ function mount(node) {
         basicPromptTextarea.spellcheck = true;
         basicPromptTextarea.addEventListener("input", () => {
             shot.basic_prompt = basicPromptTextarea.value;
+            markShotFieldEdited(shot, "basic_prompt");
             writePlan("Basic prompt saved to Plan", {deferEffects:true});
         });
         basicPromptLabel.append(basicPromptTextarea);
@@ -2177,6 +2185,7 @@ function mount(node) {
             const caret = selectionTextOffset(editor);
             renderEditorText(text, Math.min(caret, text.length));
             shot.prompt = promptTextToLines(text);
+            markShotFieldEdited(shot, "prompt");
             writePlan(direction === "undo" ? "Undo saved to Plan" : "Redo saved to Plan");
             scheduleHistoryDraft(shotId, text);
             state.schema?.refresh();
@@ -2220,6 +2229,7 @@ function mount(node) {
             }
             state.promptUndo?.record(text, {inputType:"insertReplacementText"});
             shot.prompt = promptTextToLines(text);
+            markShotFieldEdited(shot, "prompt");
             renderEditorText(text, result.caret, result);
             writePlan(message);
             scheduleHistoryDraft(shotId, text);

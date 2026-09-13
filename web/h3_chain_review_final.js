@@ -794,12 +794,35 @@ function reviewFallbackNode(data) {
     // Durable recovery inventory has no reliable display-node identity. It
     // may only route through its authoritative run match above.
     if (data?.durable === true) return null;
+    // A gate whose connected Plan carries a *different*, known run_name is
+    // proof this review belongs to another project/workflow, and no amount
+    // of leaf-id or singleton guessing may override that. Only gates whose
+    // run_name is unknown/blank (stale or not-yet-mounted widget) remain
+    // eligible for that weaker recovery.
+    const candidates = expectedRun
+        ? gates.filter((item) => {
+            const actualRun = reviewRunName(findUpstreamNode(item, PLAN_NAMES));
+            return !actualRun || actualRun === expectedRun;
+        })
+        : gates;
     // GraphBuilder execution ids use dots while subgraph-qualified display
     // ids use colons. The visible LiteGraph node is always the final leaf.
     const leaf = String(data?.node_id ?? "").split(/[.:]/).at(-1);
-    const matchingLeaf = gates.filter((item) => String(item.id) === leaf);
+    const matchingLeaf = candidates.filter((item) => String(item.id) === leaf);
     if (matchingLeaf.length === 1) return matchingLeaf[0];
-    return gates.length === 1 ? gates[0] : null;
+    return candidates.length === 1 ? candidates[0] : null;
+}
+
+// A remembered routing decision is only valid for as long as the gate node's
+// identity (its mount state, and the Plan/project it's wired to) doesn't
+// change. Forget any cached decisions pointing at a node once that node is
+// removed or reconfigured (rewired to a different Plan), and forget every
+// decision when the graph itself is reloaded/pasted, so a stale entry can
+// never keep routing a review to a project the gate no longer represents.
+function forgetRoutedNode(node) {
+    for (const [token, routed] of routedReviewNodes) {
+        if (routed === node) routedReviewNodes.delete(token);
+    }
 }
 
 // One token can arrive many times (candidate/preview ticks, reconnect
@@ -2383,6 +2406,7 @@ function mount(node) {
         api.removeEventListener("execution_error", onResumeExecutionTerminal);
         api.removeEventListener("execution_interrupted", onResumeExecutionTerminal);
         mountedReviewNodes.delete(this);
+        forgetRoutedNode(this);
         updatePendingPolling();
         return removed?.apply(this, arguments);
     };
@@ -2440,12 +2464,21 @@ app.registerExtension({
         const configured = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function () {
             const result = configured?.apply(this, arguments);
+            // The node's widgets/links (and therefore its connected Plan
+            // and project identity) may have just changed underneath a
+            // cached routing decision. Force the next review for this gate
+            // to be re-resolved from scratch.
+            forgetRoutedNode(this);
             setTimeout(() => this._h3ReviewApplyLayout?.(), 0);
             return result;
         };
         const graphConfigured = nodeType.prototype.onGraphConfigured;
         nodeType.prototype.onGraphConfigured = function () {
             const result = graphConfigured?.apply(this, arguments);
+            // A full graph load/paste can remap ids and rewire every Plan
+            // connection at once; drop all cached routing decisions rather
+            // than trying to reason about which ones are still valid.
+            routedReviewNodes.clear();
             setTimeout(() => this._h3ReviewApplyLayout?.(), 0);
             return result;
         };

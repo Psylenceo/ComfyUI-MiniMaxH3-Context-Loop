@@ -9600,7 +9600,9 @@ def _effective_editor_plan(plan: dict[str, Any]) -> dict[str, Any]:
              **({"prompt_seed": str(shot["prompt_seed"])}
                 if "prompt_seed" in shot else {}),
              **({"lora_route": shot["lora_route"]}
-                if "lora_route" in shot else {}))
+                if "lora_route" in shot else {}),
+             **({"basic_prompt": shot["basic_prompt"]}
+                if shot.get("basic_prompt") else {}))
             for shot in plan["shots"]],
     }
     editorial = _load_run_editorial(plan.get("run_name"))
