@@ -1,6 +1,6 @@
 import {app} from "/scripts/app.js";
 import {api} from "/scripts/api.js";
-import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId} from "./h3_working_branches.mjs?v=0.7.21";
+import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId} from "./h3_working_branches.mjs?v=0.7.22";
 import {branchPolicyNodes, captureBranchPolicyInputs, restoreBranchPolicyInputs} from "./h3_plan_restore_core.mjs?v=0.7.19";
 import {
     CONTINUATION_MODES,
@@ -912,11 +912,25 @@ function mount(node) {
         const defaultName = records.find(item => item.id === branches.defaultBranch)?.name ?? "Original";
         const saveBranch = button("Save branch", "Save this branch's current prompts and Plan settings", () => void branches.perform(async () => {}));
         const useDefault = button("Open project default", "Load the project's preferred branch in this Studio", () => void branches.switchTo(branches.defaultBranch));
-        saveBranch.disabled = branches.busy || !records.length;
+        saveBranch.disabled = branches.busy || !records.length || Boolean(branches.conflict || branches.draftRecovery);
         useDefault.disabled = branches.busy || !records.length || currentBranch() === branches.defaultBranch;
         bar.append(saveBranch, useDefault);
         bar.append(previous, select, next, empty, fork, makeDefault,
             element("span", "h3studio-message", `Project default: ${defaultName}`));
+        if (branches.conflict || branches.draftRecovery || branches.error) {
+            const update = button("Update active branch", "Keep the displayed prompts/settings on this branch without reloading or removing saved clips", () => {
+                void branches.updateActive(({name, displayedScenes, savedScenes, hasRecovery}) => window.confirm(
+                    `Update active branch “${name}” with the displayed prompts and settings?\n\n`
+                    + `Displayed Plan: ${displayedScenes} scenes. Saved Plan: ${savedScenes} scenes.\n`
+                    + "This replaces the saved Plan/settings on the same branch. Generated clips and checkpoint assignments stay unchanged; it does not regenerate them.\n"
+                    + "Timeline/cut edits are separate and are not saved by this action."
+                    + (displayedScenes < savedScenes ? "\nWARNING: scenes absent from the displayed Plan will no longer be in the saved Plan. Their generated files remain available." : "")
+                    + (hasRecovery ? "\nThe displayed workflow wins over the recovery draft; that draft remains in browser recovery." : ""),
+                ));
+            });
+            update.disabled = branches.busy || !branches.ready || Boolean(branches.pending);
+            bar.append(update);
+        }
         const reload = button("Reload saved branch", "Load the saved prompts/settings; keep local edits in browser recovery", () => {
             if (confirm("Reload this branch's saved prompts/settings? Local edits are kept in browser recovery; generated files are unchanged.")) {
                 void branches.reloadSaved();

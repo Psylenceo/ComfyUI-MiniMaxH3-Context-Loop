@@ -111,6 +111,34 @@ async def check():
             assert str(root / "checkpoints") in paths["checkpoint"]
         assert manager.active_selection("branches_test")[0] == {1:one, 2:two}
         assert all(path.read_bytes() == contents for path, contents in before.items())
+        # The confirmed UI update uses the ordinary revision-checked save:
+        # change authoring on an assigned branch without dropping any clips,
+        # rewriting checkpoint prompts/seeds, or touching another branch.
+        loaded = store.load(fork["id"])
+        displayed = dict(authored, width=960, height=544)
+        displayed_plan = json.loads(displayed["plan_json"])
+        displayed_plan["shots"][0].update(prompt="intentional current edit", seed="18446744073709551615")
+        displayed_plan["shots"].append({"id":"scene_3", "prompt":"new chapter", "seed":"18446744073709551614"})
+        displayed_plan["chapters"].append({"id":"chapter_2", "start_scene_id":"scene_3", "title":"Chapter 2"})
+        displayed["plan_json"] = json.dumps(displayed_plan)
+        protected = {path: path.read_bytes() for path in root.rglob("*")
+                     if path.is_file() and path != store._path(fork["id"])}
+        update_body = {"action":"save", "run_name":"branches_test", "branch_id":fork["id"],
+                       "revision":loaded["revision"], "authoring":displayed, "operation_id":"5" * 32}
+        updated = await chain._working_branch_command(Request(update_body))
+        assert updated.status == 200, updated.text
+        snapshot = json.loads(updated.text)
+        assert snapshot["id"] == fork["id"]
+        assert snapshot["authoring"]["width"] == 960 and snapshot["authoring"]["height"] == 544
+        assert json.loads(snapshot["authoring"]["plan_json"])["shots"] == displayed_plan["shots"]
+        assert all(path.read_bytes() == contents for path, contents in protected.items())
+        with chain.branch_scope("branches_test", fork["id"]):
+            assert manager.active_selection("branches_test")[0] == {1:one, 2:other}
+        assert manager.active_selection("branches_test")[0] == {1:one, 2:two}
+        replay_update = await chain._working_branch_command(Request(update_body))
+        assert replay_update.status == 200 and json.loads(replay_update.text) == snapshot
+        stale_update = await chain._working_branch_command(Request(dict(update_body, operation_id="4" * 32)))
+        assert stale_update.status == 400, "a later writer must not bypass the revision check"
         # A manager used as a source carries the selected branch all the way
         # to downstream processing, even when its shared takes predate branches.
         source = chain.MiniMaxH3ChainCheckpointManager().passthrough(json.dumps({

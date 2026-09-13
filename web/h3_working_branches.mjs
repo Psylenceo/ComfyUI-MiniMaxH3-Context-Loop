@@ -137,7 +137,7 @@ export class StudioBranches {
             && this.binding.revision === record.revision;
         const same = authoringSignature(record.authoring) === authoringSignature(this.capture());
         this.conflict = known || same || !record.authoring ? ""
-            : "This workflow differs from the saved branch. Reload saved branch, or keep these edits as a new empty branch.";
+            : "This workflow differs from the saved branch. Update active branch to keep the displayed edits, reload saved branch, or create an empty branch.";
         if (!this.conflict) this.adopt(record);
         this.ready = true;
         this.readDraft();
@@ -243,7 +243,10 @@ export class StudioBranches {
             const record = await this.sendPending();
             this.error = "";
             if (epoch !== this.epoch || body.run_name !== this.run || !this.isCurrent(this.run, this.selected)) return;
-            if (body.action === "save" && body.branch_id === this.selected) this.adopt(record);
+            if (body.action === "save" && body.branch_id === this.selected) {
+                this.adopt(record);
+                this.resolveDrafts(record.revision);
+            }
             else if (body.action === "create" && !this.records.some(item => item.id === record.id)) this.records.push(record);
             this.error = "";
         } catch (error) { this.error = error.message; }
@@ -263,6 +266,76 @@ export class StudioBranches {
         assertCurrent();
         this.adopt(saved);
         return authoringSignature(authoring);
+    }
+
+    resolveDrafts(revision) {
+        // A choice resolves the warning, not the backup. Restore local draft
+        // can still retrieve these versions explicitly after a workflow reload.
+        this.draftRecovery = null;
+        this.draftStatus = "Previous local edits remain in browser recovery.";
+        try {
+            const draft = this.drafts?.read(this.run, this.selected);
+            if (draft) this.drafts.save(this.run, this.selected, {
+                ...draft, resolved_revision:revision,
+                older:(draft.older ?? []).map(value => ({...value, resolved_revision:revision})),
+            });
+        } catch (error) {
+            this.draftStatus += ` Recovery acknowledgement could not be saved: ${error.message}`;
+        }
+    }
+
+    async updateActive(confirmUpdate = () => false) {
+        if (this.busy) return;
+        const run = this.run, selected = this.selected, epoch = this.epoch;
+        const assertCurrent = () => {
+            if (this.run !== run || this.selected !== selected || this.epoch !== epoch || !this.isCurrent(run, selected)) {
+                throw new Error("Project or branch changed during the update; try again on the intended branch.");
+            }
+        };
+        this.busy = true; this.error = ""; this.changed();
+        try {
+            assertCurrent();
+            if (!this.ready) throw new Error("Wait for working branches to load.");
+            if (this.pending) throw new Error("Retry pending operation before continuing.");
+            const authoring = structuredClone(this.capture());
+            const signature = authoringSignature(authoring);
+            const record = await this.request({action:"load", run_name:run, branch_id:selected});
+            assertCurrent();
+            if (!await confirmUpdate({
+                name:record.name || (selected === "main" ? "Original" : selected),
+                displayedScenes:parsePlanJson(authoring.plan_json).shots.length,
+                savedScenes:record.authoring ? parsePlanJson(record.authoring.plan_json).shots.length : 0,
+                hasRecovery:Boolean(this.draftRecovery),
+            })) return;
+            assertCurrent();
+            if (signature !== authoringSignature(this.capture())) {
+                throw new Error("Prompts or settings changed while confirming. Nothing was saved; update again to include those edits.");
+            }
+            try {
+                if (record.authoring) this.drafts?.stash(run, selected, {
+                    authoring:record.authoring, revision:record.revision, recovery:null,
+                });
+                this.drafts?.stash(run, selected, {authoring, revision:this.binding?.revision ?? null,
+                    recovery:this.captureRecovery()});
+            } catch (error) {
+                // A full browser must not prevent an explicitly confirmed save.
+                this.draftStatus = `Local recovery unavailable: ${error.message}`;
+            }
+            // Save only authoring, using the revision the user just confirmed.
+            // No reload, checkpoint reassignment, fork, cut/history flush or
+            // forced revision bypass. Pending local edits remain in the editor.
+            const saved = await this.mutation({action:"save", run_name:run,
+                branch_id:selected, revision:record.revision, authoring});
+            assertCurrent();
+            this.adopt(saved);
+            this.resolveDrafts(saved.revision);
+            this.observedSignature = signature;
+            if (signature !== authoringSignature(this.capture())) this.preserveDraft();
+        } catch (error) {
+            this.error = error?.message || String(error);
+        } finally {
+            this.busy = false; this.changed();
+        }
     }
 
     async perform(action, {save = true, flush = true, requireDraft = !save, navigation = false} = {}) {
@@ -338,20 +411,9 @@ export class StudioBranches {
             if (!record.authoring) throw new Error("This branch has no saved authoring snapshot yet.");
             await this.apply(record);
             this.adopt(record);
-            this.draftRecovery = null;
+            this.resolveDrafts(record.revision);
             this.observedSignature = authoringSignature(record.authoring);
-            this.draftStatus = "Saved branch loaded. Previous local edits remain in browser recovery.";
-            // Explicitly choosing the saved branch resolves the recovery
-            // warning, not its backup. Refresh/reopen must not trap the user
-            // again; Restore local draft can still retrieve every version.
-            try {
-                const draft = this.drafts?.read(this.run, this.selected);
-                if (draft) this.drafts.save(this.run, this.selected,
-                    {...draft, resolved_revision:record.revision,
-                        older:(draft.older ?? []).map(value => ({...value, resolved_revision:record.revision}))});
-            } catch (error) {
-                this.draftStatus += ` Recovery acknowledgement could not be saved: ${error.message}`;
-            }
+            this.draftStatus = `Saved branch loaded. ${this.draftStatus}`;
         }, {save:false, flush:false, navigation:true});
     }
 
@@ -373,7 +435,7 @@ export class StudioBranches {
             this.binding = {run_name:this.run, branch_id:this.selected, revision:draft.revision};
             this.rememberBinding(structuredClone(this.binding));
             this.conflict = draft.revision === record?.revision ? ""
-                : "Recovered draft differs from the saved branch. Keep these edits as a new empty branch, or reload saved branch.";
+                : "Recovered draft differs from the saved branch. Update active branch to keep it, create an empty branch, or reload saved branch.";
             this.draftRecovery = null;
             this.observedSignature = null;
         }, {save:false, flush:false});

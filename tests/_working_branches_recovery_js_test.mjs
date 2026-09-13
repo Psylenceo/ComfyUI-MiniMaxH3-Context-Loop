@@ -114,6 +114,149 @@ async function delayedLoad(t) {
         ? new Promise(resolve=>{finish=()=>resolve(structuredClone(t.disk.get(body.branch_id)));started();}) : original(body);
     return {ready,finish:()=>finish(),original};
 }
+// Explicitly adopt the displayed workflow as the active branch's authoring.
+// Unlike save-before-switch, this is a confirmed decision, never an auto-save.
+for (const selected of ['main', id]) {
+    const live = {...authoring('18446744073709551615'), width:960, height:544};
+    const plan = parsePlanJson(live.plan_json);
+    plan.shots.push({id:'scene_2',prompt:['New chapter prompt'],seed:'18446744073709551614'});
+    plan.chapters.push({id:'chapter_2',start_scene_id:'scene_2',title:'Chapter 2'});
+    live.plan_json = planToJson(plan);
+    const t = fixture({live});
+    t.controller.selected = selected;
+    await t.controller.refresh('demo');
+    assert.ok(t.controller.conflict);
+    const other = structuredClone(t.disk.get(selected === 'main' ? id : 'main'));
+    const localCut = {editorial:{value:{trims:[{scene:1,out_frame:81}]}}, history:{prompt:'pending'}};
+    t.controller.captureRecovery = () => structuredClone(localCut);
+    t.drafts.save('demo',selected,{authoring:authoring('older recovery'),revision:'old'});
+    t.controller.readDraft();
+    assert.ok(t.controller.draftRecovery);
+    await t.controller.updateActive(info => {
+        assert.equal(info.displayedScenes,2); assert.equal(info.savedScenes,1);
+        assert.equal(info.hasRecovery,true); return true;
+    });
+    assert.equal(t.controller.error,'');
+    assert.equal(t.controller.conflict,'');
+    assert.equal(t.controller.selected,selected);
+    assert.equal(t.disk.size,2,'no empty branch is created');
+    assert.deepEqual(t.disk.get(selected).authoring,live);
+    assert.deepEqual(t.getLive(),live,'never reload or replace the displayed Plan');
+    assert.deepEqual(t.disk.get(other.id),other,'another branch is unchanged');
+    assert.equal(t.getBinding().revision,t.disk.get(selected).revision);
+    assert.ok(!t.events.some(e=>e==='flush'||e.startsWith('apply:')),'cut/history writes and reloading are not part of authoring update');
+    const recovered = t.drafts.read('demo',selected);
+    assert.deepEqual(recovered.recovery,localCut,'pending local cuts/history are kept');
+    assert.equal(recovered.older.length,2,'keep both prior saved settings and the older local recovery');
+    assert.equal(JSON.parse(recovered.older[1].authoring.plan_json).shots[0].seed,'older recovery');
+    await t.controller.refresh('demo');
+    assert.equal(t.controller.draftRecovery,null,'acknowledged recovery warning stays resolved on reload');
+    t.controller.readDraft({includeResolved:true});
+    assert.ok(t.controller.draftRecovery,'explicit recovery can still retrieve the backup');
+}
+for (const confirm of [undefined,()=>false]) {
+    const t = fixture({live:authoring('current edits')}); await t.controller.refresh('demo');
+    const before = structuredClone([...t.disk]);
+    await t.controller.updateActive(confirm);
+    assert.deepEqual([...t.disk],before,'no default confirmation or cancellation may write');
+    assert.ok(t.controller.conflict); assert.equal(t.getBinding(),null);
+    assert.equal(t.drafts.read('demo','main'),null);
+}
+{
+    const t = fixture({live:authoring('intentional')}); await t.controller.refresh('demo');
+    // The just-loaded revision can differ from the initial list or workflow binding.
+    t.disk.get('main').revision = 'assigned-checkpoint-revision';
+    await t.controller.updateActive(()=>true);
+    assert.equal(t.controller.error,''); assert.equal(t.controller.conflict,'');
+    assert.equal(JSON.parse(t.disk.get('main').authoring.plan_json).shots[0].seed,'intentional');
+}
+{
+    const t = fixture({live:authoring('intentional')}); await t.controller.refresh('demo');
+    await t.controller.updateActive(()=>{
+        t.disk.set('main',{id:'main',revision:'newer',authoring:authoring('other tab')});
+        return true;
+    });
+    assert.match(t.controller.error,/revision conflict/);
+    assert.equal(JSON.parse(t.disk.get('main').authoring.plan_json).shots[0].seed,'other tab');
+    assert.equal(JSON.parse(t.getLive().plan_json).shots[0].seed,'intentional');
+    assert.ok(t.controller.conflict,'failed update must not authorize later silent saves');
+    assert.equal(t.getBinding(),null);
+}
+for (const mutate of [
+    t=>t.setLive(authoring('edited during confirmation')),
+    t=>{t.controller.isCurrent=()=>false;},
+    t=>{t.controller.epoch++;},
+]) {
+    const t = fixture({live:authoring('current')}); await t.controller.refresh('demo');
+    await t.controller.updateActive(()=>{mutate(t);return true;});
+    assert.ok(t.controller.error); assert.ok(!t.events.includes('save'));
+}
+{
+    const t = fixture({live:authoring('current')}); await t.controller.refresh('demo');
+    const load = await delayedLoad(t);
+    let asked = false;
+    const updating = t.controller.updateActive(()=>{asked=true;return true;});
+    await load.ready; t.controller.isCurrent=()=>false; load.finish(); await updating;
+    assert.equal(asked,false,'do not even ask to overwrite a branch after the project changed');
+    assert.ok(!t.events.includes('save'));
+}
+{
+    const t = fixture({live:authoring('current')}); await t.controller.refresh('demo');
+    const original = t.controller.request;
+    t.controller.request = async body => {
+        const result = await original(body);
+        if (body.action === 'save') t.setLive(authoring('arrived while saving'));
+        return result;
+    };
+    await t.controller.updateActive(()=>true);
+    assert.equal(t.controller.error,'');
+    assert.equal(JSON.parse(t.getLive().plan_json).shots[0].seed,'arrived while saving');
+    assert.equal(JSON.parse(t.disk.get('main').authoring.plan_json).shots[0].seed,'current');
+    assert.equal(JSON.parse(t.drafts.read('demo','main').authoring.plan_json).shots[0].seed,'arrived while saving');
+}
+{
+    const t = fixture({live:authoring('current')}); await t.controller.refresh('demo');
+    t.drafts.save('demo','main',{authoring:authoring('old draft'),revision:'old'});
+    t.controller.readDraft();
+    const original = t.controller.request;
+    t.controller.request = async body => {
+        const result = await original(body);
+        if (body.action === 'save') throw Error('lost response');
+        return result;
+    };
+    await t.controller.updateActive(()=>true);
+    assert.ok(t.controller.pending); assert.ok(t.controller.conflict);
+    const savedRevision = t.disk.get('main').revision;
+    await t.controller.updateActive(()=>{throw Error('must not confirm with an uncertain save');});
+    assert.match(t.controller.error,/Retry pending/);
+    t.controller.request = original;
+    await t.controller.retryPending();
+    assert.equal(t.disk.get('main').revision,savedRevision,'replay does not save twice');
+    assert.equal(t.controller.conflict,''); assert.equal(t.controller.draftRecovery,null);
+    await t.controller.refresh('demo'); assert.equal(t.controller.draftRecovery,null);
+}
+{
+    const t = fixture({live:authoring('current')}); await t.controller.refresh('demo');
+    t.storage.setItem=()=>{throw Error('quota');};
+    await t.controller.updateActive(()=>true);
+    assert.equal(t.controller.error,'','a full local storage does not prevent confirmed server save');
+    assert.equal(JSON.parse(t.disk.get('main').authoring.plan_json).shots[0].seed,'current');
+}
+{
+    const source = fs.readFileSync(new URL('../web/h3_chain_plan_studio.js',import.meta.url),'utf8');
+    const updateUI = source.slice(source.indexOf('        if (branches.conflict || branches.draftRecovery || branches.error) {'),
+        source.indexOf('        const reload = button("Reload saved branch"'));
+    let clicked, message;
+    const context = vm.createContext({
+        branches:{conflict:'stale',ready:true,updateActive:callback=>callback({name:'960x544',displayedScenes:15,savedScenes:16,hasRecovery:true})},
+        button:(_label,_help,callback)=>{clicked=callback;return {};},bar:{append(){}},
+        window:{confirm:text=>{message=text;return false;}},Boolean,
+    });
+    vm.runInContext(updateUI,context); clicked();
+    assert.match(message,/960x544/); assert.match(message,/Displayed Plan: 15 scenes. Saved Plan: 16 scenes/);
+    assert.match(message,/WARNING: scenes absent/); assert.match(message,/checkpoint assignments stay unchanged/);
+    assert.match(message,/draft remains in browser recovery/);
+}
 {
     const t=fixture();
     const live=t.getLive();
