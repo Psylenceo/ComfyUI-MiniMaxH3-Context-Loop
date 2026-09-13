@@ -106,6 +106,22 @@ function fixture({live = authoring("18446744073709551614"), storage = memoryStor
         }});
     return {controller,events,disk,drafts,storage,getLive:()=>live,setLive:value=>live=value,getBinding:()=>remembered};
 }
+{
+    // Exercise the actual node's initialization when even the tiny identity
+    // hint fails. That must not bypass the IndexedDB migration/recovery path.
+    const source=fs.readFileSync(new URL('../web/h3_chain_plan_studio.js',import.meta.url),'utf8');
+    const setup=source.slice(source.indexOf('    let branchDrafts = null'),source.indexOf('    function currentBranch()'));
+    const backend=memoryStorage(),node={id:1930,properties:{}};
+    const context=vm.createContext({node,BranchDrafts,branchDraftClientProperty:'client',
+        branchOperationId:()=> 'new-client',browserBranchRecoveryStorage:()=>backend,
+        app:{extensionManager:{workflow:{activeWorkflow:{path:'workflows/example.json'}}}},
+        window:{localStorage:{getItem:()=> 'existing-client',setItem(){throw Error('quota exceeded');}}},
+    });
+    vm.runInContext(`${setup}\nglobalThis.result = {branchDrafts,branchDraftError};`,context);
+    assert.equal(context.result.branchDraftError,'');
+    assert.equal(context.result.branchDrafts.storage,backend);
+    assert.equal(context.result.branchDrafts.client,'existing-client','keep the existing recovery namespace');
+}
 async function delayedLoad(t) {
     const original=t.controller.request;
     let finish, started;
@@ -129,8 +145,8 @@ for (const selected of ['main', id]) {
     const other = structuredClone(t.disk.get(selected === 'main' ? id : 'main'));
     const localCut = {editorial:{value:{trims:[{scene:1,out_frame:81}]}}, history:{prompt:'pending'}};
     t.controller.captureRecovery = () => structuredClone(localCut);
-    t.drafts.save('demo',selected,{authoring:authoring('older recovery'),revision:'old'});
-    t.controller.readDraft();
+    await t.drafts.save('demo',selected,{authoring:authoring('older recovery'),revision:'old'});
+    await t.controller.readDraft();
     assert.ok(t.controller.draftRecovery);
     await t.controller.updateActive(info => {
         assert.equal(info.displayedScenes,2); assert.equal(info.savedScenes,1);
@@ -145,13 +161,13 @@ for (const selected of ['main', id]) {
     assert.deepEqual(t.disk.get(other.id),other,'another branch is unchanged');
     assert.equal(t.getBinding().revision,t.disk.get(selected).revision);
     assert.ok(!t.events.some(e=>e==='flush'||e.startsWith('apply:')),'cut/history writes and reloading are not part of authoring update');
-    const recovered = t.drafts.read('demo',selected);
+    const recovered = (await t.drafts.read('demo',selected));
     assert.deepEqual(recovered.recovery,localCut,'pending local cuts/history are kept');
     assert.equal(recovered.older.length,2,'keep both prior saved settings and the older local recovery');
     assert.equal(JSON.parse(recovered.older[1].authoring.plan_json).shots[0].seed,'older recovery');
     await t.controller.refresh('demo');
     assert.equal(t.controller.draftRecovery,null,'acknowledged recovery warning stays resolved on reload');
-    t.controller.readDraft({includeResolved:true});
+    await t.controller.readDraft({includeResolved:true});
     assert.ok(t.controller.draftRecovery,'explicit recovery can still retrieve the backup');
 }
 for (const confirm of [undefined,()=>false]) {
@@ -160,7 +176,7 @@ for (const confirm of [undefined,()=>false]) {
     await t.controller.updateActive(confirm);
     assert.deepEqual([...t.disk],before,'no default confirmation or cancellation may write');
     assert.ok(t.controller.conflict); assert.equal(t.getBinding(),null);
-    assert.equal(t.drafts.read('demo','main'),null);
+    assert.equal((await t.drafts.read('demo','main')),null);
 }
 {
     const t = fixture({live:authoring('intentional')}); await t.controller.refresh('demo');
@@ -212,12 +228,12 @@ for (const mutate of [
     assert.equal(t.controller.error,'');
     assert.equal(JSON.parse(t.getLive().plan_json).shots[0].seed,'arrived while saving');
     assert.equal(JSON.parse(t.disk.get('main').authoring.plan_json).shots[0].seed,'current');
-    assert.equal(JSON.parse(t.drafts.read('demo','main').authoring.plan_json).shots[0].seed,'arrived while saving');
+    assert.equal(JSON.parse((await t.drafts.read('demo','main')).authoring.plan_json).shots[0].seed,'arrived while saving');
 }
 {
     const t = fixture({live:authoring('current')}); await t.controller.refresh('demo');
-    t.drafts.save('demo','main',{authoring:authoring('old draft'),revision:'old'});
-    t.controller.readDraft();
+    await t.drafts.save('demo','main',{authoring:authoring('old draft'),revision:'old'});
+    await t.controller.readDraft();
     const original = t.controller.request;
     t.controller.request = async body => {
         const result = await original(body);
@@ -265,10 +281,10 @@ for (const mutate of [
     t.disk.get('main').authoring.base_seed='0';
     await t.controller.refresh('demo');
     assert.equal(t.controller.conflict,'','equivalent Plan and base-seed formatting loads without a false conflict');
-    t.controller.observe();
-    assert.equal(t.drafts.read('demo','main'),null,'normalization alone must not manufacture a recovery draft');
-    t.drafts.save('demo','main',{authoring:t.disk.get('main').authoring,revision:'1'});
-    t.controller.readDraft();
+    await t.controller.observe();
+    assert.equal((await t.drafts.read('demo','main')),null,'normalization alone must not manufacture a recovery draft');
+    await t.drafts.save('demo','main',{authoring:t.disk.get('main').authoring,revision:'1'});
+    await t.controller.readDraft();
     assert.equal(t.controller.draftRecovery,null,'old formatting-only recovery entries do not block editing');
 }
 {
@@ -291,7 +307,7 @@ for (const mutate of [
     assert.equal(t.controller.switchTarget,null);
     assert.deepEqual(t.events,['settle','load','apply:main']);
     assert.equal(JSON.stringify([...t.disk]),before,'navigation must not rewrite either saved branch');
-    const draft=t.drafts.read('demo',id);
+    const draft=(await t.drafts.read('demo',id));
     assert.equal(JSON.parse(draft.authoring.plan_json).shots[0].seed,'unsaved scene-one edit');
     assert.deepEqual(draft.recovery,cut,'pending cut/history edits must survive settling');
     t.controller.captureRecovery=()=>null;
@@ -302,16 +318,16 @@ for (const mutate of [
     await t.controller.restoreDraft();
     assert.deepEqual(restored,cut);
     assert.equal(JSON.parse(t.getLive().plan_json).shots[0].seed,'unsaved scene-one edit');
-    assert.equal(t.drafts.read('demo',id).recovery,null,'consumed cut recovery must not reappear as unsaved');
+    assert.equal((await t.drafts.read('demo',id)).recovery,null,'consumed cut recovery must not reappear as unsaved');
 }
 {
     const t=fixture({live:authoring('stale widgets')}); await t.controller.refresh('demo');
     assert.ok(t.controller.conflict);
-    t.drafts.save('demo','main',{authoring:authoring('older crash draft'),revision:'1'});
-    t.controller.readDraft();
+    await t.drafts.save('demo','main',{authoring:authoring('older crash draft'),revision:'1'});
+    await t.controller.readDraft();
     await t.controller.switchTo(id,{save:false});
     assert.equal(t.controller.selected,id,'explicit recovery switch bypasses only the failed save');
-    const draft=t.drafts.read('demo','main');
+    const draft=(await t.drafts.read('demo','main'));
     assert.equal(JSON.parse(draft.authoring.plan_json).shots[0].seed,'stale widgets');
     assert.equal(JSON.parse(draft.older[0].authoring.plan_json).shots[0].seed,'older crash draft');
 }
@@ -351,7 +367,7 @@ for (const mutate of [
     t.setLive(authoring('999')); load.finish(); await switching;
     assert.equal(t.controller.selected,'main'); assert.match(t.controller.error,/Edits arrived/);
     assert.equal(JSON.parse(t.getLive().plan_json).shots[0].seed,'999');
-    assert.equal(JSON.parse(t.drafts.read('demo','main').authoring.plan_json).shots[0].seed,'999');
+    assert.equal(JSON.parse((await t.drafts.read('demo','main')).authoring.plan_json).shots[0].seed,'999');
 }
 for(const binding of [null,{run_name:'demo',branch_id:'main',revision:'old'}]) {
     const t=fixture({live:authoring('stale'),binding}); await t.controller.refresh('demo');
@@ -371,7 +387,7 @@ for(const binding of [null,{run_name:'demo',branch_id:'main',revision:'old'}]) {
     epoch++; cut={editorial:{trims:[{scene:1,out_frame:81}]}};
     load.finish(); await switching;
     assert.equal(t.controller.selected,'main'); assert.match(t.controller.error,/Edits arrived/);
-    assert.deepEqual(t.drafts.read('demo','main').recovery,cut,'cut edits arriving during navigation must be kept');
+    assert.deepEqual((await t.drafts.read('demo','main')).recovery,cut,'cut edits arriving during navigation must be kept');
 }
 {
     const t=fixture({live:authoring('intentional edit'),binding:{run_name:'demo',branch_id:'main',revision:'1'}});
@@ -393,7 +409,7 @@ for(const binding of [null,{run_name:'demo',branch_id:'main',revision:'old'}]) {
     t.controller.request=async body=>{const saved=await original(body);if(body.action==='create')throw Error('lost response');return saved;};
     await t.controller.create('Empty'); assert.equal(t.disk.size,3);
     assert.match(t.controller.error,/uncertain/); const request=t.controller.pending;
-    assert.equal(t.drafts.pending().operation_id,request.operation_id);
+    assert.equal((await t.drafts.pending()).operation_id,request.operation_id);
     t.controller.request=original; await t.controller.retryPending();
     assert.equal(t.controller.pending,null); assert.equal(t.disk.size,3);
     assert.ok(t.controller.records.some(row=>row.id===request.operation_id));
@@ -422,7 +438,7 @@ for(const binding of [null,{run_name:'demo',branch_id:'main',revision:'old'}]) {
     assert.equal(JSON.parse(t.getLive().plan_json).shots[0].seed,'late edit');
 }
 {
-    const t=fixture(); await t.controller.refresh('demo'); t.setLive(authoring('crash draft')); t.controller.observe();
+    const t=fixture(); await t.controller.refresh('demo'); t.setLive(authoring('crash draft')); await t.controller.observe();
     const restarted=fixture({storage:t.storage,binding:t.getBinding()});
     await restarted.controller.refresh('demo'); assert.ok(restarted.controller.draftRecovery);
     await restarted.controller.restoreDraft();
@@ -434,7 +450,7 @@ for(const binding of [null,{run_name:'demo',branch_id:'main',revision:'old'}]) {
     const t=fixture({live:authoring('stale')}); await t.controller.refresh('demo');
     await t.controller.reloadSaved(); assert.equal(t.controller.conflict,'');
     assert.equal(JSON.parse(t.getLive().plan_json).shots[0].seed,'18446744073709551614');
-    assert.equal(JSON.parse(t.drafts.read('demo','main').authoring.plan_json).shots[0].seed,'stale');
+    assert.equal(JSON.parse((await t.drafts.read('demo','main')).authoring.plan_json).shots[0].seed,'stale');
     await t.controller.refresh('demo');
     assert.equal(t.controller.draftRecovery,null,'explicit reload stays resolved after refresh');
     const reopened=fixture({storage:t.storage,binding:t.getBinding()});
@@ -443,30 +459,106 @@ for(const binding of [null,{run_name:'demo',branch_id:'main',revision:'old'}]) {
     await reopened.controller.switchTo(id,{save:false});
     await reopened.controller.switchTo('main',{save:false});
     assert.equal(reopened.controller.draftRecovery,null,'navigating away and back keeps old backups resolved');
-    reopened.controller.readDraft({includeResolved:true});
+    await reopened.controller.readDraft({includeResolved:true});
     assert.equal(JSON.parse(reopened.controller.draftRecovery.authoring.plan_json).shots[0].seed,'stale',
         'the previous local edits remain explicitly recoverable');
-    reopened.controller.readDraft();
+    await reopened.controller.readDraft();
     reopened.disk.get('main').revision='newer';
     await reopened.controller.refresh('demo');
     assert.ok(reopened.controller.draftRecovery,'acknowledgement does not apply to a newer server revision');
     reopened.disk.get('main').revision='1';
     await reopened.controller.refresh('demo');
-    reopened.drafts.save('demo','main',{authoring:authoring('new unsaved edit'),revision:'1'});
-    reopened.controller.readDraft();
+    await reopened.drafts.save('demo','main',{authoring:authoring('new unsaved edit'),revision:'1'});
+    await reopened.controller.readDraft();
     assert.ok(reopened.controller.draftRecovery,'a new draft still needs recovery');
     reopened.setLive(authoring('new unsaved edit'));
-    reopened.controller.readDraft();
+    await reopened.controller.readDraft();
     assert.equal(reopened.controller.draftRecovery,null);
     assert.doesNotMatch(reopened.controller.draftStatus,/restore it before editing/,'clear a stale recovery warning');
 }
 {
     const storage=memoryStorage(); storage.setItem=()=>{throw Error('quota exceeded');};
-    const t=fixture({storage}); await t.controller.refresh('demo'); t.setLive(authoring('unsaved'));t.controller.observe();
+    const t=fixture({storage}); await t.controller.refresh('demo'); t.setLive(authoring('unsaved'));await t.controller.observe();
     assert.match(t.controller.draftStatus,/Draft not saved.*quota/);
     await t.controller.perform(async()=>{});
     assert.equal(JSON.parse(t.disk.get('main').authoring.plan_json).shots[0].seed,'unsaved',
         'browser quota must not prevent a real branch save');
+}
+{
+    const storage=memoryStorage(); let writes=0;
+    storage.setItem=async()=>{writes++;throw Error('quota exceeded');};
+    const t=fixture({storage}); await t.controller.refresh('demo'); t.setLive(authoring('unsaved'));
+    await t.controller.observe();
+    for(let i=0;i<20;i++) await t.controller.observe();
+    assert.equal(writes,1,'failed unchanged draft is not retried every poll');
+    t.setLive(authoring('next edit')); await t.controller.observe();
+    assert.equal(writes,2,'a genuinely new edit may attempt recovery');
+    assert.match(t.controller.draftStatus,/Draft not saved.*quota/);
+}
+for (const fail of [false,true]) {
+    const t=fixture(); await t.controller.refresh('demo'); t.setLive(authoring('keep before navigation'));
+    const original=t.storage.setItem; let started,finish;
+    const ready=new Promise(resolve=>started=resolve);
+    t.storage.setItem=async(key,value)=>{
+        await new Promise((resolve,reject)=>{finish=()=>fail?reject(Error('commit aborted')):resolve();started();});
+        return original(key,value);
+    };
+    const switching=t.controller.switchTo(id,{save:false});
+    await ready;
+    assert.equal(t.controller.selected,'main');
+    assert.ok(!t.events.includes(`apply:${id}`),'navigation waits for the actual durable commit');
+    finish(); await switching;
+    assert.equal(t.controller.selected,fail?'main':id);
+    if(fail) {
+        assert.match(t.controller.error,/commit aborted/);
+        assert.equal(JSON.parse(t.getLive().plan_json).shots[0].seed,'keep before navigation');
+    } else assert.equal(JSON.parse((await t.drafts.read('demo','main')).authoring.plan_json).shots[0].seed,'keep before navigation');
+}
+{
+    const t=fixture(); await t.drafts.save('demo','main',{authoring:authoring('existing crash draft')});
+    const original=t.storage.getItem; let finish,started;
+    const ready=new Promise(resolve=>started=resolve);
+    t.storage.getItem=async key=>{
+        if(key.startsWith('h3-branch-draft-v1:')) await new Promise(resolve=>{finish=resolve;started();});
+        return original(key);
+    };
+    const refreshing=t.controller.refresh('demo'); await ready;
+    assert.equal(t.controller.ready,false,'editor cannot overwrite recovery before hydration finishes');
+    await t.controller.observe();
+    await assert.rejects(t.controller.save(),/recovery to load/);
+    finish(); await refreshing;
+    assert.ok(t.controller.draftRecovery); assert.equal(t.controller.ready,true);
+    t.storage.getItem=original;
+    assert.equal(JSON.parse((await t.drafts.read('demo','main')).authoring.plan_json).shots[0].seed,'existing crash draft');
+}
+{
+    const t=fixture(); await t.controller.refresh('demo');
+    await t.drafts.save('demo','main',{authoring:authoring('old project recovery')});
+    const original=t.storage.getItem; let finish,started;
+    const ready=new Promise(resolve=>started=resolve);
+    t.storage.getItem=async key=>{await new Promise(resolve=>{finish=resolve;started();});return original(key);};
+    const reading=t.controller.readDraft(); await ready;
+    t.controller.run='other-project';t.controller.epoch++;finish();await reading;
+    assert.equal(t.controller.draftRecovery,null,'late recovery read cannot attach to another project');
+}
+{
+    const t=fixture(); await t.controller.refresh('demo');
+    const previous={authoring:authoring('previous draft')};
+    await t.drafts.save('demo','main',previous);
+    const original=t.storage.getItem,key=t.drafts.key('demo','main'); let first=true;
+    t.storage.getItem=async k=>{
+        const captured=original(k);
+        if(k===key && first) {
+            first=false;
+            t.storage.setItem(k,JSON.stringify({authoring:authoring('concurrent edit'),older:[previous]}));
+        }
+        return captured;
+    };
+    await t.controller.resolveDrafts('acknowledged');
+    const current=await t.drafts.read('demo','main');
+    assert.equal(JSON.parse(current.authoring.plan_json).shots[0].seed,'concurrent edit','async acknowledgement must not overwrite a newer recovery write');
+    assert.equal(current.resolved_revision,undefined,'a newer edit was not part of the acknowledgement');
+    assert.equal(current.older[0].resolved_revision,'acknowledged');
 }
 {
     const a={properties:{branch:'old'},widgets:[{name:'seed',value:'18446744073709551614'}]};

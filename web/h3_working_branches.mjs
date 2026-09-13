@@ -51,34 +51,55 @@ export function branchOperationId() {
 export class BranchDrafts {
     constructor(storage, client) { Object.assign(this, {storage, client}); }
     key(run, id) { return `h3-branch-draft-v1:${this.client}:${encodeURIComponent(run)}:${workingBranchId(id)}`; }
-    read(run, id) {
-        const raw = this.storage.getItem(this.key(run, id));
+    parse(raw) {
         if (!raw) return null;
         const draft = JSON.parse(raw);
         authoringSignature(draft.authoring);
         return draft;
     }
+    async read(run, id) { return this.parse(await this.storage.getItem(this.key(run, id))); }
+    update(key, transform) {
+        // IndexedDB performs read/modify/write in one transaction, including
+        // across tabs. Keep injected Storage-compatible test adapters ordered.
+        if (this.storage.updateItem) return this.storage.updateItem(key, transform);
+        const write = (this.writing ?? Promise.resolve()).then(async () => {
+            const next = transform(await this.storage.getItem(key));
+            if (next == null) await this.storage.removeItem(key);
+            else await this.storage.setItem(key, next);
+        });
+        this.writing = write.catch(() => {});
+        return write;
+    }
     save(run, id, draft) {
-        const older = draft.older ?? this.read(run, id)?.older;
-        this.storage.setItem(this.key(run, id), JSON.stringify({...draft, ...(older ? {older} : {}), updated_at:Date.now()}));
+        return this.update(this.key(run, id), raw => {
+            const older = draft.older ?? this.parse(raw)?.older;
+            return JSON.stringify({...draft, ...(older ? {older} : {}), updated_at:Date.now()});
+        });
+    }
+    revise(run, id, transform) {
+        return this.update(this.key(run, id), raw => {
+            const current = this.parse(raw);
+            return current ? JSON.stringify({...transform(current), updated_at:Date.now()}) : raw;
+        });
     }
     stash(run, id, draft) {
-        const previous = this.read(run, id);
-        const older = previous ? [previous, ...(previous.older ?? [])] : [];
-        const signature = value => JSON.stringify([authoringSignature(value.authoring), value.recovery ?? null]);
-        const seen = new Set([signature(draft)]);
-        const kept = older.filter(value => {
-            const key = signature(value);
-            if (seen.has(key)) return false;
-            seen.add(key); return true;
-        }).map(({older, ...value}) => value);
-        this.save(run, id, {...draft, older:kept});
+        return this.update(this.key(run, id), raw => {
+            const previous = this.parse(raw);
+            const older = previous ? [previous, ...(previous.older ?? [])] : [];
+            const signature = value => JSON.stringify([authoringSignature(value.authoring), value.recovery ?? null]);
+            const seen = new Set([signature(draft)]);
+            const kept = older.filter(value => {
+                const key = signature(value);
+                if (seen.has(key)) return false;
+                seen.add(key); return true;
+            }).map(({older, ...value}) => value);
+            return JSON.stringify({...draft, older:kept, updated_at:Date.now()});
+        });
     }
-    pending(value = undefined) {
+    async pending(value = undefined) {
         const key = `h3-branch-pending-v1:${this.client}`;
-        if (value === undefined) return JSON.parse(this.storage.getItem(key) || "null");
-        if (value) this.storage.setItem(key, JSON.stringify(value));
-        else this.storage.removeItem(key);
+        if (value === undefined) return JSON.parse(await this.storage.getItem(key) || "null");
+        return this.update(key, () => value ? JSON.stringify(value) : null);
     }
 }
 
@@ -118,8 +139,6 @@ export class StudioBranches {
         this.draftStatus = "";
         this.pending = null;
         this.switchTarget = null;
-        try { this.pending = drafts?.pending() ?? null; }
-        catch (error) { this.draftStatus = `Local recovery unavailable: ${error.message}`; }
     }
 
     async refresh(run) {
@@ -128,6 +147,8 @@ export class StudioBranches {
         this.run = run;
         this.ready = false;
         const selected = this.selected;
+        try { this.pending ||= await this.drafts?.pending() ?? null; }
+        catch (error) { this.draftStatus = `Local recovery unavailable: ${error.message}`; }
         const data = await this.request({action:"list", run_name:run});
         const record = await this.request({action:"load", run_name:run, branch_id:selected});
         if (run !== this.run || epoch !== this.epoch || selected !== this.selected || !this.isCurrent(run, selected)) return;
@@ -139,8 +160,9 @@ export class StudioBranches {
         this.conflict = known || same || !record.authoring ? ""
             : "This workflow differs from the saved branch. Update active branch to keep the displayed edits, reload saved branch, or create an empty branch.";
         if (!this.conflict) this.adopt(record);
+        await this.readDraft();
+        if (run !== this.run || epoch !== this.epoch || selected !== this.selected || !this.isCurrent(run, selected)) return;
         this.ready = true;
-        this.readDraft();
         this.changed();
     }
 
@@ -157,11 +179,15 @@ export class StudioBranches {
         this.conflict = "";
     }
 
-    readDraft({includeResolved = false} = {}) {
-        this.draftRecovery = null;
-        this.draftStatus = "";
+    async readDraft({includeResolved = false} = {}) {
+        const run = this.run, selected = this.selected, epoch = this.epoch;
+        const token = this.draftReadToken = (this.draftReadToken ?? 0) + 1;
+        this.draftReading = true;
         try {
-            const saved = this.drafts?.read(this.run, this.selected);
+            const saved = await this.drafts?.read(run, selected);
+            if (token !== this.draftReadToken || run !== this.run || selected !== this.selected || epoch !== this.epoch || !this.isCurrent(run, selected)) return;
+            this.draftRecovery = null;
+            this.draftStatus = "";
             const revision = this.records.find(record => record.id === this.selected)?.revision;
             const candidates = [saved, ...(saved?.older ?? [])];
             const resolved = value => !includeResolved && value?.resolved_revision
@@ -175,36 +201,49 @@ export class StudioBranches {
             } else if (candidates.some(resolved)) {
                 this.draftStatus = "Previous local edits remain in browser recovery.";
             }
-        } catch (error) { this.draftStatus = `Local recovery unavailable: ${error.message}`; }
+            if (this.drafts?.storage.warning) this.draftStatus = this.drafts.storage.warning;
+        } catch (error) {
+            if (token === this.draftReadToken && run === this.run && selected === this.selected && epoch === this.epoch) this.draftStatus = `Local recovery unavailable: ${error.message}`;
+        } finally {
+            if (token === this.draftReadToken) this.draftReading = false;
+        }
     }
 
-    preserveDraft() {
+    async preserveDraft() {
         if (!this.drafts || !this.run || this.draftRecovery) return;
         const binding = this.binding?.run_name === this.run && this.binding.branch_id === this.selected
             ? this.binding : null;
-        this.drafts.save(this.run, this.selected, {authoring:this.capture(), revision:binding?.revision ?? null,
+        await this.drafts.save(this.run, this.selected, {authoring:this.capture(), revision:binding?.revision ?? null,
             recovery:this.captureRecovery()});
         this.draftStatus = "Recovery draft saved in this browser.";
     }
 
-    preserveNavigationDraft() {
+    async preserveNavigationDraft() {
         if (!this.drafts && !this.captureRecovery() && authoringSignature(this.capture()) === this.savedSignature) return;
         if (!this.drafts) throw new Error("Browser recovery is unavailable. Save or export your local edits before switching without saving.");
         const binding = this.binding?.run_name === this.run && this.binding.branch_id === this.selected ? this.binding : null;
         // Keep an older recovery draft too: navigation must never replace it
         // with the saved settings currently on screen.
-        this.drafts.stash(this.run, this.selected, {authoring:this.capture(),
+        await this.drafts.stash(this.run, this.selected, {authoring:this.capture(),
             revision:binding?.revision ?? null, recovery:this.captureRecovery()});
         this.draftStatus = "Local prompts, settings and pending edits saved in browser recovery.";
     }
 
     observe() {
-        if (this.busy || !this.ready || this.draftRecovery) return;
+        if (this.observing) return this.observing;
+        this.observing = this.observeDraft().finally(() => { this.observing = null; });
+        return this.observing;
+    }
+
+    async observeDraft() {
+        if (this.busy || !this.ready || this.draftRecovery || this.draftReading) return;
         try {
             const signature = authoringSignature(this.capture());
             if (signature === this.observedSignature) return;
-            if (signature !== this.savedSignature) this.preserveDraft();
+            // Do not retry the same failed write every 500ms. A new edit or an
+            // explicit branch action may retry; failures stay visible inline.
             this.observedSignature = signature;
+            if (signature !== this.savedSignature) await this.preserveDraft();
         } catch (error) { this.draftStatus = `Draft not saved: ${error.message}`; }
     }
 
@@ -216,18 +255,18 @@ export class StudioBranches {
 
     async sendPending() {
         const body = this.pending;
-        try { this.drafts?.pending(body); }
+        try { await this.drafts?.pending(body); }
         catch (error) { this.draftStatus = `Pending request is only in memory: ${error.message}`; }
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 const result = await this.request(structuredClone(body));
                 this.pending = null;
-                try { this.drafts?.pending(null); } catch { /* Replaying the same ID is safe. */ }
+                try { await this.drafts?.pending(null); } catch { /* Replaying the same ID is safe. */ }
                 return result;
             } catch (error) {
                 if (error.status >= 400 && error.status < 500) {
                     this.pending = null;
-                    try { this.drafts?.pending(null); } catch { /* Preserve the original error. */ }
+                    try { await this.drafts?.pending(null); } catch { /* Preserve the original error. */ }
                     throw error;
                 }
                 if (attempt) throw new Error(`Request outcome is uncertain. Use Retry pending operation. ${error.message}`);
@@ -245,7 +284,7 @@ export class StudioBranches {
             if (epoch !== this.epoch || body.run_name !== this.run || !this.isCurrent(this.run, this.selected)) return;
             if (body.action === "save" && body.branch_id === this.selected) {
                 this.adopt(record);
-                this.resolveDrafts(record.revision);
+                await this.resolveDrafts(record.revision);
             }
             else if (body.action === "create" && !this.records.some(item => item.id === record.id)) this.records.push(record);
             this.error = "";
@@ -254,7 +293,7 @@ export class StudioBranches {
     }
 
     async save(assertCurrent = () => {}) {
-        if (!this.ready) throw new Error("Wait for working branches to load.");
+        if (!this.ready || this.draftReading) throw new Error("Wait for working branches and recovery to load.");
         if (this.conflict) throw new Error(this.conflict);
         if (this.draftRecovery) throw new Error("Resolve the local recovery draft before saving.");
         if (this.binding?.run_name !== this.run || this.binding.branch_id !== this.selected) {
@@ -268,17 +307,22 @@ export class StudioBranches {
         return authoringSignature(authoring);
     }
 
-    resolveDrafts(revision) {
+    async resolveDrafts(revision) {
         // A choice resolves the warning, not the backup. Restore local draft
         // can still retrieve these versions explicitly after a workflow reload.
         this.draftRecovery = null;
         this.draftStatus = "Previous local edits remain in browser recovery.";
         try {
-            const draft = this.drafts?.read(this.run, this.selected);
-            if (draft) this.drafts.save(this.run, this.selected, {
-                ...draft, resolved_revision:revision,
-                older:(draft.older ?? []).map(value => ({...value, resolved_revision:revision})),
-            });
+            const run = this.run, selected = this.selected;
+            const draft = await this.drafts?.read(run, selected);
+            if (draft) {
+                const signature = value => JSON.stringify([authoringSignature(value.authoring), value.recovery ?? null]);
+                const acknowledged = new Set([draft, ...(draft.older ?? [])].map(signature));
+                const resolve = value => acknowledged.has(signature(value)) ? {...value, resolved_revision:revision} : value;
+                await this.drafts.revise(run, selected, current => ({
+                    ...resolve(current), older:(current.older ?? []).map(resolve),
+                }));
+            }
         } catch (error) {
             this.draftStatus += ` Recovery acknowledgement could not be saved: ${error.message}`;
         }
@@ -295,7 +339,7 @@ export class StudioBranches {
         this.busy = true; this.error = ""; this.changed();
         try {
             assertCurrent();
-            if (!this.ready) throw new Error("Wait for working branches to load.");
+            if (!this.ready || this.draftReading) throw new Error("Wait for working branches and recovery to load.");
             if (this.pending) throw new Error("Retry pending operation before continuing.");
             const authoring = structuredClone(this.capture());
             const signature = authoringSignature(authoring);
@@ -312,15 +356,16 @@ export class StudioBranches {
                 throw new Error("Prompts or settings changed while confirming. Nothing was saved; update again to include those edits.");
             }
             try {
-                if (record.authoring) this.drafts?.stash(run, selected, {
+                if (record.authoring) await this.drafts?.stash(run, selected, {
                     authoring:record.authoring, revision:record.revision, recovery:null,
                 });
-                this.drafts?.stash(run, selected, {authoring, revision:this.binding?.revision ?? null,
+                await this.drafts?.stash(run, selected, {authoring, revision:this.binding?.revision ?? null,
                     recovery:this.captureRecovery()});
             } catch (error) {
                 // A full browser must not prevent an explicitly confirmed save.
                 this.draftStatus = `Local recovery unavailable: ${error.message}`;
             }
+            assertCurrent();
             // Save only authoring, using the revision the user just confirmed.
             // No reload, checkpoint reassignment, fork, cut/history flush or
             // forced revision bypass. Pending local edits remain in the editor.
@@ -328,9 +373,10 @@ export class StudioBranches {
                 branch_id:selected, revision:record.revision, authoring});
             assertCurrent();
             this.adopt(saved);
-            this.resolveDrafts(saved.revision);
+            await this.resolveDrafts(saved.revision);
+            assertCurrent();
             this.observedSignature = signature;
-            if (signature !== authoringSignature(this.capture())) this.preserveDraft();
+            if (signature !== authoringSignature(this.capture())) await this.preserveDraft();
         } catch (error) {
             this.error = error?.message || String(error);
         } finally {
@@ -347,7 +393,7 @@ export class StudioBranches {
         this.busy = true; this.error = ""; this.changed();
         try {
             assertCurrent();
-            if (!this.ready) throw new Error("Wait for working branches to load.");
+            if (!this.ready || this.draftReading) throw new Error("Wait for working branches and recovery to load.");
             if (this.pending) throw new Error("Retry pending operation before continuing.");
             if (save && this.conflict) throw new Error(this.conflict);
             const editStamp = this.editStamp();
@@ -355,8 +401,8 @@ export class StudioBranches {
                 throw new Error("Browser recovery is unavailable. Save these edits as a new empty branch before reloading.");
             }
             try {
-                if (navigation) this.preserveNavigationDraft();
-                else this.preserveDraft();
+                if (navigation) await this.preserveNavigationDraft();
+                else await this.preserveDraft();
             }
             catch (error) {
                 this.draftStatus = `Local draft not saved: ${error.message}`;
@@ -364,20 +410,21 @@ export class StudioBranches {
                 // Saving to the server is still possible when browser storage
                 // is full. Never make local recovery a barrier to a real save.
             }
+            assertCurrent();
             if (flush) await this.flush();
             else await this.settle();
             assertCurrent();
             const signature = save ? await this.save(assertCurrent) : authoringSignature(this.capture());
             assertCurrent();
-            const assertUnedited = () => {
+            const assertUnedited = async () => {
                 assertCurrent();
                 if (signature !== authoringSignature(this.capture()) || (navigation && editStamp !== this.editStamp())) {
-                    if (navigation) this.preserveNavigationDraft();
-                    else this.preserveDraft();
+                    if (navigation) await this.preserveNavigationDraft();
+                    else await this.preserveDraft();
                     throw new Error("Edits arrived during the switch. They were kept; switch again when editing is finished.");
                 }
             };
-            assertUnedited();
+            await assertUnedited();
             await action(assertUnedited);
         } catch (error) {
             this.error = error?.message || String(error);
@@ -393,25 +440,25 @@ export class StudioBranches {
         this.switchTarget = id;
         return this.perform(async (assertCurrent) => {
             const record = await this.request({action:"load", run_name:this.run, branch_id:id});
-            assertCurrent();
+            await assertCurrent();
             if (!record.authoring) throw new Error("This branch has no saved authoring snapshot yet.");
             await this.apply(record);
             this.selected = id;
             this.switchTarget = null;
             this.adopt(record);
             this.observedSignature = null;
-            this.readDraft();
+            await this.readDraft();
         }, {save, flush:save, navigation:!save});
     }
 
     async reloadSaved() {
         return this.perform(async assertCurrent => {
             const record = await this.request({action:"load", run_name:this.run, branch_id:this.selected});
-            assertCurrent();
+            await assertCurrent();
             if (!record.authoring) throw new Error("This branch has no saved authoring snapshot yet.");
             await this.apply(record);
             this.adopt(record);
-            this.resolveDrafts(record.revision);
+            await this.resolveDrafts(record.revision);
             this.observedSignature = authoringSignature(record.authoring);
             this.draftStatus = `Saved branch loaded. ${this.draftStatus}`;
         }, {save:false, flush:false, navigation:true});
@@ -421,15 +468,15 @@ export class StudioBranches {
         if (!this.draftRecovery) return;
         const draft = this.draftRecovery;
         return this.perform(async assertCurrent => {
-            assertCurrent();
+            await assertCurrent();
             await this.apply({id:this.selected, authoring:draft.authoring});
             await this.restoreRecovery(draft.recovery);
             if (draft.recovery && this.drafts) {
-                const stored = this.drafts.read(this.run, this.selected);
+                const run = this.run, selected = this.selected;
                 const consumed = value => value && authoringSignature(value.authoring) === authoringSignature(draft.authoring)
                     && JSON.stringify(value.recovery) === JSON.stringify(draft.recovery)
                     ? {...value, recovery:null} : value;
-                this.drafts.save(this.run, this.selected, {...consumed(stored), older:(stored?.older ?? []).map(consumed)});
+                await this.drafts.revise(run, selected, current => ({...consumed(current), older:(current.older ?? []).map(consumed)}));
             }
             const record = this.records.find(item => item.id === this.selected);
             this.binding = {run_name:this.run, branch_id:this.selected, revision:draft.revision};
@@ -462,7 +509,7 @@ export class StudioBranches {
                 branch_id:this.selected, name, through_scene:throughScene, authoring});
             // Keep successfully published branches discoverable if UI application fails.
             if (run === this.run && !this.records.some(item => item.id === record.id)) this.records.push(record);
-            assertCurrent();
+            await assertCurrent();
             await this.apply(record);
             this.selected = record.id;
             this.adopt(record);
@@ -474,7 +521,7 @@ export class StudioBranches {
     async makeDefault() {
         return this.perform(async (assertCurrent) => {
             const result = await this.request({action:"default", run_name:this.run, branch_id:this.selected});
-            assertCurrent();
+            await assertCurrent();
             this.defaultBranch = result.default_branch;
         });
     }

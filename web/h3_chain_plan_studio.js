@@ -1,6 +1,7 @@
 import {app} from "/scripts/app.js";
 import {api} from "/scripts/api.js";
-import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId} from "./h3_working_branches.mjs?v=0.7.22";
+import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId} from "./h3_working_branches.mjs?v=0.7.23";
+import {browserBranchRecoveryStorage} from "./h3_branch_recovery_storage.mjs?v=0.7.23";
 import {branchPolicyNodes, captureBranchPolicyInputs, restoreBranchPolicyInputs} from "./h3_plan_restore_core.mjs?v=0.7.19";
 import {
     CONTINUATION_MODES,
@@ -747,9 +748,13 @@ function mount(node) {
         const workflow = app.extensionManager?.workflow?.activeWorkflow;
         const identity = workflow?.path ?? workflow?.activeState?.id ?? workflow?.filename;
         const index = identity ? `h3-branch-client-v1:${encodeURIComponent(identity)}:${node.id}` : null;
-        node.properties[branchDraftClientProperty] ||= (index && window.localStorage.getItem(index)) || branchOperationId();
-        if (index) window.localStorage.setItem(index, node.properties[branchDraftClientProperty]);
-        branchDrafts = new BranchDrafts(window.localStorage, node.properties[branchDraftClientProperty]);
+        let storedClient = null;
+        try { storedClient = index && window.localStorage.getItem(index); } catch { /* Use the workflow's identity. */ }
+        node.properties[branchDraftClientProperty] ||= storedClient || branchOperationId();
+        // This tiny identity hint is optional: full localStorage must not
+        // disable the IndexedDB migration which frees that space.
+        try { if (index) window.localStorage.setItem(index, node.properties[branchDraftClientProperty]); } catch { /* Best effort. */ }
+        branchDrafts = new BranchDrafts(browserBranchRecoveryStorage(), node.properties[branchDraftClientProperty]);
     }
     catch (error) { branchDraftError = `Browser recovery unavailable: ${error.message}`; }
     function currentBranch() { return workingBranchId(branchWidget?.value); }
@@ -937,12 +942,12 @@ function mount(node) {
             }
         });
         reload.disabled = !branches.ready;
-        const recover = button("Restore local draft", "Recover this browser's last unsaved branch settings", () => {
-            branches.readDraft({includeResolved:true});
+        const recover = button("Restore local draft", "Recover this browser's last unsaved branch settings", async () => {
+            await branches.readDraft({includeResolved:true});
             if (branches.draftRecovery && confirm("Replace the currently displayed prompts/settings with this browser's recovery draft? Saved branch settings and generated files are unchanged.")) {
                 void branches.restoreDraft();
             } else {
-                branches.readDraft();
+                await branches.readDraft();
                 renderShell();
             }
         });
@@ -6717,9 +6722,10 @@ function mount(node) {
         loadPlan(true);
         publishActiveScene();
     };
-    const saveLocalBranchDraft = () => {
+    const saveLocalBranchDraft = async () => {
         if (state.disposed || !state.plan) return;
-        branches.observe();
+        await branches.observe();
+        if (state.disposed) return;
         const status = root.querySelector(".h3studio-branch-draft");
         if (status) status.textContent = branchDraftError || branches.draftStatus;
     };
