@@ -1,5 +1,6 @@
 import {app} from "/scripts/app.js";
 import {api} from "/scripts/api.js";
+import {coalescedRefresh} from "./h3_coalesced_refresh.mjs";
 import {
     CONTINUATION_MODES,
     FPS,
@@ -6166,10 +6167,17 @@ function mount(node) {
     });
     domWidget.serialize = false;
     node.setSize?.([Math.max(Number(node.size?.[0]) || 0, MIN_WIDTH), Math.max(Number(node.size?.[1]) || 0, MIN_HEIGHT)]);
+    const refreshStudio = coalescedRefresh(() => {
+        loadPlan(true);
+        publishActiveScene();
+    }, {
+        isConfiguring:() => app.configuringGraph,
+        isAlive:() => Boolean(node.graph) && !state.disposed,
+    });
     const connectionsChanged = node.onConnectionsChange;
     node.onConnectionsChange = function () {
         const result = connectionsChanged?.apply(this, arguments);
-        setTimeout(() => { loadPlan(true); publishActiveScene(); }, 0);
+        refreshStudio();
         return result;
     };
     const onPromptExecuted = (event) => {
@@ -6228,6 +6236,7 @@ function mount(node) {
     node.onRemoved = function () {
         const finalFlush = flushProjectWrites(runName());
         state.disposed = true;
+        refreshStudio.cancel();
         state.checkpointToken += 1;
         state.presentationToken += 1;
         if (state.pollTimer != null) clearInterval(state.pollTimer);
@@ -6290,15 +6299,15 @@ function mount(node) {
         if (livePlanParsed) state.lastValue = liveValue;
         return true;
     };
-    node._h3PlanStudioRefresh = () => {
-        loadPlan(true);
-        publishActiveScene();
-    };
-    state.pollTimer = setInterval(() => loadPlan(false), 500);
+    node._h3PlanStudioRefresh = () => refreshStudio();
+    state.pollTimer = setInterval(() => {
+        if (app.configuringGraph) return;
+        loadPlan(false);
+    }, 500);
     state.checkpointTimer = setInterval(() => {
         if (state.executionPromptIds.size === 0) void refreshCheckpoints();
     }, 5000);
-    loadPlan(true);
+    refreshStudio();
 }
 
 app.registerExtension({
