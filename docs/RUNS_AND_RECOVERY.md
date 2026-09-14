@@ -878,6 +878,15 @@ under `upscaled/<profile>/final/`. Its normal `copy_to_output` and
 regular output tree. Legacy source-track runs without the embedded descriptor
 still need their original full AUDIO connected to Assemble.
 
+To assemble again after reopening ComfyUI, use **MiniMax H3 Upscale Manifest
+Load** → **H3 Chain Assemble**, without the upscale loop connected to Assemble.
+Set `manifest_path` to the profile's `upscale_manifest.json` (or a saved
+`partial/through_clip_NNNN.manifest.json` for a partial result). Absolute paths
+and paths relative to ComfyUI output are accepted. The loader preserves the
+saved source timeline, chapter, and upscale settings, including runs with
+`save_latent` off. It verifies the existing child artifacts when queued; it
+does not regenerate scenes, scan projects at startup, or rewrite checkpoints.
+
 ## Run Manager
 
 Connect the active Plan output to **MiniMax H3 Run Manager**. It discovers runs

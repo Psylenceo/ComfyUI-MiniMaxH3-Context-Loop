@@ -75,6 +75,73 @@ class RecoveryTests(unittest.TestCase):
         self.source["archives"] = {"api_prompt": str(path.relative_to(self.root))}
         chain._atomic_json(str(path), prompt)
 
+    def test_live_carousel_images_resolve_only_selected_bindings(self):
+        entries = copy.deepcopy(self.entries)
+        for entry, asset in zip(entries, (self.picture, self.anchor)):
+            entry["value"] = chain._project_asset_descriptor(
+                asset, str(self.run / "project_assets" / asset["relative_path"]))
+        # The inactive image must remain lazy, even when its file is gone.
+        entries[2]["value"] = chain._project_asset_descriptor(
+            {"kind": "image"}, str(self.run / "missing-unused.png"))
+        references = chain._make_tagged_references(entries)
+        before = copy.deepcopy(references)
+        before_state = copy.deepcopy(self.state)
+        for route in ("direct", "override"):
+            for pixel in (False, True):
+                for mode in ("picture_storyboard", "timestamped_video"):
+                    with self.subTest(route=route, pixel=pixel, mode=mode):
+                        refs = references
+                        prompt = ""
+                        if route == "override":
+                            refs, prompt, _, _ = (
+                                upscale.MiniMaxH3UpscaleReferencePromptOverride().override(
+                                    references=refs))
+                        options = dict(
+                            tagged_references=refs, prompt_override=prompt,
+                            override_ref_image_size="match",
+                            override_semantic_anchor_size="512",
+                            override_semantic_anchor_mode=mode)
+                        with patch.object(chain, "_project_asset_image",
+                                          wraps=chain._project_asset_image) as resolve:
+                            if pixel:
+                                result = self.condition(**options)
+                            else:
+                                result = upscale.MiniMaxH3ChainUpscaleReferenceConditioning().condition(
+                                    self.state, Clip(), video_vae=VideoVAE(),
+                                    target_video_latent={"samples": torch.zeros(1, 24, 2, 4, 4)},
+                                    **options)
+                        self.assertEqual(
+                            {call.args[0]["path"] for call in resolve.call_args_list},
+                            {entry["value"]["path"] for entry in entries[:2]})
+                        blocks = result[0][0][1]["minimax_refs"]
+                        # Anchors are Qwen presentation, not native VAE blocks.
+                        self.assertEqual(len(blocks), 1)
+                        self.assertTrue(all(torch.is_tensor(block["latent"]) for block in blocks))
+                        presentation = result[0][0][1]["tokens"]["presentation"]
+                        self.assertGreaterEqual(len(presentation), 2)
+                        self.assertTrue(all(torch.is_tensor(item["data"]) for item in presentation))
+                        self.assertIn("connected Tagged refs replace cached refs", result[-1])
+        self.assertEqual(references, before)
+        self.assertEqual(self.state, before_state)
+        self.assertFalse((self.run / "reference_cache").exists())
+
+    def test_live_tensor_picture_still_works_and_missing_selected_picture_fails(self):
+        path = str(self.run / "project_assets" / self.picture["relative_path"])
+        descriptor = chain._project_asset_descriptor(self.picture, path)
+        image = chain._project_asset_image(descriptor)
+        options = dict(prompt_override="@subject stands still.",
+                       override_ref_image_size="match",
+                       override_semantic_anchor_size="512",
+                       override_semantic_anchor_mode="picture_storyboard")
+        entry = {**self.entries[0], "value": image}
+        result = self.condition(tagged_references=chain._make_tagged_references([entry]), **options)
+        self.assertEqual(len(result[0][0][1]["minimax_refs"]), 1)
+        self.assertIs(chain._project_asset_image(image), image)
+        Path(path).unlink()
+        entry["value"] = descriptor
+        with self.assertRaisesRegex(ValueError, "project image asset does not exist"):
+            self.condition(tagged_references=chain._make_tagged_references([entry]), **options)
+
     def large_picture(self):
         self.picture = self.image("subject", "picture", (30, 60, 90), size=(192, 128))
         self.entries[0]["content_hash"] = self.picture["sha256"]

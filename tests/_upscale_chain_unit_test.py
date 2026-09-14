@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 from unittest import TestCase
+from unittest.mock import patch
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -75,6 +76,50 @@ def legacy_cache_fixture(chain, metadata, version="h3_reference_cache_v2"):
     return legacy
 
 
+def reload_saved_upscale(chain, upscale, manifest, path):
+    """Exercise the public disk recovery node, without loading model tensors."""
+    case = TestCase()
+    node = upscale.MiniMaxH3ChainUpscaleManifestLoad()
+    assert node.RETURN_TYPES[0] == chain.MANIFEST_TYPE
+    before = path.read_bytes()
+    with patch.object(chain, "_st_load", side_effect=AssertionError("loaded tensors")), \
+         patch.object(chain, "_atomic_json", side_effect=AssertionError("rewrote project")), \
+         patch.object(upscale.MiniMaxH3ChainUpscaleAdapter, "adapt",
+                      side_effect=AssertionError("reran upscale")), \
+         patch.object(upscale.MiniMaxH3ChainUpscaleSegmentSave, "save",
+                      side_effect=AssertionError("saved a scene")):
+        for address in (str(path), chain._relative_output_path(str(path))):
+            loaded, serialized, status = node.load(address)
+            assert loaded == manifest and json.loads(serialized) == manifest
+            assert "no regeneration" in status
+    assert path.read_bytes() == before
+    with case.assertRaisesRegex(ValueError, "Choose the saved"):
+        node.load("")
+    with case.assertRaisesRegex(ValueError, "escapes the output"):
+        node.load("../outside-output.json")
+    with case.assertRaises(FileNotFoundError):
+        node.load(str(path.parent / "missing-manifest.json"))
+    invalid = path.parent / "loader-invalid.json"
+    for document in ([], {"format": "h3_chain_manifest_v3"},
+                     {"format": "h3_chain_upscale_segment_v1"},
+                     {"format": "h3_chain_upscale_final_v1"}):
+        invalid.write_text(json.dumps(document))
+        with case.assertRaisesRegex(ValueError, "Select an upscale manifest"):
+            node.load(str(invalid))
+    broken = chain._json_document(manifest)
+    broken["segments"][0]["segment_sha256"] = "0" * 64
+    invalid.write_text(json.dumps(broken))
+    with case.assertRaisesRegex(ValueError, "SHA-256"):
+        node.load(str(invalid))
+    # Missing artifacts are reported, not silently reconstructed.
+    broken["segments"][0]["segment"] = "missing-upscale.mp4"
+    invalid.write_text(json.dumps(broken))
+    with case.assertRaisesRegex(FileNotFoundError, "missing"):
+        node.load(str(invalid))
+    invalid.unlink()
+    return loaded
+
+
 def check_partial_assembly(chain, upscale, partial):
     """Scene 1/2 is deliverable, without turning its resume manifest complete."""
     case = TestCase()
@@ -83,6 +128,7 @@ def check_partial_assembly(chain, upscale, partial):
         partial["run_name"], partial["profile"], 1,
         partial["source_manifest"])["partial"])
     saved_partial = partial_path.read_bytes()
+    partial = reload_saved_upscale(chain, upscale, partial, partial_path)
     assert partial["clip_count"] == 2 and partial["completed_clip_count"] == 1
     assert upscale._validate_upscale_manifest(partial) == partial["segments"]
     converted = upscale._assembly_manifest(partial, partial["segments"])
@@ -141,6 +187,9 @@ def check_partial_assembly(chain, upscale, partial):
                  "source_start_frame": 5})
     chapter["segments"][0]["index"] = 8
     chapter.update(scene_start=8, scene_end=8, last_completed_clip=8)
+    chapter_path = partial_path.parent / "chapter-recovery.manifest.json"
+    chapter_path.write_text(json.dumps(chapter))
+    chapter = reload_saved_upscale(chain, upscale, chapter, chapter_path)
     converted = upscale._assembly_manifest(
         chapter, upscale._validate_upscale_manifest(chapter))
     assert converted["format"] == chain.CHAPTER_MANIFEST_FORMAT
@@ -176,6 +225,7 @@ def main():
         "MiniMaxH3ChainUpscaleSegmentSave",
         "MiniMaxH3ChainUpscaleLoopEnd",
         "MiniMaxH3ChainUpscaleMerge",
+        "MiniMaxH3ChainUpscaleManifestLoad",
     }
     assert required <= set(package.NODE_CLASS_MAPPINGS)
     assert upscale.UPSCALE_MANIFEST_TYPE == chain.MANIFEST_TYPE
@@ -988,6 +1038,9 @@ def main():
         assert manifest["profile"] == "quality"
         assert len(manifest["segments"]) == 2
         assert not manifest["latent_saving"]
+        manifest = reload_saved_upscale(chain, upscale, manifest, pathlib.Path(
+            upscale._profile_paths(manifest["run_name"], manifest["profile"], 2,
+                                   manifest["source_manifest"])["manifest"]))
         merged_result = chain.MiniMaxH3ChainAssemble().assemble(
             manifest, "generated", "final", 96,
             copy_to_output=True, output_subfolder="published_upscale")
