@@ -88,6 +88,11 @@ and follows the destination project's workflow-ownership rules.
 For a screen-by-screen explanation, expected output paths, and common first-run
 problems, use the [Getting started guide](docs/GETTING_STARTED.md).
 
+For disposable batch renders, Assemble has an opt-in
+[`delete_checkpoints_after_assembly`](docs/POST_EXPORT_CHECKPOINT_CLEANUP.md)
+setting. It frees checkpoint space only after a completed export. Leave it off
+if you need resume, latent upscale, or checkpoint-based reassembly later.
+
 ## Choose a workflow
 
 | I want to… | Open this workflow |

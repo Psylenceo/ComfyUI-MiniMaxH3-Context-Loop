@@ -125,7 +125,8 @@
         "output_subfolder": "",
         "blend_schedule": "plan",
         "boundary_tone_match": "off",
-        "color_stabilization": "off"
+        "color_stabilization": "off",
+        "delete_checkpoints_after_assembly": false
       },
       "inputs": {
         "manifest": [
@@ -176,7 +177,8 @@
         "output_subfolder": "",
         "blend_schedule": "plan",
         "boundary_tone_match": "off",
-        "color_stabilization": "off"
+        "color_stabilization": "off",
+        "delete_checkpoints_after_assembly": false
       },
       "inputs": {
         "manifest": [

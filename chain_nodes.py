@@ -27527,6 +27527,16 @@ class MiniMaxH3ChainAssemble:
                                "MP4 retained. Assemble then re-decodes the "
                                "existing checkpoint; it does not sample or "
                                "regenerate the scene."}),
+                "delete_checkpoints_after_assembly": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Permanently delete this completed manifest's "
+                               "checkpoint payloads after the final video and "
+                               "requested output copies are saved. Keeps videos, "
+                               "prompts, metadata and checkpoints shared with "
+                               "other saved branches. Skips partial exports. "
+                               "Deleted checkpoints cannot be used for resume, "
+                               "latent upscale or checkpoint-based reassembly. "
+                               "Leave OFF if further processing is planned."}),
             },
         }
 
@@ -27552,7 +27562,8 @@ class MiniMaxH3ChainAssemble:
                  copy_to_output=False, output_subfolder="",
                  source_timeline=None, blend_schedule="plan",
                  blend_video_vae=None, boundary_tone_match="off",
-                 color_stabilization="off"):
+                 color_stabilization="off",
+                 delete_checkpoints_after_assembly=False):
         upscale_manifest = None
         upscale_support = None
         manifest_format = str((manifest or {}).get("format") or "")
@@ -27568,6 +27579,16 @@ class MiniMaxH3ChainAssemble:
             manifest = upscale_support._assembly_manifest(
                 upscale_manifest, upscale_segments)
         segments = _validate_manifest(manifest)
+        checkpoint_cleanup = None
+        checkpoint_cleanup_status = ""
+        if delete_checkpoints_after_assembly:
+            from .assembly_checkpoint_cleanup import AssemblyCheckpointCleanup
+
+            try:
+                checkpoint_cleanup = AssemblyCheckpointCleanup(
+                    _output_root(), upscale_manifest or manifest)
+            except (OSError, TypeError, ValueError) as exc:
+                checkpoint_cleanup_status = "checkpoint cleanup skipped: %s" % exc
         geometry = common_saved_resolution(segments, "H3 Chain Assemble")
         if geometry:
             manifest = {**manifest, "compatibility": {
@@ -27911,6 +27932,16 @@ class MiniMaxH3ChainAssemble:
                            if subtitle_path is not None else "")
         if subtitle_copy is not None:
             subtitle_status += " + %s" % subtitle_copy
+        if checkpoint_cleanup is not None:
+            try:
+                checkpoint_cleanup_status = checkpoint_cleanup.finish([
+                    path for path in (final_path, output_copy, generated_sidecar_path,
+                                      subtitle_path, subtitle_copy) if path is not None])
+            except (OSError, TypeError, ValueError) as exc:
+                checkpoint_cleanup_status = (
+                    "checkpoint cleanup did not finish: %s; final export saved" % exc)
+        if checkpoint_cleanup_status:
+            copy_status += "; " + checkpoint_cleanup_status
         gap_status = ("; %d black editorial frames" % editorial_gap_frames
                       if editorial_gap_frames else "")
         trim_status = ("; %d latent-safe frames trimmed" %

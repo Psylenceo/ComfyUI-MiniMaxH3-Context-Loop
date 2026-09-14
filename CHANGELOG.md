@@ -4,6 +4,12 @@ Newest first. This file keeps release history out of the onboarding README.
 
 ## Unreleased — Deferred checkpoint upscaling
 
+- Add #66's opt-in Assemble checkpoint cleanup (off by default). After a
+  completed export and requested copies are safely saved, delete only its
+  unshared checkpoint payloads; retain videos, prompts and metadata. Skip
+  partial exports, preserve checkpoints on export failure, and report freed
+  space. No cleanup inspection runs during workflow loading or previews.
+
 - Fix #53's Tagged Source Audio lip-sync example: connect Audio VAE to Apply
   Scene Context and allow explicit soundtrack tags with a locked source target.
   Preserve scene-window slicing, track identity checks, and the locked audio policy.
