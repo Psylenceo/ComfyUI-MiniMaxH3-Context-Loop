@@ -305,8 +305,11 @@ output/h3_chains/<run_name>/chapters/02_<chapter_id>/
 If a branch ends with an empty next-scene slot and saved candidates
 exist elsewhere, the graph displays **Reuse saved clip**. Click it to preview
 the available candidates and choose **Attach selected candidate**. This is
-offered only when the candidate consumes neither predecessor video context nor
-generated-audio continuity. The manager creates a new immutable lineage record
+offered when the candidate uses no saved context, or every saved picture/audio
+context source is unchanged on the target path. This includes a reused take
+that still shares its original checkpoint: attaching it does not invalidate
+later scenes that used it. Changed, missing or unverifiable context sources
+remain blocked. The manager creates a new immutable lineage record
 pointing at the chosen parent; the original video, audio, prompt, and checkpoint
 files remain shared and are not regenerated or copied. Shared-file deletion is
 reference-aware, so those files are retained until the last lineage record that

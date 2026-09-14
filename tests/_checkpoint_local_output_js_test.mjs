@@ -376,12 +376,15 @@ assert.ok(!elements(attaching).filter(item=>item.className.split(" ").includes("
     .some(item=>item.children.some(child=>child.textContent === "Reuse for S3")),"Reuse is not nested beneath the previous scene's branch heading");
 const beforeReuse = value(attaching), writesBeforeReuse = mutations;
 byText(attaching, "Reuse for S3").click();
+assert.ok(elements(attaching).some(item => item.textContent.includes(
+    "saved video/audio context sources match this path")), "Reuse explains context-compatible candidates");
 assert.equal(value(attaching),beforeReuse,"Opening reuse choices does not change output");
 assert.equal(mutations,writesBeforeReuse,"Only confirmed reuse can mutate saved branch data");
 assert.equal(byClass(attaching, "h3cm-output-scope").value, "chapter");
 attachResponse = {scene:3, revision:"e".repeat(32), message:"Attached"};
 byText(attaching, "Attach selected candidate").click();
 await settle();
+assert.ok(confirmations.at(-1).includes("saved video/audio context sources match this path"));
 const attachedOutput = JSON.parse(await attaching.widgets[0].serializeValue());
 assert.equal(attachedOutput.output_scope, "chapter");
 assert.equal(attachedOutput.scope_start_scene, 2);
