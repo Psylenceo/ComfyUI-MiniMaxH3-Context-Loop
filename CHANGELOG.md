@@ -4,6 +4,10 @@ Newest first. This file keeps release history out of the onboarding README.
 
 ## Unreleased — Deferred checkpoint upscaling
 
+- Preserve pending or failed editorial-only gap/trim edits in browser recovery
+  across workflow reloads, even when prompts and settings are unchanged. Save
+  scene placements on drop and clear pending recovery after a successful save.
+
 - Keep Checkpoint Manager scroll positions when selecting clips or ALTs and
   refreshing the graph. Long chapters retain their own position when switching
   chapter tabs or collapsing another chapter; zoom and output selections stay unchanged.

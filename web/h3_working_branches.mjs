@@ -239,11 +239,18 @@ export class StudioBranches {
         if (this.busy || !this.ready || this.draftRecovery || this.draftReading) return;
         try {
             const signature = authoringSignature(this.capture());
-            if (signature === this.observedSignature) return;
+            const recovery = this.captureRecovery();
+            const scope = JSON.stringify([this.run, this.selected]);
+            const observed = JSON.stringify([scope, signature, recovery]);
+            if (observed === this.observedSignature) return;
             // Do not retry the same failed write every 500ms. A new edit or an
             // explicit branch action may retry; failures stay visible inline.
-            this.observedSignature = signature;
-            if (signature !== this.savedSignature) await this.preserveDraft();
+            this.observedSignature = observed;
+            // Gaps/trims are editorial-only: their Plan signature is unchanged.
+            // Also retire the pending recovery once its server save completes.
+            const hadRecovery = this.observedRecoveryScope === scope;
+            this.observedRecoveryScope = recovery ? scope : null;
+            if (recovery || hadRecovery || signature !== this.savedSignature) await this.preserveDraft();
         } catch (error) { this.draftStatus = `Draft not saved: ${error.message}`; }
     }
 

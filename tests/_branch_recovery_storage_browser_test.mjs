@@ -9,7 +9,7 @@ import {join} from "node:path";
 
 async function browserTests() {
     const {BranchRecoveryStorage, RECOVERY_BYTE_LIMIT} = await import("/web/h3_branch_recovery_storage.mjs");
-    const {BranchDrafts} = await import("/web/h3_working_branches.mjs");
+    const {BranchDrafts, StudioBranches} = await import("/web/h3_working_branches.mjs");
     const results = [];
     const check = (condition, message) => { if (!condition) throw Error(message); };
     const rejects = async (promise, pattern) => {
@@ -27,6 +27,34 @@ async function browserTests() {
     const store = (options = {}) => new BranchRecoveryStorage({indexedDB, name:crypto.randomUUID(), ...options});
     const close = async storage => (await storage.ready).close();
     check(RECOVERY_BYTE_LIMIT === 64 * 1024 * 1024, "recovery has a finite byte budget");
+
+    // A gap-only edit must survive closing/reopening the recovery database,
+    // even though the saved Plan has not changed at all.
+    const gapDatabase = crypto.randomUUID();
+    const gapStorage = store({name:gapDatabase});
+    const authoring = draft("18446744073709551615").authoring;
+    const pendingGap = {editorial:{value:{placements:[{scene_id:"s1",start_frame:96}]},
+        baseline:{placements:[]},stored:{placements:[]},ready:true}};
+    const gapController = (storage, recovery) => new StudioBranches({
+        drafts:new BranchDrafts(storage,"gap-reload"), capture:()=>structuredClone(authoring),
+        captureRecovery:()=>structuredClone(recovery), apply:async()=>{}, flush:async()=>{}, changed(){},
+        request:async body => {
+            if (body.action === "list") return {branches:[{id:"main",revision:"1"}],default_branch:"main"};
+            check(body.action === "load", "gap recovery never writes a server branch");
+            return {id:"main",revision:"1",authoring:structuredClone(authoring)};
+        },
+    });
+    const editing = gapController(gapStorage,pendingGap);
+    await editing.refresh("run");
+    await editing.observe();
+    await close(gapStorage);
+    const reopenedStorage = store({name:gapDatabase});
+    const reopened = gapController(reopenedStorage,null);
+    await reopened.refresh("run");
+    check(reopened.draftRecovery?.recovery.editorial.value.placements[0].start_frame === 96,
+        "reopened Studio recovers gap-only edits from IndexedDB");
+    await close(reopenedStorage);
+    results.push("gap-only recovery survives workflow/database reopen without prompt/settings edits or server writes");
 
     // Exhaust REAL localStorage as the old node could, without touching the
     // user's origin/profile. Preserve full history, exact uint64 seeds and

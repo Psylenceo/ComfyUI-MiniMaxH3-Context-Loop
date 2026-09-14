@@ -102,7 +102,7 @@ function studioContext() {
         }},
     });
     const names = ["normalizedEditorial", "editorialPayload", "applyEditorialPayload", "syncAlternateTakeWidget", "scheduleEditorialSave",
-        "sceneLocked", "trimForScene", "setSceneTrim", "flushProjectWrites"];
+        "sceneLocked", "trimForScene", "setSceneTrim", "setScenePlacement", "flushProjectWrites"];
     if (studio.includes("function editorialSignature(")) names.push("editorialSignature", "persistEditorial");
     vm.runInContext(names.map(name => handler(studio, name)).join("\n"), context);
     return {context, writes, async flush() {
@@ -118,6 +118,44 @@ const incoming = {
     trims:[{scene:1, scene_id:"scene_b", out_frame:90}], locked_scene_ids:["scene_b"],
     subtitles:{mode:"off", asset_id:"", offset_seconds:0}, alternate_draft:null, replacements:[],
 };
+for (const branchId of ["main", "a".repeat(32)]) {
+    const fixture = studioContext();
+    const {context} = fixture;
+    context.currentBranch = () => branchId;
+    context.state.plan.shots = [{id:"scene_a",prompt:["A"],length:124},
+        {id:"scene_b",prompt:["B"],length:124}];
+    const rows = context.state.plan.shots.map(shot=>({id:shot.id,rawFrames:124,deliveredFrames:124}));
+    context.timing = () => ({shots:rows});
+    const packed = {...incoming,chapters:[],scene_order:rows.map((row,i)=>({scene:i+1,scene_id:row.id})),
+        placements:[],trims:[],locked_scene_ids:[]};
+    context.applyEditorialPayload(packed);
+    const originalPlan = JSON.stringify(context.state.plan);
+    let observations = 0;
+    context.branches.observe = async () => { observations++; };
+    context.setScenePlacement(1,200);
+    assert.ok(observations>0, "a gap drop captures recovery without waiting for a form event or polling");
+    context.applyEditorialPayload(packed);
+    assert.equal(context.state.editorial.placements[0].start_frame,200,"an older GET cannot erase the pending gap");
+    await fixture.flush();
+    assert.equal(fixture.writes.length,1,"placement drop sends one editorial save");
+    assert.equal(fixture.writes[0].branch_id,branchId,"gap saves remain scoped to the active branch");
+    assert.ok(observations>1,"save completion updates local recovery immediately");
+    assert.equal(JSON.stringify(context.state.plan),originalPlan,"black gaps do not edit generation settings or prompts");
+    const saved = {...fixture.writes[0],revision:"c".repeat(32)};
+    // Fresh Studio state, as on a workflow reload, rehydrates the saved cut.
+    const reopened = studioContext();
+    reopened.context.currentBranch = () => branchId;
+    reopened.context.state.plan = JSON.parse(originalPlan);
+    reopened.context.applyEditorialPayload(JSON.parse(JSON.stringify(saved)));
+    const segments = studioCore.studioTimelineSegments(rows,reopened.context.state.editorial.placements);
+    const gap = segments.find(segment=>segment.kind==="gap");
+    assert.equal(gap.startFrame,124);
+    assert.equal(gap.durationFrames,76,"the exact between-scene gap survives a fresh Studio reload");
+    assert.equal(segments.at(-1).startFrame,200);
+    assert.equal(reopened.writes.length,0,"reloading a saved gap is read-only");
+    context.setScenePlacement(1,null); await fixture.flush();
+    assert.deepEqual(fixture.writes[1].placements,[],"packing the scene again still removes its gap");
+}
 {
     const fixture = studioContext();
     fixture.context.state.plan.shots[0].id = "scene_b";

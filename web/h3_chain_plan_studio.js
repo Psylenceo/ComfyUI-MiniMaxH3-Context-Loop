@@ -1,7 +1,7 @@
 import {app} from "/scripts/app.js";
 import {api} from "/scripts/api.js";
 import {coalescedRefresh} from "./h3_coalesced_refresh.mjs";
-import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId} from "./h3_working_branches.mjs?v=0.7.23";
+import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId} from "./h3_working_branches.mjs?v=0.7.24";
 import {browserBranchRecoveryStorage} from "./h3_branch_recovery_storage.mjs?v=0.7.23";
 import {branchPolicyNodes, captureBranchPolicyInputs, restoreBranchPolicyInputs} from "./h3_plan_restore_core.mjs?v=0.7.19";
 import {
@@ -1334,7 +1334,8 @@ function mount(node) {
                 start_frame:requestedStart,
             });
         }
-        scheduleEditorialSave();
+        // Placement is committed once on drop/change, not on every pointermove.
+        scheduleEditorialSave(0);
         renderShell();
         if (state.sourcePreview?.source_audio?.available) {
             void loadSourceWaveform(state.sourcePreview);
@@ -1585,7 +1586,10 @@ function mount(node) {
         } finally {
             if (state.editorialSavePromise === request) {
                 state.editorialSavePromise = null;
-                if (!state.disposed && state.editorial === binding) renderStatus();
+                if (!state.disposed && state.editorial === binding) {
+                    void branches?.observe?.();
+                    renderStatus();
+                }
             }
         }
     }
@@ -1638,6 +1642,7 @@ function mount(node) {
             state.editorialTimer = null; state.editorialPending = null;
             state.lastEditorialSignature = "";
             state.editorialSaveError = blocked;
+            void branches?.observe?.();
             renderStatus();
             return;
         }
@@ -1646,6 +1651,9 @@ function mount(node) {
         if (state.editorialTimer != null) clearTimeout(state.editorialTimer);
         if (!payload.run_name) return;
         state.editorialPending = {payload, signature};
+        // A pointer drop does not emit a form input/change event. Persist its
+        // recovery now instead of waiting for the next background observation.
+        void branches?.observe?.();
         state.editorialTimer = setTimeout(() => {
             state.editorialTimer = null;
             const pending = state.editorialPending;

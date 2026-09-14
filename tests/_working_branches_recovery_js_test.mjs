@@ -122,6 +122,41 @@ function fixture({live = authoring("18446744073709551614"), storage = memoryStor
     assert.equal(context.result.branchDrafts.storage,backend);
     assert.equal(context.result.branchDrafts.client,'existing-client','keep the existing recovery namespace');
 }
+// Moving a clip changes the editorial cut, not the Plan's authoring signature.
+// A pending/failed gap save must still be recoverable after a workflow reload.
+for (const selected of ['main', id]) {
+    const storage = memoryStorage();
+    const live = authoring(selected === 'main' ? '18446744073709551614' : '2');
+    const t = fixture({storage, live});
+    t.controller.selected = selected;
+    await t.controller.refresh('demo');
+    await t.controller.observe();
+    const cut = {editorial:{value:{placements:[{scene_id:'one',start_frame:48}]},
+        baseline:{placements:[]},stored:{placements:[]},ready:true}};
+    let recovery = cut;
+    t.controller.captureRecovery = () => structuredClone(recovery);
+    await t.controller.observe();
+    assert.deepEqual((await t.drafts.read('demo',selected))?.recovery, cut,
+        'editorial-only gap edits must be persisted even when prompt/settings did not change');
+    cut.editorial.value.placements[0].start_frame = 96;
+    await t.controller.observe();
+    assert.equal((await t.drafts.read('demo',selected)).recovery.editorial.value.placements[0].start_frame,96,
+        'another placement edit updates recovery without a Plan edit');
+    const reopened = fixture({storage, live});
+    reopened.controller.selected = selected;
+    await reopened.controller.refresh('demo');
+    assert.deepEqual(reopened.controller.draftRecovery?.recovery,cut,
+        'workflow reload offers the latest unsaved gap instead of losing it');
+    assert.deepEqual(t.events,['list','load'], 'recovery never writes or activates a server branch');
+    recovery = null; // The editorial POST succeeded; the server now owns the cut.
+    await t.controller.observe();
+    const savedReload = fixture({storage, live});
+    savedReload.controller.selected = selected;
+    await savedReload.controller.refresh('demo');
+    assert.equal(savedReload.controller.draftRecovery,null,
+        'a completed cut save must not leave a false recovery warning on reload');
+}
+
 async function delayedLoad(t) {
     const original=t.controller.request;
     let finish, started;
