@@ -84,6 +84,11 @@ checkpoint history; changing it starts a separate run.
 Use the visual Scene Plan or Scene Prompt Editor for normal work. Raw Plan JSON
 is an import/export and advanced-editing surface.
 
+In both the original and Modern Plan, use the triangle beside a scene to
+collapse its controls, or **Collapse all / Expand all** above the scene list.
+The scene name and timing stay visible. Collapsed state is saved with the
+workflow; it does not change prompts, seeds, or generation settings.
+
 ### Continuity and audio
 
 For a new graph, connect **Generation Profile** to Plan and begin with:
