@@ -1622,9 +1622,11 @@ function mount(node) {
         payload.run_name = local.run_name;
         // Do not turn a GET (or a seed/prompt-only edit) into a project write.
         if (editorialSignature(payload) === state.lastEditorialSignature) return;
-        if (state.editorialUnusedSceneIds?.length) {
-            payload.scene_order = local.scene_order;
-        }
+        // Scene-indexed edits and their ID/number map are one document. The
+        // loaded Plan may already have more scenes than the saved cut, so its
+        // unchanged local baseline alone cannot detect this stale scene_order.
+        // This runs only for an explicit edit; binding/branch guards still apply.
+        payload.scene_order = local.scene_order;
         cacheStudioPresentation([...state.checkpoints.values()], payload);
         const signature = editorialSignature(payload);
         if (signature === state.lastEditorialSignature) return;

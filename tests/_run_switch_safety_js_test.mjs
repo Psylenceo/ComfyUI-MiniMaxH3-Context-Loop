@@ -262,6 +262,44 @@ for (const blocked of [
 }
 assert.doesNotMatch(handler(studio, "loadPlan"), /scheduleEditorialSave\(/);
 
+// The workflow may already contain later scenes when an older editorial
+// document is loaded. They are in the local baseline, but NOT in scene_order
+// on disk: a field-diff alone can send new placements with the old order.
+for (const branchId of ["main", "a".repeat(32)]) {
+    const fixture = studioContext();
+    const {context} = fixture;
+    context.currentBranch = () => branchId;
+    context.state.plan.shots = [{id:"scene_a",prompt:["A"],length:124},
+        {id:"scene_b",prompt:["B"],length:124}];
+    context.timing = () => ({shots:context.state.plan.shots.map(shot=>({
+        id:shot.id,rawFrames:124,deliveredFrames:124}))});
+    const saved = {...incoming,chapters:[{id:"one",title:"Keep saved chapter",start_scene:1,start_scene_id:"scene_a"}],
+        scene_order:[{scene:1,scene_id:"scene_a"}],
+        placements:[{scene:1,scene_id:"scene_a",start_frame:24}],trims:[],locked_scene_ids:[]};
+    const original = JSON.stringify(saved);
+    context.applyEditorialPayload(saved);
+    context.scheduleEditorialSave(); await fixture.flush();
+    assert.equal(fixture.writes.length,0,"merely loading a longer Plan must not rewrite editorial data");
+    context.setScenePlacement(1,200); await fixture.flush();
+    const written = fixture.writes[0];
+    assert.equal(written.branch_id,branchId);
+    assert.deepEqual(written.scene_order,[{scene:1,scene_id:"scene_a"},{scene:2,scene_id:"scene_b"}],
+        "new placement and its scene must be saved together even if the Plan did not change after hydration");
+    for (const [index,placement] of written.placements.entries()) {
+        assert.ok(written.scene_order.some(row=>row.scene_id===placement.scene_id && row.scene===placement.scene),
+            `Editorial placement ${index+1} must target a scene in scene_order`);
+    }
+    assert.deepEqual(written.placements,[{scene:1,scene_id:"scene_a",start_frame:24},
+        {scene:2,scene_id:"scene_b",start_frame:200}]);
+    assert.deepEqual(written.chapters,saved.chapters,"gap saving retains untouched saved chapter notes");
+    assert.equal(JSON.stringify(saved),original,"the fetched editorial document is never mutated");
+    const reopened = studioContext();
+    reopened.context.state.plan = structuredClone(context.state.plan);
+    reopened.context.applyEditorialPayload({...written,revision:"c".repeat(32)});
+    assert.equal(reopened.context.state.editorial.placements[1].start_frame,200,
+        "reload retains the later-scene gap");
+}
+
 // A removed/renamed empty placeholder is not evidence of a different Run.
 // Only a fresh backend inventory may establish that it has no saved renders.
 const placeholderEditorial = {

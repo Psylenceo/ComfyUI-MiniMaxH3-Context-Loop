@@ -4,6 +4,10 @@ Newest first. This file keeps release history out of the onboarding README.
 
 ## Unreleased — Deferred checkpoint upscaling
 
+- Fix editorial saves rejecting gaps on newer scenes with "placement must
+  target a scene in scene_order". Save the current scene map with explicit cut
+  edits while preserving untouched chapter data and existing branch safeguards.
+
 - Preserve pending or failed editorial-only gap/trim edits in browser recovery
   across workflow reloads, even when prompts and settings are unchanged. Save
   scene placements on drop and clear pending recovery after a successful save.

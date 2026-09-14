@@ -78,6 +78,36 @@ async def check():
         checkpoints.mkdir(parents=True)
         reviews.mkdir(parents=True)
 
+        # A later scene can exist in the workflow before the older cut's
+        # scene_order is updated. A failed gap save must preserve the old cut;
+        # retrying with the complete scene map must round-trip the second gap.
+        gap_saved = chain._save_run_editorial_document({
+            "run_name": "gap_reload",
+            "scene_order": [{"scene": 1, "scene_id": "scene_a"}],
+            "placements": [{"scene": 1, "scene_id": "scene_a", "start_frame": 24}],
+        })
+        gap_edit = {
+            **gap_saved, "base_revision": gap_saved["revision"],
+            "placements": [*gap_saved["placements"],
+                           {"scene": 2, "scene_id": "scene_b", "start_frame": 200}],
+        }
+        try:
+            chain._save_run_editorial_document(gap_edit)
+        except ValueError as exc:
+            assert str(exc) == "Editorial placement 2 must target a scene in scene_order."
+        else:
+            raise AssertionError("An unknown gap scene was silently accepted")
+        assert chain._load_run_editorial("gap_reload") == gap_saved
+        gap_edit["scene_order"] = [
+            {"scene": 1, "scene_id": "scene_a"},
+            {"scene": 2, "scene_id": "scene_b"},
+        ]
+        gap_retry = chain._save_run_editorial_document(gap_edit)
+        assert gap_retry["revision"] != gap_saved["revision"]
+        reloaded_gap = chain._saved_checkpoint_listing("gap_reload", False)["editorial"]
+        assert reloaded_gap["scene_order"] == gap_edit["scene_order"]
+        assert reloaded_gap["placements"] == gap_edit["placements"]
+
         try:
             chain._confined_media_path(
                 "/etc/hosts", "unsafe Plan Studio media")
