@@ -3416,10 +3416,16 @@ def _tagged_audio_reference_value(
             "in Current Shot state." %
             (int(length), int(scene), current.get("raw_frames")))
     compatibility = plan.get("compatibility")
+    # A prompt-selected reference to the locked soundtrack is still valid.
+    # Lip-sync disables automatic loose reference/carry, not explicit @tags;
+    # Chain Context continues to encode and protect the source target. Keep
+    # the same-track and exact-window checks below for both policies.
     if (not isinstance(compatibility, dict) or
-            not _audio_policy_uses_source_reference(plan, current)):
+            not (_audio_policy_uses_source_reference(plan, current) or
+                 _audio_policy_locks_source_audio(plan, current))):
         raise ValueError(
             "Tagged audio @%s source_timeline requires Source reference=on "
+            "or Lock source audio (Lip-sync to source audio) "
             "in this scene's effective audio policy." %
             entry.get("tag", "audio"))
     expected_hash = str(compatibility.get("source_audio_hash") or "")

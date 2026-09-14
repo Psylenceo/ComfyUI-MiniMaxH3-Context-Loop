@@ -367,6 +367,13 @@ def validate_independent_source_audio() -> None:
     assert reference["widgets_values"][1] == "source_timeline"
     assert origin(workflow, conditioner, "state") == current
     assert origin(workflow, conditioner, "references") == reference
+    context = one(workflow, "MiniMaxH3ChainContext")
+    assert origin(workflow, context, "audio_vae") == origin(
+        workflow, conditioner, "audio_vae"), "Lip-sync context needs the audio VAE"
+    recipe = load(ROOT / "tools" / "v06" / "recipes" /
+                  "Ref2V Tagged Source Audio - MiniMax H3 0.6.json")
+    assert one(recipe, "MiniMaxH3ChainContext")["inputs"]["audio_vae"] == (
+        one(recipe, "MiniMaxH3TaggedReferenceToVideo")["inputs"]["audio_vae"])
     assert origin(workflow, plan, "generation_fingerprint") == reference
     for kind in ("MiniMaxH3ChainPreflight", "MiniMaxH3ChainLoopStart"):
         target = one(workflow, kind)

@@ -3,6 +3,12 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
+## Unreleased
+
+- Fix #53's Tagged Source Audio lip-sync example: connect Audio VAE to Apply
+  Scene Context and allow explicit soundtrack tags with a locked source target.
+  Preserve scene-window slicing, track identity checks, and the locked audio policy.
+
 ## v0.6.9 — Plan controls, workflow loading and save durability
 
 - Coalesce repeated Plan editor and Studio refreshes during workflow restore,
