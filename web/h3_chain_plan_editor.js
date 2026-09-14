@@ -174,7 +174,7 @@ function injectStyles() {
         .h3c-label { display: block; margin-bottom: 4px; color: var(--h3c-muted); font-weight: 650; }
         .h3c-help { margin-top: 4px; color: var(--h3c-muted); }
         .h3c-prefix { min-height: 88px; }
-        .h3c-toolbar { position: sticky; top: -10px; z-index: 4; padding: 7px 0; background: var(--h3c-bg); }
+        .h3c-toolbar { position: sticky; top: -10px; z-index: 4; padding: 7px 0; background: var(--h3c-bg); flex-wrap: wrap; }
         .h3c-toolbar .h3c-spacer { flex: 1; }
         .h3c-card {
             --h3c-scene-color: var(--h3c-accent);
@@ -190,6 +190,9 @@ function injectStyles() {
         .h3c-card.h3c-invalid { border-left-color: #ff6b72; }
         .h3c-card.h3c-drag-over { outline: 2px solid var(--h3c-accent); }
         .h3c-card-head { margin-bottom: 7px; }
+        .h3c-card.h3c-collapsed .h3c-card-head { margin-bottom: 0; }
+        .h3c-card-body[hidden] { display: none; }
+        .h3c-collapse { flex: none; width: 25px; padding: 4px !important; }
         .h3c-drag { cursor: grab; user-select: none; padding: 4px 3px; color: var(--h3c-muted); }
         .h3c-index { min-width: 58px; font-weight: 700; }
         .h3c-color {
@@ -451,6 +454,10 @@ function planLayout(node) {
             || Array.isArray(layout.promptHeights)) {
         layout.promptHeights = {};
     }
+    if (!layout.collapsedScenes || typeof layout.collapsedScenes !== "object"
+            || Array.isArray(layout.collapsedScenes)) {
+        layout.collapsedScenes = {};
+    }
     return layout;
 }
 
@@ -551,6 +558,7 @@ function mountEditor(node) {
         draggedIndex: null,
         resizeObservers: [],
         seedRefreshers: [],
+        collapseRefreshers: [],
     };
     node._h3ChainEditor = state;
 
@@ -575,6 +583,16 @@ function mountEditor(node) {
         layout.jsonOpen = state.jsonOpen;
         layout.settingsOpen = state.settingsOpen;
         graphDirty();
+    }
+
+    function setScenesCollapsed(collapsed) {
+        const collapsedScenes = {};
+        if (collapsed) state.plan.shots.forEach((shot, index) => {
+            collapsedScenes[sceneColorKey(shot, index)] = true;
+        });
+        node.properties[LAYOUT_PROPERTY] = {...planLayout(node), collapsedScenes};
+        state.collapseRefreshers.forEach(refresh => refresh());
+        graphDirty(); // UI only: never syncPlan, rerender cards, or refresh seeds.
     }
 
     function disconnectResizeObservers() {
@@ -826,6 +844,29 @@ function mountEditor(node) {
         });
 
         const head = element("div", "h3c-card-head");
+        const body = element("div", "h3c-card-body");
+        const collapse = button("", "", () => {
+            const layout = planLayout(node);
+            const key = sceneColorKey(shot, index);
+            const collapsedScenes = {...layout.collapsedScenes};
+            if (collapsedScenes[key] === true) delete collapsedScenes[key];
+            else collapsedScenes[key] = true;
+            node.properties[LAYOUT_PROPERTY] = {...layout, collapsedScenes};
+            refreshCollapsed();
+            graphDirty();
+        });
+        collapse.classList.add("h3c-collapse");
+        function refreshCollapsed() {
+            const collapsed = planLayout(node).collapsedScenes[sceneColorKey(shot, index)] === true;
+            body.hidden = collapsed;
+            card.classList.toggle("h3c-collapsed", collapsed);
+            collapse.textContent = collapsed ? "▸" : "▾";
+            collapse.title = collapsed ? "Expand scene" : "Collapse scene";
+            collapse.setAttribute("aria-label", `${collapse.title} ${index + 1}`);
+            collapse.setAttribute("aria-expanded", String(!collapsed));
+        }
+        state.collapseRefreshers.push(refreshCollapsed);
+        refreshCollapsed();
         const drag = element("span", "h3c-drag", "⠿");
         drag.title = "Drag to reorder";
         drag.draggable = true;
@@ -882,6 +923,11 @@ function mountEditor(node) {
                 node.properties[SCENE_COLOR_PROPERTY] = {...colors};
             }
             const heights = planLayout(node).promptHeights;
+            const collapsedScenes = planLayout(node).collapsedScenes;
+            if (previousKey !== nextKey && collapsedScenes[previousKey] === true) {
+                collapsedScenes[nextKey] = true;
+                delete collapsedScenes[previousKey];
+            }
             const previousPromptKey = `scene:${previousKey}`;
             const nextPromptKey = `scene:${nextKey}`;
             if (previousPromptKey !== nextPromptKey && heights[previousPromptKey]) {
@@ -914,12 +960,13 @@ function mountEditor(node) {
             if (state.plan.shots.length <= 1) return;
             if (!window.confirm(`Delete scene ${index + 1}?`)) return;
             saveSceneColor(sceneColorKey(shot, index), null);
+            delete planLayout(node).collapsedScenes[sceneColorKey(shot, index)];
             removePlanShot(state.plan, index);
             syncPlan();
             render();
         });
         remove.disabled = state.plan.shots.length <= 1;
-        head.append(drag, color, ordinal, id, timingLabel, up, down, copy, remove);
+        head.append(collapse, drag, color, ordinal, id, timingLabel, up, down, copy, remove);
 
         const lengthRow = element("div", "h3c-length-row");
         const mode = element("select");
@@ -1603,8 +1650,7 @@ function mountEditor(node) {
             field("Advanced implementation", continuation),
             field("Boundary spatial proxy", spatialProxy),
         );
-        card.append(
-            head,
+        body.append(
             lengthRow,
             field("Scene prompt (optional with shared prompt)", prompt),
             promptTools(prompt, index + 1),
@@ -1616,6 +1662,7 @@ function mountEditor(node) {
             audioFields,
             advanced,
         );
+        card.append(head, body);
         return card;
     }
 
@@ -1799,6 +1846,7 @@ function mountEditor(node) {
         if (!state.plan) return;
         disconnectResizeObservers();
         state.seedRefreshers = [];
+        state.collapseRefreshers = [];
         const scrollTop = root.scrollTop;
         root.replaceChildren();
         root.classList.toggle("h3c-show-advanced", state.advanced);
@@ -1913,7 +1961,9 @@ function mountEditor(node) {
             savePanelState();
             render();
         });
-        toolbar.append(add, advanced, element("span", "h3c-spacer"), json);
+        const collapseAll = button("Collapse all", "Collapse all scene cards", () => setScenesCollapsed(true));
+        const expandAll = button("Expand all", "Expand all scene cards", () => setScenesCollapsed(false));
+        toolbar.append(add, advanced, collapseAll, expandAll, element("span", "h3c-spacer"), json);
 
         const errors = element("div", "h3c-errors");
         const cards = element("div", "h3c-cards");
