@@ -7,8 +7,9 @@ import {pathToFileURL} from "node:url";
 import {spawnSync} from "node:child_process";
 
 const read = name => readFileSync(new URL("../web/" + name, import.meta.url), "utf8");
-const modules = ["h3_checkpoint_manager_core.mjs", "h3_working_branches.mjs", "h3_checkpoint_graph.mjs", "h3_storage_inspector.mjs"]
-    .map(name => read(name).replace(/^export /gm, "")).join("\n");
+const modules = ["h3_chain_plan_core.mjs", "h3_checkpoint_manager_core.mjs", "h3_working_branches.mjs", "h3_checkpoint_graph.mjs", "h3_storage_inspector.mjs"]
+    .map(name => read(name).replace(/^import\s[\s\S]*?from\s+"[^"]+";\n/gm, "")
+        .replace(/^export /gm, "")).join("\n");
 const extension = read("h3_chain_checkpoint_manager.js")
     .replace(/^import\s[\s\S]*?from\s+"[^"]+";\n/gm, "");
 if (!process.argv.includes("--browser")) {
@@ -25,7 +26,7 @@ writeFileSync(file, html);
 const run = spawnSync(process.env.H3_TEST_BROWSER || "/opt/google/chrome/chrome", [
     "--headless", "--disable-gpu", "--no-first-run", "--disable-background-networking",
     "--disable-component-update", "--disable-sync", "--host-resolver-rules=MAP * ~NOTFOUND",
-    "--user-data-dir=" + join(out, "profile"), "--virtual-time-budget=2500", "--window-size=1900,1100",
+    "--user-data-dir=" + join(out, "profile"), "--virtual-time-budget=4000", "--window-size=1900,1100",
     "--screenshot=" + join(out, "checkpoint-manager.png"), "--dump-dom", pathToFileURL(file).href,
 ], {encoding:"utf8",timeout:25000,maxBuffer:2 * 1024 * 1024});
 assert.equal(run.status,0,run.error?.message || run.stderr);
@@ -93,7 +94,13 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         const root = document.querySelector(".h3cm-root");
         const card = [...root.querySelectorAll("button")].find(item=>item.textContent.startsWith("S7 · 77777777"));
         check(Boolean(card),"Seven-scene saved path renders");
+        const initialViewport = root.querySelector(".h3cm-fork-scroll");
+        initialViewport.scrollLeft = initialViewport.scrollWidth;
+        const initialScroll = initialViewport.scrollLeft;
+        check(initialScroll > 0, "Saved path overflows horizontally before selecting its last clip");
         card.click(); await new Promise(resolve=>setTimeout(resolve,100));
+        check(root.querySelector(".h3cm-fork-scroll").scrollLeft === initialScroll,
+            "Selecting a clip preserves horizontal scroll without chapter metadata");
         const action = [...root.querySelectorAll("button")].find(item=>item.textContent === "Assign path to Original");
         check(Boolean(action && !action.disabled),"Original assignment is enabled for the saved 960x544 path");
         check(!root.querySelector(".h3cm-fork-slot"),"Blocked-only fake slot is absent");
@@ -241,6 +248,66 @@ async function browserChecks(extensionSource, keepStorageOpen) {
             document.getElementById("host").style.width=width+"px";
             check(root.scrollWidth<=root.clientWidth+1,`Final-cut control has no root overflow at ${width}px`);
         }
+        // A long second chapter must not jump to scene 8 whenever a take is clicked.
+        const long = Array.from({length:21}, (_,i)=>({scene:i+8,scene_id:`scene_${i+8}`,
+            revision:(i+100).toString(16).padStart(32,"0"), ready:true,active:false,
+            compatibility:{width:960,height:544},created_at:"2026-09-12T10:00:00Z",
+            ...(i ? {parent:{scene:i+7,revision:(i+99).toString(16).padStart(32,"0")}} : {})}));
+        const lateAlt = {...long.at(-1),revision:"f".repeat(32),take_kind:"editorial_alternate",
+            alternate_of_revision:long.at(-1).revision};
+        long.at(-1).alternates = [lateAlt];
+        payload.revisions.push(...long,lateAlt);
+        payload.scenes.push(...long.map(item=>({scene:item.scene,scene_id:item.scene_id,revision_count:1})));
+        payload.branches.push({active:false,path:long});
+        payload.editorial = {chapters:[{id:"one",title:"Chapter 1",start_scene:1},
+            {id:"two",title:"Chapter 2",start_scene:8}]};
+        node._h3CheckpointManagerRefresh(); await new Promise(resolve=>setTimeout(resolve,100));
+        const viewports = () => [...root.querySelectorAll(".h3cm-fork-scroll")];
+        const chapter = title => [...root.querySelectorAll(".h3cm-chapter-tab")]
+            .find(item=>item.textContent===title).click();
+        const toggleChapterOne = () => [...root.querySelectorAll(".h3cm-branch-chapter-title")]
+            .find(item=>item.textContent.includes("Chapter 1")).click();
+        viewports()[0].scrollLeft = 120;
+        viewports()[1].scrollLeft = viewports()[1].scrollWidth;
+        const chapterOneScroll = viewports()[0].scrollLeft;
+        const chapterTwoScroll = viewports()[1].scrollLeft;
+        check(chapterTwoScroll > 3000, "Chapter 2 fixture needs substantial horizontal scrolling");
+        const sceneStrip = root.querySelector(".h3cm-scenes");
+        sceneStrip.scrollLeft = sceneStrip.scrollWidth;
+        const sceneStripScroll = sceneStrip.scrollLeft;
+        check(sceneStripScroll > 0, "Long chapter also overflows the scene selector strip");
+        const lateCard = () => root.querySelector('.h3cm-fork-node[data-graph-key="28:'
+            + long.at(-1).revision + '"] .h3cm-revision');
+        lateCard().click(); await new Promise(resolve=>setTimeout(resolve,40));
+        check(viewports()[0].scrollLeft === chapterOneScroll && viewports()[1].scrollLeft === chapterTwoScroll,
+            "Clicking a late Chapter 2 clip preserves both chapter viewports independently");
+        check(lateCard().classList.contains("h3cm-revision-selected"), "Scrolled-to clip is still selected normally");
+        sceneStrip.querySelector(".h3cm-scene:last-child").click();
+        check(sceneStrip.scrollLeft === sceneStripScroll && viewports()[1].scrollLeft === chapterTwoScroll,
+            "Selecting from the scrolled scene strip preserves both the strip and graph positions");
+        root.querySelectorAll(".h3cm-alternate")[1].click();
+        check(viewports()[1].scrollLeft === chapterTwoScroll, "Selecting a late ALT preserves the graph position");
+        node._h3CheckpointManagerRefresh(); await new Promise(resolve=>setTimeout(resolve,100));
+        check(viewports()[1].scrollLeft === chapterTwoScroll, "Checkpoint refresh preserves the scrolled chapter");
+        toggleChapterOne();
+        check(viewports().length === 1 && viewports()[0].scrollLeft === chapterTwoScroll,
+            "Collapsing Chapter 1 does not transfer its scroll position to Chapter 2");
+        toggleChapterOne();
+        check(viewports()[0].scrollLeft === chapterOneScroll && viewports()[1].scrollLeft === chapterTwoScroll,
+            "Expanding a chapter restores its own position without moving the other chapter");
+        chapter("Chapter 2");
+        check(viewports().length === 1 && viewports()[0].scrollLeft === Math.min(
+            chapterTwoScroll, viewports()[0].scrollWidth - viewports()[0].clientWidth),
+            "Chapter 2 tab retains its position, clamped to the wider viewport without chapter borders");
+        chapter("Chapter 1");
+        check(viewports()[0].scrollLeft === chapterOneScroll, "Chapter tabs retain separate scroll positions");
+        chapter("Chapter 2");
+        await setZoom(125);
+        viewports()[0].scrollLeft = viewports()[0].scrollWidth;
+        const zoomedScroll = viewports()[0].scrollLeft;
+        lateCard().click();
+        check(viewports()[0].scrollLeft === zoomedScroll, "Clip selection preserves scroll with graph zoom applied");
+        check(node.widgets[0].value === output, "Scrolling, browsing chapters and previewing takes never change output selection");
         const host = document.getElementById("host"); host.style.width="1850px";host.style.height="1040px";
         root.querySelector(".h3cm-main").style.gridTemplateColumns="minmax(0,1fr)";
         root.querySelector(".h3cm-detail").style.display="none";

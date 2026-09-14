@@ -212,7 +212,7 @@ assert.match(source, /h3_checkpoint_manager_collapsed_chapters/);
 assert.match(source, /function setChapterCollapsed/);
 assert.match(source, /heading\.setAttribute\("aria-expanded", String\(!collapsed\)\)/);
 assert.match(source, /body\.hidden = collapsed/);
-assert.match(source, /if \(!collapsed\) renderBranchRows\(body, rows, order\)/);
+assert.match(source, /if \(!collapsed\) renderBranchRows\(body, rows, order, range.id\)/);
 assert.match(source, /function chapterRanges/);
 assert.match(source, /function selectedChapterRange\(\)/);
 assert.match(source, /All scenes/);

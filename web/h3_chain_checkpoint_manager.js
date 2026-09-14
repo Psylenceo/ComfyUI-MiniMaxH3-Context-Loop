@@ -368,7 +368,7 @@ function mount(node) {
                 ? node.properties[COLLAPSED_CHAPTERS_PROPERTY].map(String) : [],
         ),
         previewHeight:previewHeight(node.properties[PREVIEW_HEIGHT_PROPERTY]),
-        graphZoom:graphZoom(node.properties[GRAPH_ZOOM_PROPERTY]), graphViews:[],
+        graphZoom:graphZoom(node.properties[GRAPH_ZOOM_PROPERTY]), graphViews:[], graphScroll:new Map(),
         selected:null, outputTip:null, previewTip:null, deletion:null, busy:false, requestToken:0,
         initialRefresh:true, attribution:null, attributionButton:null,
         workingBranches:[], defaultWorkingBranch:"main", graphCleanups:[], planMarkerSignature:"",
@@ -1161,6 +1161,7 @@ function mount(node) {
     }
 
     function renderScenes() {
+        const scrollLeft = scenes.scrollLeft;
         scenes.replaceChildren();
         for (const scene of state.payload?.scenes ?? []) {
             if (!sceneVisible(scene.scene)) continue;
@@ -1176,6 +1177,7 @@ function mount(node) {
             if (Number(scene.scene) === Number(state.scene)) item.classList.add("h3cm-scene-selected");
             scenes.append(item);
         }
+        scenes.scrollLeft = scrollLeft;
     }
 
     function appendSaveOrder(card, record, order) {
@@ -1188,7 +1190,7 @@ function mount(node) {
             + "\nOrder is per scene among available saved takes, not branch order; equal timestamps are tied.";
     }
 
-    function renderBranchRows(container, rows, order) {
+    function renderBranchRows(container, rows, order, chapterId = "all") {
         const original = state.stage === "original";
         const model = checkpointForkGraph(rows.map(row => row.attribution_slot && !sceneVisible(row.attribution_slot.scene)
             ? {...row, attribution_slot:null} : row), state.stage);
@@ -1343,7 +1345,8 @@ function mount(node) {
             cell.append(empty); graph.append(cell); cards.set(item.key, empty);
         }
         scroll.append(graph); container.append(scroll);
-        state.graphViews.push({graph, scroll});
+        const key = JSON.stringify([state.runName, selectedWorkingBranch(), state.stage, chapterId]);
+        state.graphViews.push({graph, scroll, key});
         updateGraphZoomControls();
         state.graphCleanups.push(mountCheckpointGraphEdges(graph, model, cards, output, document, window));
     }
@@ -1364,6 +1367,23 @@ function mount(node) {
     }
 
     function renderBranches() {
+        // Selection and metadata refreshes rebuild these elements. Remember each
+        // chapter by identity, not DOM order (other chapters may be collapsed).
+        for (const {key, scroll} of state.graphViews) {
+            state.graphScroll.set(key, {left:scroll.scrollLeft, top:scroll.scrollTop});
+        }
+        const panelScrollTop = branchesPanel.scrollTop;
+        const restoreScroll = () => {
+            // Chapter graphs must be attached before the browser can scroll them.
+            for (const {key, scroll} of state.graphViews) {
+                const position = state.graphScroll.get(key);
+                if (position) {
+                    scroll.scrollLeft = position.left;
+                    scroll.scrollTop = position.top;
+                }
+            }
+            branchesPanel.scrollTop = panelScrollTop;
+        };
         for (const cleanup of state.graphCleanups) cleanup();
         state.graphCleanups = [];
         renderPlanContext();
@@ -1382,6 +1402,7 @@ function mount(node) {
             else branches.append(element(
                 "div", "h3cm-muted", "No versioned checkpoints were found.",
             ));
+            restoreScroll();
             return;
         }
         const visibleRanges = state.chapterTab === "all"
@@ -1411,10 +1432,10 @@ function mount(node) {
                 );
                 const body = element("div", "h3cm-branch-chapter-body");
                 body.hidden = collapsed;
-                if (!collapsed) renderBranchRows(body, rows, order);
+                if (!collapsed) renderBranchRows(body, rows, order, range.id);
                 section.append(heading, body);
                 branches.append(section);
-            } else renderBranchRows(branches, rows, order);
+            } else renderBranchRows(branches, rows, order, range.id);
             rendered += rows.length;
         }
         if (!rendered) {
@@ -1422,6 +1443,7 @@ function mount(node) {
                 "div", "h3cm-muted", "No versioned checkpoints were found in this chapter.",
             ));
         }
+        restoreScroll();
     }
 
     function addInspector(label, value) {

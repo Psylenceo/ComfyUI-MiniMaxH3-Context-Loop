@@ -4,6 +4,10 @@ Newest first. This file keeps release history out of the onboarding README.
 
 ## Unreleased — Deferred checkpoint upscaling
 
+- Keep Checkpoint Manager scroll positions when selecting clips or ALTs and
+  refreshing the graph. Long chapters retain their own position when switching
+  chapter tabs or collapsing another chapter; zoom and output selections stay unchanged.
+
 - Add a standalone Review Gate Relay for inspecting live candidate batches
   and sending an explicit selection from another canvas on the same server.
   No wiring, queueing, project takeover or chain-folder scanning is required.
