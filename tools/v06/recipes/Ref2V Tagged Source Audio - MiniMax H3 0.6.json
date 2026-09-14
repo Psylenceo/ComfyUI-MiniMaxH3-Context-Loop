@@ -241,6 +241,10 @@
         "latent": [
           "n18",
           "latent"
+        ],
+        "audio_vae": [
+          "n5",
+          "VAE"
         ]
       },
       "label": "MiniMax H3 Context Loop Context — AUTO CONTEXT — clip 1 bypass / continuation"
@@ -698,7 +702,7 @@
       "key": "source_audio_help",
       "type": "Note",
       "settings": {
-        "text": "INDEPENDENT SOURCE AUDIO — NO CAROUSEL\n\nUpload/select your complete soundtrack in Load Audio. Copy the two supplied courier/greenhouse pictures into ComfyUI/input, or replace the Load Image selections and matching prompt tags. The soundtrack must cover the complete planned timeline; adjust scene lengths to your track.\n\nLoad Audio feeds Source Timeline and Tagged Audio Ref with the same FULL track. Source Timeline feeds both Preflight and Loop Start. Current Scene.state feeds Tagged Ref2VA.state, so source_timeline references resolve the correct window on every scene. Never feed Current Scene.source_audio_slice into Tagged Audio Ref: its fingerprint connection back to the Plan would create a cycle. Leave the legacy source_audio sockets disconnected.\n\nLip-sync to source audio locks the scene's exact source audio and uses the source track in final assembly. The preset alone does not load audio. @soundtrack is available as an optional prompt reference; the supplied picture prompts do not use it. For a voice reference only (not a timed soundtrack), use Tagged Audio Ref timeline_mode=standalone with a generated-audio profile; Source Timeline is not required.\n\nFor an existing Ref2V Tagged workflow, add the same source connections and connect Current Scene.state to Tagged Ref2VA.state."
+        "text": "INDEPENDENT SOURCE AUDIO — NO CAROUSEL\n\nUpload/select your complete soundtrack in Load Audio. Copy the two supplied courier/greenhouse pictures into ComfyUI/input, or replace the Load Image selections and matching prompt tags. The soundtrack must cover the complete planned timeline; adjust scene lengths to your track.\n\nLoad Audio feeds Source Timeline and Tagged Audio Ref with the same FULL track. Source Timeline feeds both Preflight and Loop Start. Current Scene.state feeds Tagged Ref2VA.state, so source_timeline references resolve the correct window on every scene. Never feed Current Scene.source_audio_slice into Tagged Audio Ref: its fingerprint connection back to the Plan would create a cycle. Leave the legacy source_audio sockets disconnected.\n\nLip-sync to source audio locks the scene's exact source audio and uses the source track in final assembly. The preset alone does not load audio. @soundtrack is available as an optional prompt reference; the supplied picture prompts do not use it. For a voice reference only (not a timed soundtrack), use Tagged Audio Ref timeline_mode=standalone with a generated-audio profile; Source Timeline is not required.\n\nThe Audio VAE must feed **both Tagged Ref2VA.audio_vae and Apply Scene Context.audio_vae**. The latter encodes and locks the source audio in the sampler target; the example now includes this connection.\n\nTo mention the soundtrack in a prompt, use the exact registered tag: `@soundtrack` by default, or rename the Tagged Audio Ref to `audio_1` when your prompt uses `@audio_1`. A matching tag supplies that scene's audio window as a native reference while lip-sync keeps the target audio locked. It does not enable automatic loose audio reference or generated-audio continuity. Leaving the tag out of the prompt still allows lip-sync through the locked target.\n\nFor an existing Ref2V Tagged workflow, add the same source connections, connect Current Scene.state to Tagged Ref2VA.state, and connect Audio VAE to Apply Scene Context.audio_vae."
       },
       "inputs": {}
     }

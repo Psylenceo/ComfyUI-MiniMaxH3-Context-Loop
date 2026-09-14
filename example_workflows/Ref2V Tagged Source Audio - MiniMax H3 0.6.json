@@ -2,7 +2,7 @@
   "id": "f22228b4-5519-582b-85ae-46195107f4c5",
   "revision": 0,
   "last_node_id": 36,
-  "last_link_id": 67,
+  "last_link_id": 68,
   "nodes": [
     {
       "id": 1,
@@ -158,7 +158,8 @@
           "type": "VAE",
           "links": [
             10,
-            36
+            36,
+            68
           ]
         }
       ],
@@ -700,7 +701,7 @@
         {
           "name": "audio_vae",
           "type": "VAE",
-          "link": null
+          "link": 68
         },
         {
           "name": "model",
@@ -2588,6 +2589,14 @@
       35,
       1,
       "H3_TAGGED_REFERENCES"
+    ],
+    [
+      68,
+      5,
+      0,
+      12,
+      4,
+      "VAE"
     ]
   ],
   "groups": [

@@ -38,4 +38,8 @@ Load Audio feeds Source Timeline and Tagged Audio Ref with the same FULL track. 
 
 Lip-sync to source audio locks the scene's exact source audio and uses the source track in final assembly. The preset alone does not load audio. @soundtrack is available as an optional prompt reference; the supplied picture prompts do not use it. For a voice reference only (not a timed soundtrack), use Tagged Audio Ref timeline_mode=standalone with a generated-audio profile; Source Timeline is not required.
 
-For an existing Ref2V Tagged workflow, add the same source connections and connect Current Scene.state to Tagged Ref2VA.state.
+The Audio VAE must feed **both Tagged Ref2VA.audio_vae and Apply Scene Context.audio_vae**. The latter encodes and locks the source audio in the sampler target; the example now includes this connection.
+
+To mention the soundtrack in a prompt, use the exact registered tag: `@soundtrack` by default, or rename the Tagged Audio Ref to `audio_1` when your prompt uses `@audio_1`. A matching tag supplies that scene's audio window as a native reference while lip-sync keeps the target audio locked. It does not enable automatic loose audio reference or generated-audio continuity. Leaving the tag out of the prompt still allows lip-sync through the locked target.
+
+For an existing Ref2V Tagged workflow, add the same source connections, connect Current Scene.state to Tagged Ref2VA.state, and connect Audio VAE to Apply Scene Context.audio_vae.

@@ -4,6 +4,10 @@ Newest first. This file keeps release history out of the onboarding README.
 
 ## Unreleased — Deferred checkpoint upscaling
 
+- Fix #53's Tagged Source Audio lip-sync example: connect Audio VAE to Apply
+  Scene Context and allow explicit soundtrack tags with a locked source target.
+  Preserve scene-window slicing, track identity checks, and the locked audio policy.
+
 - Fix editorial saves rejecting gaps on newer scenes with "placement must
   target a scene in scene_order". Save the current scene map with explicit cut
   edits while preserving untouched chapter data and existing branch safeguards.
