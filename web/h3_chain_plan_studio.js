@@ -1,6 +1,8 @@
 import {app} from "/scripts/app.js";
 import {api} from "/scripts/api.js";
 import {coalescedRefresh} from "./h3_coalesced_refresh.mjs";
+import {CONTEXT_MASK_MODES} from "./h3_context_mask_core.mjs";
+import {contextMaskEditor} from "./h3_context_mask_editor.mjs";
 import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId} from "./h3_working_branches.mjs?v=0.7.24";
 import {browserBranchRecoveryStorage} from "./h3_branch_recovery_storage.mjs?v=0.7.23";
 import {branchPolicyNodes, captureBranchPolicyInputs, restoreBranchPolicyInputs} from "./h3_plan_restore_core.mjs?v=0.7.19";
@@ -57,7 +59,7 @@ import {
     visualContextDefaultPartition,
     visualContextMaximumBlocks,
     visualContextPartitionFromBoundaries,
-} from "./h3_chain_plan_core.mjs?v=0.7.9";
+} from "./h3_chain_plan_core.mjs?v=context-mask-1";
 import {
     promptRevisionHelp,
     promptRevisionLabel,
@@ -465,6 +467,10 @@ function injectStyles() {
             text-overflow:ellipsis; white-space:nowrap; }
         .h3studio-context-video { display:block; width:100%; min-height:180px; max-height:330px;
             object-fit:contain; background:#050608; border-radius:6px; }
+        .h3studio-context-mask-tools:not([hidden]) { display:flex; flex-wrap:wrap; gap:8px;
+            padding:8px 0; align-items:center; }
+        .h3studio-context-mask-tools label { display:flex; flex-direction:column; min-width:100px; flex:1; }
+        .h3studio-context-mask-tools input { width:100%; }
         .h3studio-context-empty { display:grid; place-items:center; width:100%; min-height:180px;
             padding:18px; color:var(--hs-media-muted); text-align:center; border:1px dashed var(--hs-border);
             border-radius:6px; background:#050608; }
@@ -3630,7 +3636,8 @@ function mount(node) {
                     renderShell();
                     return;
                 }
-                const sources = shot.visual_context_blocks.map(
+                const previousBlocks = shot.visual_context_blocks;
+                const sources = previousBlocks.map(
                     (block) => String(block?.source ?? ""),
                 );
                 const count = Math.min(
@@ -3648,6 +3655,8 @@ function mount(node) {
                                 `clip_${String(state.active).padStart(4, "0")}`,
                             ),
                         frames,
+                        ...(previousBlocks[offset]?.weaken_mask
+                            ? {weaken_mask:structuredClone(previousBlocks[offset].weaken_mask)} : {}),
                     }),
                 );
                 shot.video_blend_frames = 0;
@@ -4804,6 +4813,9 @@ function mount(node) {
                 const prior = previous[offset] ?? previous.at(-1);
                 const source = Number(prior?.source) || state.active;
                 const block = {source:sourceId(source), frames:Number(frames)};
+                if (previous[offset]?.weaken_mask) {
+                    block.weaken_mask = structuredClone(previous[offset].weaken_mask);
+                }
                 if (preserveStarts && Number(prior?.frames) === Number(frames)
                         && Number.isInteger(prior?.startFrame)) {
                     block.start_frame = Number(prior.startFrame);
@@ -5043,7 +5055,7 @@ function mount(node) {
             }
             sourceSelect.value = sourceRow
                 ? sourceId(sourceRow.index) : "";
-            sourceSelect.title = "Choose any earlier scene. Multiple blocks may select the same scene and use independent latent windows.";
+            sourceSelect.title = "Choose any earlier scene. Changing the source clears this block's painted mask. Multiple blocks may select the same scene and use independent latent windows.";
             sourceSelect.addEventListener("change", () => {
                 if (!Array.isArray(shot.visual_context_blocks)) {
                     writeVisualBuilder(partition, {preserveStarts:true});
@@ -5051,6 +5063,7 @@ function mount(node) {
                 const authored = shot.visual_context_blocks[block.blockIndex];
                 authored.source = sourceSelect.value;
                 delete authored.start_frame;
+                delete authored.weaken_mask; // A different scene is a different painting surface.
                 shot.video_blend_frames = 0;
                 writePlan();
                 renderShell();
@@ -5101,7 +5114,21 @@ function mount(node) {
                 video.muted = true;
                 video.src = videoUrl(media.video);
                 state.contextPlayers.push(video);
-                card.append(video);
+                const savedMask = shot.visual_context_blocks?.[block.blockIndex]?.weaken_mask;
+                if (CONTEXT_MASK_MODES.includes(row.continuationMode) || savedMask) {
+                    card.append(contextMaskEditor(video, savedMask, {
+                        enabled:CONTEXT_MASK_MODES.includes(row.continuationMode),
+                        onChange(mask) {
+                            if (!Array.isArray(shot.visual_context_blocks)) {
+                                writeVisualBuilder(partition, {preserveStarts:true});
+                            }
+                            const authored = shot.visual_context_blocks[block.blockIndex];
+                            if (mask) authored.weaken_mask = mask;
+                            else delete authored.weaken_mask;
+                            writePlan();
+                        },
+                    }));
+                } else card.append(video);
             } else {
                 card.append(element(
                     "div", "h3studio-context-empty",

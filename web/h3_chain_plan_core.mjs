@@ -1,5 +1,6 @@
 // Pure data helpers for the H3 Chain Plan editor. Keep this module free of
 // ComfyUI/browser dependencies so its timing and serialization can be tested.
+import {normalizeContextMask, CONTEXT_MASK_MODES} from "./h3_context_mask_core.mjs";
 
 export const FPS = 24;
 export const MAX_SHOTS = 128;
@@ -1033,6 +1034,7 @@ export function sceneVisualContextBlocks(plan, index, contextLength) {
                     `Visual context block ${offset + 1} ends at frame ${consumed}, which is not an H3 latent boundary.`,
                 );
             }
+            const weakenMask = normalizeContextMask(raw.weaken_mask);
             blocks.push(Object.freeze({
                 source,
                 sourceId:safeShotId(
@@ -1043,6 +1045,7 @@ export function sceneVisualContextBlocks(plan, index, contextLength) {
                 startFrame:startValue === undefined || startValue === null
                     || (typeof startValue === "string" && !startValue.trim())
                     ? null : Number(startValue),
+                ...(weakenMask ? {weaken_mask:weakenMask} : {}),
             }));
         }
         if (consumed !== total) {
@@ -1573,6 +1576,10 @@ export function calculatePlanTiming(plan, settings = {}) {
             continuationMode = sceneContinuationMode(
                 shot, planContinuationMode,
             );
+            if (visualContextBlocks.some((block) => block.weaken_mask)
+                    && !CONTEXT_MASK_MODES.includes(continuationMode)) {
+                rowErrors.push("Context weaken masks require Masked AV, Feathered AV or Audio Feather AV.");
+            }
             if (sceneContext > 0 && [
                 "masked_av", "tapered_av", "feathered_av",
                 "audio_feathered_av", "drift_control_av",

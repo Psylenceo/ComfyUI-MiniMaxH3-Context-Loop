@@ -25,7 +25,7 @@ import {
     reviewLocalDeadline,
     reviewPlanScenePrompt,
     reviewSeed,
-} from "./h3_chain_review_core.mjs?v=0.7.7";
+} from "./h3_chain_review_core.mjs?v=context-mask-1";
 import {projectMutationOptions} from "./h3_project_ownership.mjs?v=0.7.4";
 
 const NODE_NAME = "MiniMaxH3ChainReview";

@@ -4,6 +4,13 @@ Newest first. This file keeps release history out of the onboarding README.
 
 ## Unreleased — Deferred checkpoint upscaling
 
+- Nightly: paint a fixed **Weaken context** mask on individual Plan Studio
+  picture blocks in Masked AV, Feathered AV and Audio Feather AV. Adjust release
+  strength, brush size/softness, erase or reset; masks persist in Plans, saved
+  takes and branch recovery. Only painted visual-prefix regions are released:
+  source checkpoints, audio and frame/trim timing stay unchanged. No file scans
+  or external mask assets. See [Context masks](docs/CONTEXT_WEAKEN_MASK.md).
+
 - Add #66's opt-in Assemble checkpoint cleanup (off by default). After a
   completed export and requested copies are safely saved, delete only its
   unshared checkpoint payloads; retain videos, prompts and metadata. Skip

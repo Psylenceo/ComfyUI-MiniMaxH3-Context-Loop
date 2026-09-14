@@ -495,6 +495,29 @@ def main():
     assert torch.all(five_video_mask[:, :, 2:] == 1.0)
     assert not torch.count_nonzero(five_audio)
     assert torch.all(five_audio_mask == 1.0)
+    # Spatial release changes only the requested visual prefix cells. Same
+    # saved samples, same trim, same audio, and no VAE re-encode of the source.
+    for release in (0.0, 0.5, 1.0):
+        for context, carry_audio, baseline in ((5, False, five_frame_av), (39, True, out)):
+            _, painted, painted_trim = masked.apply_masked_prefix(
+                conditioning=conditioning, vae=UnexpectedVideoVAE(), latent=target,
+                previous_frames=frames, context_length=context, crop="disabled",
+                previous_latent=previous, preserve_audio_prefix=carry_audio,
+                context_masks=[{"frames":context, "weaken_mask":{
+                    "columns":2, "rows":1, "cells":[16, 0], "strength":release}}],
+            )
+            painted_video, painted_audio = painted["samples"].unbind()
+            baseline_video, baseline_audio = baseline["samples"].unbind()
+            painted_mask, painted_audio_mask = painted["noise_mask"].unbind()
+            baseline_mask, baseline_audio_mask = baseline["noise_mask"].unbind()
+            prefix_steps = 2 if context == 5 else 12
+            assert painted_trim == context
+            assert torch.equal(painted_video, baseline_video)
+            assert torch.equal(painted_audio, baseline_audio)
+            assert torch.equal(painted_audio_mask, baseline_audio_mask)
+            assert torch.all(painted_mask[:, :, :prefix_steps, :, :2] == release)
+            assert torch.all(painted_mask[:, :, :prefix_steps, :, 2:] == 0)
+            assert torch.equal(painted_mask[:, :, prefix_steps:], baseline_mask[:, :, prefix_steps:])
     try:
         masked.apply_masked_prefix(
             conditioning=conditioning,

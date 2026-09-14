@@ -5350,6 +5350,12 @@ def _shot_visual_context_blocks(
                 "authored_start": "start_frame" in raw,
                 "legacy": False,
             })
+            if "weaken_mask" in raw:
+                from .context_mask import normalize_context_mask
+
+                mask = normalize_context_mask(raw["weaken_mask"])
+                if mask is not None:
+                    blocks[-1]["weaken_mask"] = mask
         if consumed != context_length:
             raise ValueError(
                 "Visual context blocks total %d frames; scene %d requires "
@@ -6275,6 +6281,8 @@ def _scene_dependency_record(
             }
             if bool(block.get("authored_start")):
                 dependency_block["start_frame"] = int(block["start_frame"])
+            if "weaken_mask" in block:
+                dependency_block["weaken_mask"] = _json_document(block["weaken_mask"])
             dependency_blocks.append(dependency_block)
         scopes["incoming_boundary"][
             "visual_context_blocks"] = dependency_blocks
@@ -7776,6 +7784,12 @@ def _normalize_plan(
                 }
                 if bool(block.get("authored_start")) and start != block_default:
                     normalized["start_frame"] = int(start)
+                if "weaken_mask" in block:
+                    from .context_mask import CONTEXT_MASK_MODES
+
+                    if target.get("continuation_mode", continuation_mode) not in CONTEXT_MASK_MODES:
+                        raise ValueError("Context weaken masks require Masked AV, Feathered AV or Audio Feather AV.")
+                    normalized["weaken_mask"] = block["weaken_mask"]
                 normalized_blocks.append(normalized)
                 prefix_frames += frames
             target["visual_context_blocks"] = normalized_blocks
@@ -20206,6 +20220,9 @@ class MiniMaxH3ChainContext:
                 detail_video_seed=detail_video_seed,
                 context_spatial_proxy=context_spatial_proxy,
                 latent_color_carry=latent_color_carry,
+                context_masks=(shot.get("visual_context_blocks")
+                               if any("weaken_mask" in block for block in
+                                      shot.get("visual_context_blocks", [])) else None),
             )
             if explicit_future_anchor is not None:
                 from .nodes import _append_explicit_future_end_anchor
@@ -20943,6 +20960,8 @@ class MiniMaxH3ChainSegmentSave:
                     if "start_frame" in authored:
                         saved_block["start_frame"] = int(
                             authored["start_frame"])
+                    if "weaken_mask" in authored:
+                        saved_block["weaken_mask"] = _json_document(authored["weaken_mask"])
                     saved_blocks.append(saved_block)
                 segment["visual_context_blocks"] = saved_blocks
             else:
@@ -29221,6 +29240,8 @@ def _checkpoint_plan_revision(segment: dict[str, Any]) -> dict[str, Any]:
             "frames": int(block.get("frames", 0)),
             **({"start_frame": int(block["start_frame"])}
                if "start_frame" in block else {}),
+            **({"weaken_mask": _json_document(block["weaken_mask"])}
+               if "weaken_mask" in block else {}),
         } for block in segment["visual_context_blocks"]
             if isinstance(block, dict)]
     if "visual_context_source_id" in segment:

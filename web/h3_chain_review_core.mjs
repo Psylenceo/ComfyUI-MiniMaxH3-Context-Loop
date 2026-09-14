@@ -12,7 +12,8 @@ import {
     sceneVisualContextLeadSource,
     sceneVisualContextSource,
     sharedPrompt,
-} from "./h3_chain_plan_core.mjs?v=0.7.8";
+} from "./h3_chain_plan_core.mjs?v=context-mask-1";
+import {normalizeContextMask} from "./h3_context_mask_core.mjs";
 
 const FPS = 24;
 const MAX_H3_FRAMES = 3592;
@@ -251,12 +252,16 @@ export function applyCheckpointRevisionSet(plan, revisions, {
         }
         if (Array.isArray(revision.visual_context_blocks)) {
             shot.visual_context_blocks = revision.visual_context_blocks.map(
-                (block) => ({
-                    source:String(block?.source ?? ""),
-                    frames:Number(block?.frames),
-                    ...(Object.hasOwn(block ?? {}, "start_frame")
-                        ? {start_frame:Number(block.start_frame)} : {}),
-                }),
+                (block) => {
+                    const weakenMask = normalizeContextMask(block?.weaken_mask);
+                    return {
+                        source:String(block?.source ?? ""),
+                        frames:Number(block?.frames),
+                        ...(Object.hasOwn(block ?? {}, "start_frame")
+                            ? {start_frame:Number(block.start_frame)} : {}),
+                        ...(weakenMask ? {weaken_mask:weakenMask} : {}),
+                    };
+                },
             );
             delete shot.visual_context_source;
             delete shot.visual_context_start_frame;

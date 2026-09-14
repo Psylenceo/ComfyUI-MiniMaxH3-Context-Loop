@@ -555,6 +555,7 @@ def apply_masked_prefix(
     detail_video_seed=0,
     context_spatial_proxy="off",
     latent_color_carry=None,
+    context_masks=None,
 ):
     """Return conditioning, masked target latent, and repeated trim length."""
     _require_h3_mask_support()
@@ -715,6 +716,13 @@ def apply_masked_prefix(
     else:
         video_mask[:, :, :video_steps] = 0.0
         audio_mask[..., :audio_steps] = 0.0
+
+    if context_masks:
+        from .context_mask import release_context_regions
+
+        if sum(int(block["frames"]) for block in context_masks) != frames:
+            raise ValueError("Context weaken masks must cover exactly the selected prefix.")
+        release_context_regions(video_mask, context_masks)
 
     import comfy.nested_tensor
 

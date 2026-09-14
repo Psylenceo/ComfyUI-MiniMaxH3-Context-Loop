@@ -44,7 +44,9 @@ def recover_authoring(authoring, metadata):
         if isinstance(segment.get("visual_context_blocks"), list):
             shot["visual_context_blocks"] = [
                 {"source": block["source_id"], "frames": block["frames"],
-                 **({"start_frame": block["start_frame"]} if "start_frame" in block else {})}
+                 **({"start_frame": block["start_frame"]} if "start_frame" in block else {}),
+                 **({"weaken_mask": copy.deepcopy(block["weaken_mask"])}
+                    if "weaken_mask" in block else {})}
                 for block in segment["visual_context_blocks"]]
         # Strings preserve uint64 seeds through JSON and the browser.
         shot["seed"] = str(segment["seed"])

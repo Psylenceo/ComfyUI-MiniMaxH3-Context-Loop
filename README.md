@@ -35,6 +35,9 @@ Models are not included.
 
 ### Context Loop execution and recovery
 
+- **Nightly context brush.** In Plan Studio → Context → Picture, use
+  **Weaken context…** to paint fixed regions that may change more under AV Mask.
+  [Usage and limits](docs/CONTEXT_WEAKEN_MASK.md).
 - **Maintained workflow path.** The release docs now describe the proven
   memory-safe top-level prompt lifecycle: keep the same Plan and creative
   model stack, let Loop End finish, wait through the cleanup delay, then queue
