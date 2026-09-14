@@ -355,10 +355,13 @@ const attaching = makeNode(core.checkpointSelectionJson(
     currentGraph, "demo", currentGraph.revisions[1], {start:2, end:3}, "chapter"));
 await settle();
 byText(attaching, "S3 · reuse saved clip").click();
+assert.ok(elements(attaching).some(item => item.textContent.includes(
+    "saved video/audio context sources match this path")), "Reuse explains context-compatible candidates");
 assert.equal(byClass(attaching, "h3cm-output-scope").value, "chapter");
 attachResponse = {scene:3, revision:"e".repeat(32), message:"Attached"};
 byText(attaching, "Attach selected candidate").click();
 await settle();
+assert.ok(confirmations.at(-1).includes("saved video/audio context sources match this path"));
 const attachedOutput = JSON.parse(await attaching.widgets[0].serializeValue());
 assert.equal(attachedOutput.output_scope, "chapter");
 assert.equal(attachedOutput.scope_start_scene, 2);

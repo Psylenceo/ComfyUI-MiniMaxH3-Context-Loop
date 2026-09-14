@@ -165,6 +165,7 @@ from .checkpoint_manager import (
     CheckpointDeleteBlocked,
     CheckpointGraphManager,
     checkpoint_audio_context_length,
+    checkpoint_same_context_source,
     checkpoint_revision_token,
     checkpoint_run_lock,
 )
@@ -27474,7 +27475,9 @@ def _checkpoint_selection_manifest(value: Any) -> dict[str, Any] | None:
                 dependency.get("revision") or "").lower()
             if (dependency_scene in selected_revisions and
                     selected_revisions[dependency_scene] !=
-                    dependency_revision):
+                    dependency_revision and not checkpoint_same_context_source(
+                        dependency_records.get((dependency_scene, dependency_revision), {}),
+                        dependency_records.get((dependency_scene, selected_revisions[dependency_scene]), {}))):
                 raise ValueError(
                     "Selected checkpoint scene %d explicitly depends on "
                     "scene %d revision %s." %
@@ -27775,7 +27778,10 @@ async def _restore_checkpoint_revisions(request):
                     dependency.get("revision") or "").lower()
                 selected_or_active = by_scene.get(
                     dependency_scene, active_revisions.get(dependency_scene, ""))
-                if str(selected_or_active).lower() != dependency_revision:
+                if (str(selected_or_active).lower() != dependency_revision
+                        and not checkpoint_same_context_source(
+                            graph_records.get((dependency_scene, dependency_revision), {}),
+                            graph_records.get((dependency_scene, str(selected_or_active).lower()), {}))):
                     raise ValueError(
                         "Scene %d revision explicitly depends on scene %d "
                         "revision %s, which is not active in its chapter." %
@@ -27846,7 +27852,10 @@ async def _restore_checkpoint_revisions(request):
                 dependency_scene = int(dependency.get("scene", 0))
                 dependency_revision = str(
                     dependency.get("revision") or "").lower()
-                if proposed_active.get(dependency_scene) != dependency_revision:
+                if (proposed_active.get(dependency_scene) != dependency_revision
+                        and not checkpoint_same_context_source(
+                            graph_records.get((dependency_scene, dependency_revision), {}),
+                            graph_records.get((dependency_scene, proposed_active.get(dependency_scene)), {}))):
                     raise ValueError(
                         "Active scene %d explicitly depends on scene %d "
                         "revision %s. Activate a compatible branch in that "

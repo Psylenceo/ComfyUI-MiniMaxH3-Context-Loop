@@ -1199,8 +1199,8 @@ function mount(node) {
                 candidates,
                 element("div", "h3cm-muted",
                     attribution.candidate
-                        ? "This candidate uses no predecessor video or generated-audio context. Attribution creates a new lineage link without regeneration or media duplication."
-                        : "No reusable candidate is proven independent by its saved metadata."),
+                        ? "This candidate uses no saved context, or all its saved video/audio context sources match this path. Attribution creates a new lineage link without regeneration or media duplication."
+                        : "No candidate has compatible saved context for this path."),
                 attach,
             );
             for (const blocked of attribution.blocked ?? []) {
@@ -1713,7 +1713,7 @@ function mount(node) {
         if (!candidate || !parent || state.busy) return;
         const confirmed = window.confirm(
             `Attribute scene ${candidate.scene} candidate ${candidate.revision.slice(0, 8)} after scene ${parent.scene} revision ${parent.revision.slice(0, 8)}?\n\n` +
-            "The candidate has no predecessor video or generated-audio dependency. A new immutable lineage record will be created; its existing video, audio, prompt, and checkpoint files remain shared. Nothing is regenerated or copied.",
+            "The candidate's saved video/audio context sources match this path, or it uses no saved context. A new immutable lineage record will be created; its existing video, audio, prompt, and checkpoint files remain shared. Nothing is regenerated or copied.",
         );
         if (!confirmed) return;
         setBusy(true, "Attributing saved candidate to branch…");
