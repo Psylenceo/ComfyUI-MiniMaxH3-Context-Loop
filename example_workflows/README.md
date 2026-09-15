@@ -131,6 +131,25 @@ Upscaled variants are saved below
 `output/h3_chains/<run>/upscaled/<profile>/` and never replace source
 checkpoints. See [Runs and recovery](../docs/RUNS_AND_RECOVERY.md).
 
+**Assemble an already-saved upscale**
+
+Add **MiniMax H3 Upscale Manifest Load**, paste the path to the saved
+`upscale_manifest.json`, and connect its **manifest** output directly to
+**H3 Chain Assemble**. This bypasses the upscale loop entirely: no scene needs
+to be regenerated, and no source Plan or model loaders are required.
+
+For a project-wide run the file is
+`output/h3_chains/<run>/upscaled/<profile>/upscale_manifest.json`.
+Chapter-scoped runs keep it under
+`output/h3_chains/<run>/chapters/<chapter>/upscaled/<profile>/`
+(inside the working branch directory when applicable). An unfinished run can
+use its saved `partial/through_clip_NNNN.manifest.json` instead; it stays partial.
+The node accepts an absolute path or one relative to ComfyUI's output folder.
+It reads and verifies only when queued, without scanning or rewriting projects.
+Keep the saved upscale's media and checkpoints; loading does not reconstruct
+deleted artifacts. Checkpoint Manager's processing tabs remain preview-only
+except for the existing DeRoPE source selection.
+
 The SeedVR2 workflow uses the current **SeedVR2 Video Path Upscaler** node
 (`SeedVR2VideoPathUpscaler`), not the retired `SeedVR2DirectVideoUpscaler` ID.
 Install the base SeedVR2 model-loader pack as well as the linked video-path

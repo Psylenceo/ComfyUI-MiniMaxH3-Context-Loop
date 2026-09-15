@@ -191,6 +191,11 @@ upscale packs and example assets are listed in the [workflow catalog](example_wo
 For Studio workflows, set the run name in **Project Asset Carousel** instead.
 See [Getting started](docs/GETTING_STARTED.md) for setup and recovery steps.
 
+For disposable batch renders, Assemble has an opt-in
+[`delete_checkpoints_after_assembly`](docs/POST_EXPORT_CHECKPOINT_CLEANUP.md)
+setting. It frees checkpoint space only after a completed export. Leave it off
+if you need resume, latent upscale, or checkpoint-based reassembly later.
+
 To reuse a still as a reference, scrub the saved Review Gate preview, click
 **Capture frame…**, check the destination project and tag, then **Save to
 Carousel**. Reusing a tag creates a numbered take without replacing the

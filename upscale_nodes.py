@@ -797,7 +797,11 @@ def _conditioning_from_tagged_upscale_override(
         if detail:
             slice_details.append(detail)
 
-    pictures = [entry["value"] for entry in bindings["pictures"]]
+    # Carousel entries are lazy file descriptors. Resolve only the references
+    # selected for this scene, just as generation does; leave the registry and
+    # its fingerprints untouched (and unused project images unopened).
+    pictures = [chain._project_asset_image(entry["value"])
+                for entry in bindings["pictures"]]
     has_visual_refs = bool(pictures or resolved_videos)
     has_audio_refs = bool(
         resolved_audios or any(
@@ -830,7 +834,7 @@ def _conditioning_from_tagged_upscale_override(
             "standalone_audio_count": len(resolved_audios),
             "anchors": [{
                 "tag": anchor["tag"],
-                "image": anchor["entry"]["value"],
+                "image": chain._project_asset_image(anchor["entry"]["value"]),
                 "timestamps": tuple(anchor["timestamps"]),
                 "untimed": bool(anchor.get("untimed")),
             } for anchor in semantic_anchors],
@@ -3133,6 +3137,62 @@ def _write_upscale_final_record(manifest: dict[str, Any],
     chain._atomic_json(os.path.splitext(final_path)[0] + ".json", record)
 
 
+class MiniMaxH3ChainUpscaleManifestLoad:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "manifest_path": ("STRING", {
+                "default": "",
+                "tooltip": "Saved upscale_manifest.json (complete), or "
+                           "partial/through_clip_NNNN.manifest.json. Accepts an "
+                           "absolute path or a path relative to ComfyUI output. "
+                           "Connect manifest directly to H3 Chain Assemble; "
+                           "no Adapter, sampler, or source Plan is needed.",
+            }),
+        }}
+
+    RETURN_TYPES = (UPSCALE_MANIFEST_TYPE, "STRING", "STRING")
+    RETURN_NAMES = ("manifest", "manifest_json", "status")
+    OUTPUT_TOOLTIPS = (
+        "Saved complete or partial upscale manifest for H3 Chain Assemble.",
+        "Readable JSON of the saved upscale manifest.",
+        "Verified saved scene count and manifest location.",
+    )
+    FUNCTION = "load"
+    CATEGORY = "conditioning/minimax/context_loop/upscale"
+    DESCRIPTION = (
+        "Reload a saved upscale for assembly without regenerating any scene. "
+        "Reads the chosen manifest and verifies its saved artifacts only when "
+        "executed. Does not scan projects, change branches, or rewrite saves.")
+
+    @classmethod
+    def IS_CHANGED(cls, *args, **kwargs):
+        return float("NaN")
+
+    def load(self, manifest_path):
+        address = str(manifest_path or "").strip()
+        if not address:
+            raise ValueError(
+                "Choose the saved upscale_manifest.json, or a saved "
+                "partial/through_clip_NNNN.manifest.json.")
+        path = chain._absolute_output_path(address)
+        manifest = chain._read_json(path)
+        if not isinstance(manifest, dict) or manifest.get("format") not in (
+                "h3_chain_upscale_manifest_v1",
+                "h3_chain_upscale_partial_manifest_v1"):
+            raise ValueError(
+                "Select an upscale manifest, not a scene checkpoint, "
+                "final-video record, or generation manifest.")
+        segments = _validate_upscale_manifest(manifest)
+        complete = manifest["format"] == "h3_chain_upscale_manifest_v1"
+        status = (
+            "Loaded saved %s upscale: %d/%d scenes from %s. "
+            "Connect to H3 Chain Assemble; no regeneration." % (
+                "complete" if complete else "partial", len(segments),
+                manifest["clip_count"], path))
+        return manifest, json.dumps(manifest, ensure_ascii=False, indent=2), status
+
+
 class MiniMaxH3ChainUpscaleMerge:
     DEPRECATED = True
 
@@ -3207,6 +3267,7 @@ UPSCALE_NODE_CLASS_MAPPINGS = {
     "MiniMaxH3ChainUpscaleHandoff": MiniMaxH3ChainUpscaleHandoff,
     "MiniMaxH3ChainUpscaleAdvance": MiniMaxH3ChainUpscaleAdvance,
     "MiniMaxH3ChainUpscaleMerge": MiniMaxH3ChainUpscaleMerge,
+    "MiniMaxH3ChainUpscaleManifestLoad": MiniMaxH3ChainUpscaleManifestLoad,
 }
 
 UPSCALE_NODE_DISPLAY_NAME_MAPPINGS = {
@@ -3229,4 +3290,5 @@ UPSCALE_NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3ChainUpscaleSegmentSave": "MiniMax H3 Upscale Segment Save",
     "MiniMaxH3ChainUpscaleLoopEnd": "MiniMax H3 Upscale Loop End",
     "MiniMaxH3ChainUpscaleMerge": "MiniMax H3 Upscale Merger (Legacy)",
+    "MiniMaxH3ChainUpscaleManifestLoad": "MiniMax H3 Upscale Manifest Load",
 }
