@@ -76,7 +76,7 @@ import {
     convertTaggedPictureReference,
     taggedPictureReferenceMode,
     taggedPictureReferenceToken,
-} from "./h3_reference_preview_core.mjs?v=0.7.3";
+} from "./h3_reference_preview_core.mjs?v=0.7.25";
 import {
     applySceneAudioOverride,
     applySceneLipSync,
@@ -96,7 +96,7 @@ import {
 import {
     availableLoRARoutes,
     loraRouteLabel,
-} from "./h3_lora_scheduler_core.mjs?v=0.7.0";
+} from "./h3_lora_scheduler_core.mjs?v=0.7.25";
 import {
     h3StudioGridMarkers,
     locateStudioTimelineSegment,
