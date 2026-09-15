@@ -225,4 +225,40 @@ assert.doesNotMatch(teardown, /flushPlanEffects\(\)/);
 assert.doesNotMatch(teardown, /flushPromptAnalysis\(\)/);
 assert.doesNotMatch(teardown, /flushHistoryDraft\(\)/);
 
+// A tag can be introduced in the basic prompt before Optimize ever turns it
+// into H3 text. Reference scanning for the optimizer request must include
+// the shot's basic_prompt, or that tag is reported inactive and its media
+// is left out of the Direct API resources list even though it belongs.
+const optimizePromptSource = source.slice(
+    source.indexOf("async function optimizePrompt()"),
+    source.indexOf("function stopOptimizer()"),
+);
+assert.match(optimizePromptSource,
+    /const refs = availableReferenceRecords\(node, sceneIndex \+ 1, \{[\s\S]{0,600}shot\.basic_prompt/,
+    "optimizer reference scanning must include the shot's basic_prompt, " +
+    "not just the shared/H3 prompt text, or a tag used only in the basic " +
+    "draft is excluded from the optimizer's active media list");
+
+// Applying an optimizer result (Direct API, MCP, or a previously pending
+// result) must refresh the reference tray/highlighting against the new
+// text before redrawing, or a newly active tag stays shown "inactive"
+// until an unrelated manual edit happens to trigger a refresh.
+assert.match(source, /function refreshTaggedReferencesForShot\(shot, text\)/,
+    "a shared helper must refresh reference records for the shot's new " +
+    "text (plus its basic_prompt) so all optimizer-apply sites stay " +
+    "consistent");
+for (const fnName of [
+    "handleOptimizerFrame", "applyPendingOptimizerResult", "applyOptimizerResponse",
+]) {
+    const start = source.indexOf(`function ${fnName}(`);
+    assert.notEqual(start, -1, `${fnName} must exist`);
+    const end = source.indexOf("\n    }\n\n", start);
+    const body = source.slice(start, end === -1 ? undefined : end);
+    assert.match(body,
+        /refreshTaggedReferencesForShot\([\s\S]{0,80}renderEditorText/,
+        `${fnName} must refresh tagged references before redrawing the ` +
+        "applied optimizer result, covering Direct API, MCP, and " +
+        "pending-result application alike");
+}
+
 console.log("H3 Rich Scene Prompt Editor: tokens, guides, previews, optimizer, and history pass");

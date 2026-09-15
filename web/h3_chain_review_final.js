@@ -835,7 +835,14 @@ function routeReview(data) {
     const token = String(data?.token ?? "");
     const remembered = token ? routedReviewNodes.get(token) : null;
     if (remembered) {
-        if (deliverReview(remembered, data, {verifyRun: false})) return true;
+        // Unlike a freshly resolved fallback node, a remembered decision can
+        // be arbitrarily old: the gate's connected Plan run_name can change
+        // live (a widget edit, or a Project Assets manager swap) without any
+        // graph reload, node removal, or reconfigure event to invalidate the
+        // cache via forgetRoutedNode. Re-verify identity on every cached
+        // delivery so a token cached for one project can never be delivered
+        // to a gate that has since become another project's.
+        if (deliverReview(remembered, data)) return true;
         routedReviewNodes.delete(token);
     }
     const exact = findNodeByQualifiedId(data?.node_id);

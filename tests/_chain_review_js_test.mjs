@@ -507,6 +507,18 @@ assert.match(routeSource, /deliverReview\(fallback, data, \{verifyRun: false\}\)
     "that same node via a second strict run_name check, or a Review Gate " +
     "with a stale/reset Plan run_name widget can never route at all even " +
     "when it is the only gate in the graph");
+assert.match(routeSource,
+    /if \(remembered\) \{[\s\S]{0,900}deliverReview\(remembered, data\)\) return true;/,
+    "a cached routing decision can outlive the identity it was cached for " +
+    "(a live run_name/Project Assets change, with no reload, removal or " +
+    "reconfigure to invalidate it) - the cached delivery path must still " +
+    "verify identity (default verifyRun: true), unlike the freshly " +
+    "resolved fallback path above, which already checked it this call");
+assert.doesNotMatch(routeSource,
+    /deliverReview\(remembered, data, \{verifyRun: false\}\)/,
+    "the remembered/cached delivery path must not skip run_name " +
+    "verification - a token cached for one project could then be " +
+    "delivered to a gate that has since become another project's");
 const reviewHandlerStart = reviewSource.indexOf("node._h3ReviewHandler =");
 const reviewHandlerSource = reviewSource.slice(reviewHandlerStart);
 assert.match(reviewHandlerSource, /const candidateBatchComplete = Boolean\(current\?\.candidate_generation_complete\) \|\|[\s\S]*current\.candidates\.length >=[\s\S]*candidate_count/);

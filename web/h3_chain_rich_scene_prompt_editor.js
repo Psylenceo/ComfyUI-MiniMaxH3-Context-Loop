@@ -1717,6 +1717,7 @@ function mount(node) {
                     state.optimizer.origins.set(meta.sceneKey, {source:meta.source, result});
                     writePlan("Optimized prompt saved to Plan");
                     if (state.active === meta.sceneIndex) {
+                        refreshTaggedReferencesForShot(shot, result);
                         renderEditorText(result);
                         scheduleHistoryDraft(meta.sceneId, result, shot.basic_prompt);
                         void flushHistoryDraft();
@@ -1765,11 +1766,31 @@ function mount(node) {
         state.optimizer.message = "Changed source replaced explicitly; result saved as a new revision.";
         writePlan("Optimized prompt saved to Plan");
         if (state.active === pending.sceneIndex) {
+            refreshTaggedReferencesForShot(shot, pending.result);
             renderEditorText(pending.result);
             scheduleHistoryDraft(pending.sceneId, pending.result, shot.basic_prompt);
             void flushHistoryDraft();
         }
         refreshOptimizerUi();
+    }
+
+    // A tag can appear only in the basic prompt, not yet in the H3 prompt
+    // text an applied optimizer result replaces. Refresh the reference
+    // tray/highlighting against the shot's current basic_prompt as well as
+    // the new H3 text before redrawing, or a tag that Optimize just turned
+    // into real content stays shown "inactive" until an unrelated manual
+    // edit happens to trigger a refresh.
+    function refreshTaggedReferencesForShot(shot, text) {
+        if (state.referenceMode !== "tagged") return;
+        const refreshed = availableReferenceRecords(
+            node, state.active + 1, {
+                includeInactive:true,
+                prompt:[sharedPrompt(state.plan).text.trim(), String(text ?? "").trim(),
+                    String(shot?.basic_prompt ?? "").trim()].filter(Boolean).join("\n\n"),
+            },
+        );
+        state.records = refreshed.records;
+        state.referenceMode = refreshed.mode;
     }
 
     function optimizerInstruction(mode, refs, basicPrompt = "") {
@@ -1818,6 +1839,7 @@ function mount(node) {
         state.optimizer.origins.set(meta.sceneKey, {source:meta.source, result});
         writePlan("Optimized prompt saved to Plan");
         if (state.active === meta.sceneIndex) {
+            refreshTaggedReferencesForShot(shot, result);
             renderEditorText(result);
             scheduleHistoryDraft(meta.sceneId, result, shot.basic_prompt);
             void flushHistoryDraft();
@@ -1911,8 +1933,13 @@ function mount(node) {
         const source = optimizerSource(current, state.optimizer.origins.get(sceneKey));
         const refs = availableReferenceRecords(node, sceneIndex + 1, {
             includeInactive: true,
-            prompt: [sharedPrompt(state.plan).text.trim(), source.trim()]
-                .filter(Boolean).join("\n\n"),
+            // A tag can be introduced in the basic prompt before it ever
+            // reaches the H3 prompt text (that is the point of Optimize).
+            // Scan it too, or a tag used only there is reported "inactive"
+            // and its media is left out of optimizerResources() below, even
+            // though it is meant to be part of this request.
+            prompt: [sharedPrompt(state.plan).text.trim(), source.trim(),
+                String(shot.basic_prompt ?? "").trim()].filter(Boolean).join("\n\n"),
         });
         const mode = richGenerationMode(refs.mode);
         const context = buildPromptAssistantContext(state.plan, sceneIndex, source, {
