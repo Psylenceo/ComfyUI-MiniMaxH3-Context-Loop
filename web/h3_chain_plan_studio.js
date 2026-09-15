@@ -1,6 +1,7 @@
 import {app} from "/scripts/app.js";
 import {api} from "/scripts/api.js";
 import {coalescedRefresh} from "./h3_coalesced_refresh.mjs";
+import {normalizeSceneLipSyncSource, sceneLipSyncPlayback} from "./h3_scene_lip_sync.mjs";
 import {
     studioChapterGroups, studioChapterViewKey, studioChapterView,
     studioChapterEntries, studioChapterLayout, studioChapterPixel, studioChapterSecond,
@@ -750,7 +751,9 @@ function mount(node) {
         editorial:{revision:"", placements:[], trims:[], locked_scene_ids:[], subtitles:{},
             alternate_draft:null, replacements:[]},
         subtitleAssets:[], subtitleAssetsRun:"", subtitleAssetsToken:0,
+        sceneAudioAssets:[], sceneAudioAssetsRun:"", sceneAudioAssetsLoading:false,
         playhead:null, player:null, playerAudio:null, sourceAudioPlayer:null,
+        sceneAudioPlayer:null, sceneAudioAudition:null,
         sourcePlayer:null, sourceLayer:null, subtitleOverlay:null,
         editorialClockFrame:null, mediaClockFrame:null, mediaClockKind:"",
         playerSegmentKey:"",
@@ -1017,7 +1020,7 @@ function mount(node) {
     root.addEventListener("pointerleave", () => { state.keyboardHover = false; });
     const pausePlayerMonitors = () => {
         for (const media of [
-            state.playerAudio, state.sourceAudioPlayer, state.sourcePlayer,
+            state.playerAudio, state.sourceAudioPlayer, state.sceneAudioPlayer, state.sourcePlayer,
             ...state.contextPlayers,
         ]) {
             try { media?.pause(); } catch (_error) {}
@@ -1496,6 +1499,31 @@ function mount(node) {
                 state.subtitleAssets = [];
                 console.warn("H3 Plan Studio could not load timed lyrics:", error);
             }
+        }
+    }
+
+    function sceneAudioAssetUrl(assetId) {
+        return api.apiURL(`/minimax_h3_context_loop/project-assets/media?project=${encodeURIComponent(runName())}&asset=${encodeURIComponent(assetId)}`);
+    }
+
+    async function loadSceneAudioAssets() {
+        const project = runName();
+        if (!project || state.disposed || state.sceneAudioAssetsLoading) return;
+        state.sceneAudioAssetsLoading = true;
+        state.sceneAudioAssets = [];
+        state.sceneAudioAssetsRun = project; // One attempt; retry is explicit.
+        try {
+            const response = await api.fetchApi(`/minimax_h3_context_loop/project-assets?project=${encodeURIComponent(project)}`);
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+            if (project !== runName() || state.disposed) return;
+            state.sceneAudioAssets = (payload.assets ?? []).filter(asset => asset.kind === "audio");
+        } catch (error) {
+            state.sceneAudioAssets = [];
+            console.warn("H3 scene audio catalog:", error);
+        } finally {
+            state.sceneAudioAssetsLoading = false;
+            if (!state.disposed && project === runName() && state.view === "scene" && !state.activeChapterId) renderPanel();
         }
     }
 
@@ -3943,6 +3971,59 @@ function mount(node) {
             renderStatus();
         });
         form.append(field("Lip-sync", lipSync));
+        const localSource = normalizeSceneLipSyncSource(shot.lip_sync_source);
+        const sceneSource = element("select");
+        const inheritSource = element("option", "", "Inherit project timeline");
+        inheritSource.value = ""; sceneSource.append(inheritSource);
+        const assets = state.sceneAudioAssetsRun === runName() ? state.sceneAudioAssets : [];
+        for (const asset of assets) {
+            const option = element("option", "", asset.name || asset.original_name || asset.tag || asset.id);
+            option.value = asset.id; sceneSource.append(option);
+        }
+        if (localSource && !assets.some(asset => asset.id === localSource.asset_id)) {
+            const missing = element("option", "", `Selected audio · ${localSource.asset_id} (refresh to check)`);
+            missing.value = localSource.asset_id; sceneSource.append(missing);
+        }
+        sceneSource.value = localSource?.asset_id ?? "";
+        sceneSource.addEventListener("change", () => {
+            if (sceneSource.value) {
+                shot.lip_sync_source = normalizeSceneLipSyncSource({asset_id:sceneSource.value});
+                applySceneLipSync(shot, "on");
+            } else delete shot.lip_sync_source;
+            writePlan(); renderPanel(); renderStatus();
+        });
+        const sourceWrap = element("div");
+        sourceWrap.append(sceneSource, button("Refresh audio", "Read carousel audio choices", () => void loadSceneAudioAssets()));
+        form.append(field("Lip-sync source · this scene only", sourceWrap));
+        if (state.sceneAudioAssetsRun !== runName() && !state.sceneAudioAssetsLoading) void loadSceneAudioAssets();
+        if (localSource) {
+            const offset = element("input"); offset.type = "number"; offset.min = "0";
+            offset.step = String(1 / FPS); offset.value = String(localSource.start_seconds);
+            offset.title = "Audio file position at the first delivered frame, snapped to 1/24 second. Short audio is padded with silence; long audio is cut to the scene. Editorial trims move audio with the picture.";
+            offset.addEventListener("change", () => {
+                try {
+                    shot.lip_sync_source = normalizeSceneLipSyncSource({...shot.lip_sync_source, start_seconds:offset.value});
+                    offset.value = String(shot.lip_sync_source.start_seconds);
+                    writePlan(); renderStatus();
+                } catch (error) { offset.value = String(localSource.start_seconds); offset.setCustomValidity(error.message); offset.reportValidity(); }
+            });
+            offset.addEventListener("input", () => offset.setCustomValidity(""));
+            const mix = element("select");
+            for (const [value, label] of [["mix", "Dialogue over project track"], ["replace", "Replace project track in this scene"]]) {
+                const option = element("option", "", label); option.value = value; mix.append(option);
+            }
+            mix.value = localSource.final_audio;
+            mix.addEventListener("change", () => {
+                shot.lip_sync_source = {...shot.lip_sync_source, final_audio:mix.value};
+                writePlan(); renderStatus();
+            });
+            const audition = element("audio"); audition.controls = true; audition.preload = "none";
+            state.sceneAudioAudition = audition;
+            audition.src = sceneAudioAssetUrl(localSource.asset_id);
+            audition.addEventListener("loadedmetadata", () => { audition.currentTime = Number(shot.lip_sync_source?.start_seconds) || 0; });
+            form.append(field("Audio file start (seconds)", offset), field("Final soundtrack (Source policy)", mix), field("Audition audio file", audition));
+            form.append(element("div", "h3studio-message", "Applies only while this scene's Lip-sync is On. The source and mix choice are saved with the generated take. Generated export uses the dialogue; None stays muted. No prompt tag or second project Source track is needed."));
+        }
         function audioOverrideSelect(key, inherited, choices, title) {
             const select = element("select");
             const inheritedOption = element(
@@ -5485,12 +5566,16 @@ function mount(node) {
         const current = state.player;
         const generatedAudio = state.playerAudio;
         const sourceAudioCurrent = state.sourceAudioPlayer;
+        const sceneAudioCurrent = state.sceneAudioPlayer;
+        const sceneAudioAudition = state.sceneAudioAudition;
         const sourceCurrent = state.sourcePlayer;
         const preloadVideo = state.playerPreloadVideo;
         const preloadAudio = state.playerPreloadAudio;
         state.player = null;
         state.playerAudio = null;
         state.sourceAudioPlayer = null;
+        state.sceneAudioPlayer = null;
+        state.sceneAudioAudition = null;
         state.sourcePlayer = null;
         state.sourceLayer = null;
         state.subtitleOverlay = null;
@@ -5505,7 +5590,7 @@ function mount(node) {
         state.playPlayerTransport = null;
         state.togglePlayerPlayback = null;
         for (const media of [
-            current, generatedAudio, sourceAudioCurrent, sourceCurrent,
+            current, generatedAudio, sourceAudioCurrent, sceneAudioCurrent, sceneAudioAudition, sourceCurrent,
             preloadVideo, preloadAudio, ...contextPlayers,
         ]) {
             if (!media) continue;
@@ -5723,6 +5808,8 @@ function mount(node) {
         generatedAudio.preload = "metadata"; generatedAudio.hidden = true;
         const sourceTimelineAudio = element("audio");
         sourceTimelineAudio.preload = "metadata"; sourceTimelineAudio.hidden = true;
+        const sceneDialogue = element("audio");
+        sceneDialogue.preload = "metadata"; sceneDialogue.hidden = true;
         const sourceVideo = element("video"); sourceVideo.playsInline = true;
         sourceVideo.preload = "metadata"; sourceVideo.muted = true;
         const sourceLayer = element("div", "h3studio-source-layer");
@@ -5951,9 +6038,38 @@ function mount(node) {
                         - Number(trimForScene(state.playerIndex)?.in_frame ?? 0) / FPS),
             );
         };
+        const synchronizeSceneDialogue = (playAudio, timelineSecond) => {
+            const local = sceneLipSyncPlayback(state.plan.shots, settings().audioPolicy,
+                playbackModel().segments, timelineSecond);
+            const url = local ? sceneAudioAssetUrl(local.asset_id) : "";
+            if (sceneDialogue.dataset.source !== url) {
+                sceneDialogue.pause();
+                sceneDialogue.dataset.source = url;
+                if (url) sceneDialogue.src = url;
+                else sceneDialogue.removeAttribute("src");
+                sceneDialogue.load();
+            }
+            const audible = Boolean(local && sourceToggle.checked && !sourceAudioMuted(local.sceneIndex));
+            sourceTimelineAudio.muted = !sourceToggle.checked || local?.final_audio === "replace"
+                || (!state.playerSegmentKey.startsWith("gap:") && sourceAudioMuted(state.playerIndex));
+            sceneDialogue.muted = !audible;
+            sceneDialogue.volume = state.sourceVolume;
+            sceneDialogue.playbackRate = video.playbackRate;
+            if (local && (!Number.isFinite(sceneDialogue.duration) || local.seconds < sceneDialogue.duration)) {
+                if (Math.abs(sceneDialogue.currentTime - local.seconds) > .12) {
+                    try { sceneDialogue.currentTime = local.seconds; } catch (_error) {}
+                }
+                if (audible && playAudio && sceneDialogue.paused) void sceneDialogue.play().catch(() => {});
+            } else sceneDialogue.pause();
+            // Don't double the dialogue already baked into the generated audio.
+            video.muted = !generatedToggle.checked || Boolean(generatedAudio.dataset.source) || audible;
+            generatedAudio.muted = !generatedToggle.checked || audible;
+            return local;
+        };
         const synchronizeSourceTimelineAudio = (
             playAudio = false, timelineSecond = playerTimelineSecond(),
         ) => {
+            const local = synchronizeSceneDialogue(playAudio, timelineSecond);
             const timelineAudio = sourceAudio();
             if (!timelineAudio || !sourceTimelineAudio.dataset.source) return;
             sourceTimelineAudio.playbackRate = video.playbackRate;
@@ -5967,6 +6083,7 @@ function mount(node) {
             }
             sourceTimelineAudio.muted =
                 !sourceToggle.checked ||
+                local?.final_audio === "replace" ||
                 (!state.playerSegmentKey.startsWith("gap:")
                     && sourceAudioMuted(state.playerIndex));
             if (playAudio && sourceToggle.checked) {
@@ -5979,6 +6096,8 @@ function mount(node) {
                 model.totalSeconds, Number(current) || 0,
             ));
             state.timelinePosition = bounded;
+            synchronizeSceneDialogue(!video.paused || !sourceTimelineAudio.paused
+                || state.editorialClockFrame != null, bounded);
             const local = studioChapterLocalSecond(model, bounded);
             slider.max = String(model.chapter ? Math.round(model.durationSeconds * FPS) : model.durationSeconds);
             slider.value = String(model.chapter ? Math.round(local * FPS) : local);
@@ -6252,7 +6371,7 @@ function mount(node) {
         });
         onActiveVideo("waiting", () => {
             stopMediaClock("video");
-            generatedAudio.pause(); sourceTimelineAudio.pause(); sourceVideo.pause();
+            generatedAudio.pause(); sourceTimelineAudio.pause(); sceneDialogue.pause(); sourceVideo.pause();
         });
         onActiveGeneratedAudio("canplay", () => {
             synchronizeGeneratedAudio(!video.paused);
@@ -6263,6 +6382,10 @@ function mount(node) {
         });
         sourceTimelineAudio.addEventListener("canplay", () => {
             synchronizeSourceTimelineAudio(!video.paused);
+        });
+        sceneDialogue.addEventListener("canplay", () => {
+            synchronizeSceneDialogue(!video.paused || !sourceTimelineAudio.paused
+                || state.editorialClockFrame != null, playerTimelineSecond());
         });
         sourceTimelineAudio.addEventListener("play", () => {
             if (!video.dataset.source) {
@@ -6275,7 +6398,7 @@ function mount(node) {
             if (!video.dataset.source) play.textContent = "▶";
         });
         onActiveVideo("seeking", () => {
-            generatedAudio.pause(); sourceTimelineAudio.pause(); sourceVideo.pause();
+            generatedAudio.pause(); sourceTimelineAudio.pause(); sceneDialogue.pause(); sourceVideo.pause();
             synchronizeGeneratedAudio(false); synchronizeSourceTimelineAudio(false);
             syncSource();
         });
@@ -6365,7 +6488,7 @@ function mount(node) {
             GENERATED_VOLUME_PROPERTY, "generatedVolume",
         );
         const sourceControl = audioToggle(
-            "h3studio-audio-source", "Source track", true,
+            "h3studio-audio-source", "Source track / scene dialogue", true,
             SOURCE_VOLUME_PROPERTY, "sourceVolume",
         );
         const motionControl = audioToggle(
@@ -6393,7 +6516,9 @@ function mount(node) {
                 synchronizeSourceTimelineAudio(!video.paused);
             } else {
                 sourceTimelineAudio.pause();
+                sceneDialogue.pause();
             }
+            synchronizeSceneDialogue(!video.paused, playerTimelineSecond());
         };
         for (const control of [
             generatedControl, sourceControl, motionControl,
@@ -6405,6 +6530,7 @@ function mount(node) {
         compareControls.append(wipeLabel, wipe, audioMix);
         state.player = video; state.playerAudio = generatedAudio;
         state.sourceAudioPlayer = sourceTimelineAudio;
+        state.sceneAudioPlayer = sceneDialogue;
         state.sourcePlayer = sourceVideo;
         state.sourceLayer = sourceLayer; state.subtitleOverlay = subtitleOverlay;
         state.playerSlider = slider;
@@ -6412,7 +6538,7 @@ function mount(node) {
             await refreshCheckpoints(); renderPanel();
         }));
         wrapper.append(
-            scope, label, stage, generatedAudio, sourceTimelineAudio,
+            scope, label, stage, generatedAudio, sourceTimelineAudio, sceneDialogue,
             preloadAudio,
             compareControls, controls,
             element("div", "h3studio-message", "Generated and Source Track can play together on the planned timeline. Adjacent saved scenes are pre-decoded in a second player for a smooth boundary handoff; this preview behavior never changes the saved clips or final assembly. Before a scene is rendered, Source Track playback supplies the timeline clock; playback hands back to video automatically when a saved segment begins. Each monitor has independent volume; waveform speaker buttons mute only the Source Track for that scene. Click the player and press Space to play or pause. Motion-ref audio is optional when available."),

@@ -3186,11 +3186,15 @@ def _assembly_manifest(manifest: dict[str, Any],
     first, _last = _source_bounds(source)
     saved_last = first + len(segments) - 1
     partial = manifest.get("format") == "h3_chain_upscale_partial_manifest_v1"
+    source_segments = {int(item["index"]): item for item in source["segments"]}
     assembled = []
     for item in segments:
         assembled.append({
             **item,
             "blend_frames": 0,
+            **{key: source_segments.get(int(item["index"]), {})[key]
+               for key in ("lip_sync_source", "lip_sync_source_asset")
+               if key in source_segments.get(int(item["index"]), {})},
         })
     assembly = {
         "format": ("h3_chain_partial_manifest_v3" if partial else

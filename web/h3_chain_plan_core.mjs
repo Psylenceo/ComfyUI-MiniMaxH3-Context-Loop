@@ -1,6 +1,7 @@
 // Pure data helpers for the H3 Chain Plan editor. Keep this module free of
 // ComfyUI/browser dependencies so its timing and serialization can be tested.
 import {normalizeContextMask, CONTEXT_MASK_MODES} from "./h3_context_mask_core.mjs";
+import {normalizeSceneLipSyncSource} from "./h3_scene_lip_sync.mjs";
 
 export const FPS = 24;
 export const MAX_SHOTS = 128;
@@ -322,6 +323,11 @@ export function parsePlanJson(source) {
             throw new Error(`Scene ${offset + 1} must be an object or prompt string.`);
         }
         const normalized = {...shot};
+        if (Object.hasOwn(shot, "lip_sync_source")) {
+            const source = normalizeSceneLipSyncSource(shot.lip_sync_source);
+            if (source) normalized.lip_sync_source = source;
+            else delete normalized.lip_sync_source;
+        }
         normalized.prompt = promptTextToLines(
             promptValueToText(shot.prompt, `Scene ${offset + 1} prompt`),
         );

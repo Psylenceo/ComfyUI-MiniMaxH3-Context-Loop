@@ -493,6 +493,76 @@ def _audio_policy_locks_source_audio(value: Any, shot: Any = None) -> bool:
         "source_audio_target", "off") == "locked"
 
 
+def _normalize_scene_lip_sync_source(value: Any) -> dict[str, Any] | None:
+    """Optional scene-local audio; offsets use the delivered scene's clock."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not str(value.get("asset_id") or "").strip():
+        raise ValueError("Scene lip-sync source needs a carousel audio asset ID.")
+    start = float(value.get("start_seconds", 0))
+    if not math.isfinite(start) or start < 0:
+        raise ValueError("Scene lip-sync source start must be finite and non-negative.")
+    mode = str(value.get("final_audio", "mix"))
+    if mode not in ("mix", "replace"):
+        raise ValueError("Scene lip-sync final audio must be mix or replace.")
+    return {"asset_id": str(value["asset_id"]).strip(),
+            "start_seconds": math.floor(start * FPS + 0.5) / float(FPS),
+            "final_audio": mode}
+
+
+def _scene_has_local_lip_sync(plan: Any, shot: Any) -> bool:
+    return (isinstance(shot, dict) and bool(shot.get("lip_sync_source"))
+            and _audio_policy_locks_source_audio(plan, shot))
+
+
+def _scene_lip_sync_media(run_name: str, shot: dict[str, Any]):
+    """Resolve just the selected asset, never scan/decode the carousel."""
+    selection = _normalize_scene_lip_sync_source(shot.get("lip_sync_source"))
+    if selection is None:
+        raise ValueError("No scene-local lip-sync source selected.")
+    descriptor = shot.get("lip_sync_source_asset")
+    if descriptor is None:
+        entry, path = _project_asset_store().asset(run_name, selection["asset_id"])
+        if entry.get("kind") != "audio":
+            raise ValueError("Scene lip-sync source must be an audio asset.")
+        descriptor = _project_asset_descriptor(entry, path)
+    path = _project_asset_media_path(descriptor, "audio")
+    source = _make_source_timeline(audio_path=path)
+    if descriptor.get("content_hash") != source["audio"].get("file_sha256"):
+        raise ValueError("Scene lip-sync audio changed since it was selected/saved.")
+    if selection["start_seconds"] * FPS >= source["extent"]["frame_count"]:
+        raise ValueError("Scene lip-sync source start is past the end of the audio file.")
+    return selection, descriptor, source
+
+
+def _scene_lip_sync_window(source: dict[str, Any], start: int, frames: int):
+    """Read only this file-local window; silence outside its available audio."""
+    rate = int(source["audio"]["sample_rate"])
+    channels = int(source["audio"]["channels"])
+    samples = sample_boundary_from_frames(frames, rate, FPS)
+    waveform = torch.zeros((1, channels, samples), dtype=torch.float32)
+    left = max(0, start)
+    right = min(start + frames, int(source["extent"]["frame_count"]))
+    if right > left:
+        audio = _source_timeline_scene_audio(source, left, right)
+        offset = sample_boundary_from_frames(left - start, rate, FPS)
+        count = min(samples - offset, int(audio["waveform"].shape[-1]))
+        waveform[..., offset:offset + count] = audio["waveform"][..., :count]
+    return {"waveform": waveform, "sample_rate": rate}
+
+
+def _scene_lip_sync_target(plan: dict[str, Any], shot: dict[str, Any]):
+    selection, descriptor, source = _scene_lip_sync_media(plan["run_name"], shot)
+    options = _resolved_lip_sync_options(plan, shot) or {}
+    preroll = int(math.ceil(float(options.get("preroll_seconds", 0)) * FPS))
+    lookahead = int(math.ceil(float(options.get("lookahead_seconds", 0)) * FPS))
+    repeated = int(shot["raw_frames"]) - int(shot["delivered_frames"])
+    start = int(round(selection["start_seconds"] * FPS)) - repeated
+    audio = _scene_lip_sync_window(
+        source, start - preroll, int(shot["raw_frames"]) + preroll + lookahead)
+    return audio, preroll / float(FPS), descriptor
+
+
 def _audio_source_requirements(value: Any) -> list[dict[str, Any]]:
     """Describe every effective setting that makes source audio mandatory."""
     policy = _resolved_audio_policy(value)
@@ -508,6 +578,8 @@ def _audio_source_requirements(value: Any) -> list[dict[str, Any]]:
     shots = value.get("shots") if isinstance(value, dict) else None
     if isinstance(shots, list):
         for fallback_index, shot in enumerate(shots, 1):
+            if _scene_has_local_lip_sync(value, shot):
+                continue
             resolved = _resolved_scene_audio_policy(value, shot)
             scene = int(shot.get("index", fallback_index))
             scene_id = str(shot.get("id") or "scene_%d" % scene)
@@ -561,8 +633,9 @@ def _audio_policy_requires_source(value: Any) -> bool:
     shots = value.get("shots") if isinstance(value, dict) else None
     if isinstance(shots, list):
         return any(
-            _audio_policy_uses_source_reference(value, shot)
-            or _audio_policy_locks_source_audio(value, shot)
+            (_audio_policy_uses_source_reference(value, shot)
+             or _audio_policy_locks_source_audio(value, shot))
+            and not _scene_has_local_lip_sync(value, shot)
             for shot in shots)
     return (policy["source_reference"] == "on" or
             policy.get("source_audio_target") == "locked")
@@ -6024,7 +6097,7 @@ def _legacy_history_contract(
                 "context_spatial_proxy"]
         for key in (
                 "source_reference", "generated_continuity",
-                "source_audio_target"):
+                "source_audio_target", "lip_sync_source"):
             if key in shot:
                 contract[key] = shot[key]
         shots.append(contract)
@@ -6116,6 +6189,19 @@ def _canonical_source_reference_dependency(
         ) -> dict[str, Any] | None:
     """Hash the canonical source PCM window which affects one scene."""
     shot = plan["shots"][int(index) - 1]
+    if _scene_has_local_lip_sync(plan, shot):
+        audio, clip_start, descriptor = _scene_lip_sync_target(plan, shot)
+        options = dict(_resolved_lip_sync_options(plan, shot) or {})
+        options.pop("voice_fingerprint", None)  # A global stem is not this dialogue.
+        return {
+            "route": "scene_audio_asset", "asset_id": descriptor["asset_id"],
+            "start_seconds": shot["lip_sync_source"]["start_seconds"],
+            "clip_start_seconds": clip_start,
+            "sample_rate": audio["sample_rate"],
+            "sample_count": int(audio["waveform"].shape[-1]),
+            "pcm_sha256": _audio_fingerprint(audio),
+            "lip_sync_options": options,
+        }
     if (not _audio_policy_uses_source_reference(plan, shot)
             and not _audio_policy_locks_source_audio(plan, shot)):
         return None
@@ -7590,6 +7676,9 @@ def _normalize_plan(
         # Scene-local audio generation axes are optional. Their absence is the
         # exact stable spelling of "inherit Chain Policy"; final audio remains
         # a Plan-wide assembly decision.
+        local_audio = _normalize_scene_lip_sync_source(item.get("lip_sync_source"))
+        if local_audio is not None:
+            shot["lip_sync_source"] = local_audio
         for audio_key, allowed in (
                 ("source_reference", SOURCE_REFERENCE_POLICIES),
                 ("generated_continuity", GENERATED_CONTINUITY_POLICIES),
@@ -9734,6 +9823,8 @@ def _effective_editor_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 if "generated_continuity" in shot else {}),
              **({"source_audio_target": shot["source_audio_target"]}
                 if "source_audio_target" in shot else {}),
+             **({"lip_sync_source": dict(shot["lip_sync_source"])}
+                if "lip_sync_source" in shot else {}),
              **({"prompt_seed_mode": shot["prompt_seed_mode"]}
                 if "prompt_seed_mode" in shot else {}),
              **({"prompt_seed": str(shot["prompt_seed"])}
@@ -10624,6 +10715,7 @@ def _public_segment(value: dict[str, Any]) -> dict[str, Any]:
         "seed", "steps", "continuation_mode", "context_length",
         "audio_context_length", "context_spatial_proxy",
         "source_reference", "generated_continuity", "source_audio_target",
+        "lip_sync_source", "lip_sync_source_asset",
         "prompt_seed_mode", "prompt_seed", "lora_route",
         "guide_tone_carry",
         "guide_tone_input_applied",
@@ -17362,8 +17454,9 @@ def _preflight_chain(
                     shot.get("prompt")),
                 "references": [],
             }
-            if (not any(issue["code"].startswith("source_")
-                        for issue in report["errors"])):
+            if ((record["selected"] or not _scene_has_local_lip_sync(prepared, shot))
+                    and not any(issue["code"].startswith("source_")
+                                for issue in report["errors"])):
                 source_dependency = _canonical_source_reference_dependency(
                     prepared, int(shot["index"]), runtime_timeline,
                     source_audio)
@@ -19595,9 +19688,13 @@ class MiniMaxH3ChainCurrent:
         source_audio_locked = _audio_policy_locks_source_audio(plan, shot)
         lip_sync_options = _resolved_lip_sync_options(plan, shot)
         target_clip_start_seconds = 0.0
+        local_source_asset = None
         if source_reference_enabled or source_audio_locked:
             external_lead = int(shot.get("external_context_frames", 0))
-            if source_timeline is not None:
+            if _scene_has_local_lip_sync(plan, shot):
+                target_audio_slice, target_clip_start_seconds, local_source_asset = (
+                    _scene_lip_sync_target(plan, shot))
+            elif source_timeline is not None:
                 _validate_source_timeline_hash(
                     plan["compatibility"], source_timeline,
                     "H3 Chain Current Shot")
@@ -19711,6 +19808,10 @@ class MiniMaxH3ChainCurrent:
             audio_status = "song %.3f..%.3fs" % (
                 shot["audio_start_seconds"],
                 shot["audio_start_seconds"] + shot["audio_duration_seconds"])
+        if local_source_asset is not None:
+            alignment_status = "scene audio target-locked"
+            audio_status = "dialogue %s from %.3fs (file-local)" % (
+                local_source_asset["asset_id"], shot["lip_sync_source"]["start_seconds"])
         cfg = _scene_compatibility(plan, index)
         _validate_scene_resolution_boundary(plan, index)
         context_length = _shot_context_length(
@@ -19733,6 +19834,9 @@ class MiniMaxH3ChainCurrent:
                    shot["delivered_frames"], video_blend_frames, audio_status,
                    alignment_status, scene_audio_status, shot["seed"]))
         dependency_state = dict(state)
+        dependency_state.pop("current_lip_sync_source_asset", None)
+        if local_source_asset is not None:
+            dependency_state["current_lip_sync_source_asset"] = local_source_asset
         if source_audio_locked:
             dependency_state["current_source_audio_target"] = target_audio_slice
             dependency_state[
@@ -20081,6 +20185,12 @@ class MiniMaxH3ChainContext:
             from .masked_context import apply_locked_source_audio_target
 
             lip_sync_options = _resolved_lip_sync_options(cfg, shot)
+            if _scene_has_local_lip_sync(cfg, shot):
+                # Project-wide vocal gating must not gate a different dialogue.
+                lip_sync_voice = None
+                if lip_sync_options is not None:
+                    lip_sync_options = dict(lip_sync_options)
+                    lip_sync_options.pop("voice_fingerprint", None)
             expected_voice = str(
                 (lip_sync_options or {}).get("voice_fingerprint") or "")
             if expected_voice and lip_sync_voice is None:
@@ -21061,6 +21171,13 @@ class MiniMaxH3ChainSegmentSave:
                     shot["source_audio_target"])
             elif _audio_policy_locks_source_audio(plan, shot):
                 segment["source_audio_target"] = "locked"
+            if "lip_sync_source" in shot:
+                segment["lip_sync_source"] = dict(shot["lip_sync_source"])
+            if _scene_has_local_lip_sync(plan, shot):
+                descriptor = state.get("current_lip_sync_source_asset")
+                if descriptor is None:
+                    raise ValueError("Scene-local lip-sync source was not prepared by Current Shot.")
+                segment["lip_sync_source_asset"] = dict(descriptor)
             try:
                 cache_metadata = _find_reference_cache(
                     str(plan["compatibility"].get(
@@ -23964,6 +24081,7 @@ def _assemble_generated_audio_records(
         start_frame = cumulative_frames
         use_overlap = (
             ordinal > 0
+            and not segment.get("lip_sync_source_asset")
             and record["mode"] in MASKED_CONTINUATION_MODES
             and record["repeated_frames"] > 0
             and record["overlap"] is not None)
@@ -23978,7 +24096,7 @@ def _assemble_generated_audio_records(
                 "H3 generated audio: clip %d owns its %d-frame AV overlap at "
                 "the incoming boundary.", int(segment["index"]),
                 int(record["repeated_frames"]))
-        elif (ordinal > 0
+        elif (ordinal > 0 and not segment.get("lip_sync_source_asset")
               and record["mode"] in MASKED_CONTINUATION_MODES
               and record["repeated_frames"] > 0):
             _LOG.warning(
@@ -24009,6 +24127,7 @@ def _assemble_generated_audio_records(
     result = {"waveform": assembled, "sample_rate": sample_rate}
     first_record = records[0]
     if (first_record["mode"] in MASKED_CONTINUATION_MODES
+            and not first_record["segment"].get("lip_sync_source_asset")
             and first_record["repeated_frames"] > 0
             and first_record["overlap"] is not None):
         # Preserve scene 1's complete decoded AV window until an optional
@@ -24021,6 +24140,43 @@ def _assemble_generated_audio_records(
             AUDIO_TRIM_FRAMES_KEY: first_record["repeated_frames"],
         })
     return result
+
+
+def _audio_with_scene_lip_sync(audio: Any, manifest: dict[str, Any], selected: str):
+    """Apply saved dialogue in generation order, before editorial trims/gaps.
+
+    Old manifests take the identity path. Only explicit scene sources are read;
+    mixing cannot change the level of audio outside the selected scene.
+    """
+    if audio is None or selected == "none":
+        return audio
+    segments = manifest.get("segments") or []
+    if not any(item.get("lip_sync_source_asset") for item in segments):
+        return audio
+    waveform, rate = _validate_audio(audio, "Scene lip-sync final audio")
+    waveform = waveform.clone()
+    cursor = 0
+    for segment in segments:
+        frames = int(segment["delivered_frames"])
+        left = sample_boundary_from_frames(cursor, rate, FPS)
+        right = sample_boundary_from_frames(cursor + frames, rate, FPS)
+        cursor += frames
+        if not segment.get("lip_sync_source_asset"):
+            continue
+        selection, _descriptor, source = _scene_lip_sync_media(
+            manifest["run_name"], segment)
+        dialogue = _scene_lip_sync_window(
+            source, int(round(selection["start_seconds"] * FPS)), frames)
+        dialogue = _resample_audio_exact(
+            dialogue, rate, right - left, int(waveform.shape[-2]),
+            "Scene lip-sync final dialogue")["waveform"].to(waveform)
+        if selected == "source" and selection["final_audio"] == "mix":
+            dialogue = waveform[..., left:right] + dialogue
+            peak = float(dialogue.abs().max())
+            if peak > 1:
+                dialogue = dialogue / peak
+        waveform[..., left:right] = dialogue
+    return {**audio, "waveform": waveform}
 
 
 def _audio_with_editorial_timeline(
@@ -26910,6 +27066,7 @@ def _full_chain_selected_audio(
     else:
         raise ValueError(
             "Unknown H3 full-chain audio source %r." % selected)
+    audio = _audio_with_scene_lip_sync(audio, manifest, selected)
     if (audio is not None and editorial_records is not None
             and editorial_frames is not None):
         audio = _audio_with_editorial_timeline(
@@ -27670,6 +27827,9 @@ class MiniMaxH3ChainAssemble:
                 generated_warning = (
                     "generated audio sidecar unavailable: %s" % exc)
                 _LOG.warning("H3 Chain %s", generated_warning)
+        if generated_track is not None:
+            generated_track = _audio_with_scene_lip_sync(
+                generated_track, manifest, "generated")
         if generated_track is not None and editorial_changed:
             generated_track = _audio_with_editorial_timeline(
                 generated_track, editorial_records,
@@ -27736,6 +27896,7 @@ class MiniMaxH3ChainAssemble:
                     ..., source_start_sample:source_end_sample],
                 "sample_rate": sample_rate,
             }
+            audio = _audio_with_scene_lip_sync(audio, manifest, "source")
             audio = _audio_with_editorial_timeline(
                 audio, editorial_records, generated_extension_frames,
                 editorial_extension_frames, "H3 source editorial audio")
@@ -29280,6 +29441,8 @@ def _checkpoint_plan_revision(segment: dict[str, Any]) -> dict[str, Any]:
             segment["audio_context_lead_start_frame"])
     if "lora_route" in segment:
         revision["lora_route"] = str(segment["lora_route"])
+    if "lip_sync_source" in segment:
+        revision["lip_sync_source"] = dict(segment["lip_sync_source"])
     for key in (
             "continuation_mode", "context_spatial_proxy",
             "source_reference", "generated_continuity",

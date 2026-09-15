@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import {sceneLipSyncMode, applySceneLipSync} from "../web/h3_policy_core.mjs";
+import {normalizeSceneLipSyncSource} from "../web/h3_scene_lip_sync.mjs";
 import {projectAudioTrackBindings, setProjectAudioTrack} from "../web/h3_project_asset_editor_core.mjs";
 
 const shot = {id: "singing", prompt: "Keep me", length: 73};
@@ -52,13 +53,16 @@ for (const file of ["h3_chain_plan_studio.js", "h3_chain_plan_editor.js"]) {
     const sandbox = {
         shot: current, planAudioPolicy: {sourceAudioTarget: "locked"},
         applySceneLipSync, sceneLipSyncMode,
+        normalizeSceneLipSyncSource,
+        state: {sceneAudioAssetsRun:"test", sceneAudioAssets:[]}, runName:() => "test",
+        button() {},
         element: () => {
             const control = {append() {}, addEventListener(event, callback) { this[event] = callback; }};
             controls.push(control); return control;
         },
         form: {append() {}}, field() {},
         syncPlan() { saves++; }, writePlan() { saves++; },
-        render() {}, renderScenePanel() {}, renderStatus() {},
+        render() {}, renderScenePanel() {}, renderPanel() {}, renderStatus() {},
     };
     vm.runInNewContext(source.slice(start, stop), sandbox);
     const select = controls[0];

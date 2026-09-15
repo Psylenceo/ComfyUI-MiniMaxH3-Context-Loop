@@ -14,6 +14,7 @@ import {
     sharedPrompt,
 } from "./h3_chain_plan_core.mjs?v=context-mask-1";
 import {normalizeContextMask} from "./h3_context_mask_core.mjs";
+import {normalizeSceneLipSyncSource} from "./h3_scene_lip_sync.mjs";
 
 const FPS = 24;
 const MAX_H3_FRAMES = 3592;
@@ -345,6 +346,9 @@ export function applyCheckpointRevisionSet(plan, revisions, {
         } else {
             delete shot.context_spatial_proxy;
         }
+        const lipSyncSource = normalizeSceneLipSyncSource(revision.lip_sync_source);
+        if (lipSyncSource) shot.lip_sync_source = lipSyncSource;
+        else delete shot.lip_sync_source;
         for (const [key, allowed] of [
             ["source_reference", ["on", "off"]],
             ["generated_continuity", ["on", "off"]],

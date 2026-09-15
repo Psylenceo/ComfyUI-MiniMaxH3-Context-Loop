@@ -160,6 +160,28 @@ See [How disabled nodes are shown](docs/NODE_REFERENCE.md#how-disabled-nodes-are
 The [Node guide](docs/NODE_REFERENCE.md) lists the important sockets, settings,
 reference nodes, recovery tools, masking nodes, and advanced groups.
 
+## Dialogue audio for one scene (nightly)
+
+In Plan Studio, select a scene and choose **Lip-sync source · this scene only**.
+Pick an audio file from the Project Asset Carousel (use **Refresh audio** after
+importing it). This turns that scene's Lip-sync on. The file can remain disabled
+for prompt tags; it does not need to become the project's Source track.
+
+**Audio file start** selects the position heard at the first delivered frame,
+snapped to 1/24 second. AV context remains before that position. Short audio is
+padded with silence and longer audio is cut to the scene; scene timing and other
+scenes' sources do not change. Editorial trims/slips move dialogue with the picture.
+
+With a Source final soundtrack, choose dialogue over the project track (default)
+or replace the track during this scene. Generated output uses the dialogue once;
+None remains muted. Source, offset and mix choice are saved with the generated
+take and retained for checkpoint recovery, chapter delivery and upscale export.
+Keep the carousel audio file: saved exports reference that original asset.
+The player previews the current Plan selection through its Source track / scene
+dialogue monitor; regenerate the scene after changing its dialogue source.
+Choose **Inherit project timeline** to return to the existing source behavior.
+Existing workflows without a scene source keep their previous behavior.
+
 ## Important behavior
 
 - **Nightly: collapsible Studio chapters.** Use **▾** beside a chapter title to
