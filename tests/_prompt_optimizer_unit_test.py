@@ -90,8 +90,8 @@ class FakeResponse:
 requests = []
 
 
-def fake_urlopen(request, timeout):
-    requests.append((request, timeout))
+def fake_urlopen(request, timeout, extra_origins=""):
+    requests.append((request, timeout, extra_origins))
     return FakeResponse({
         "choices": [{"message": {"content": "Rewritten H3 prompt."}}],
     })
@@ -102,9 +102,10 @@ result = optimizer.call_direct_optimizer(
     "http://127.0.0.1:1234/v1", "", "local-model", "openai",
     "Rewrite this scene.")
 assert result == "Rewritten H3 prompt."
-request, timeout = requests[-1]
+request, timeout, extra_origins = requests[-1]
 assert request.full_url == "http://127.0.0.1:1234/v1/chat/completions"
 assert timeout == optimizer.REQUEST_TIMEOUT_SECONDS
+assert extra_origins == ""
 payload = json.loads(request.data)
 assert payload["model"] == "local-model"
 assert payload["messages"][0]["role"] == "system"
