@@ -162,6 +162,11 @@ reference nodes, recovery tools, masking nodes, and advanced groups.
 
 ## Important behavior
 
+- **Nightly: collapsible Studio chapters.** Use **▾** beside a chapter title to
+  fold its scenes into a compact group. Click the group to play/scrub the chapter
+  on a local timeline, including trims, ALTs and internal black gaps. Folding is
+  saved with the workflow and does not alter generation or exports.
+  See [chapter folding and playback](docs/PLAN_STUDIO_CHAPTERS.md).
 - **Nightly: chapter resolution.** Click a chapter marker in Plan Studio, then
   choose **Inherit from Plan** or set its **Width / Height** (multiples of 32).
   Connect **Current Shot** width/height to the H3 conditioning node. A locked

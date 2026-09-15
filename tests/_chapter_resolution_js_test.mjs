@@ -35,6 +35,7 @@ let writes = 0;
 const state = {plan, activeChapterId:"sequel"};
 const context = vm.createContext({
     state, node:{}, orderedChapters, safeShotId, normalizeChapterResolution, element,
+    chapterView:() => ({collapsed:[]}),
     widget:(_node, key) => ({value:key === "width" ? 64 : 96}),
     field:(label, control) => { fields[label] = control; return control; },
     button:() => element("button"), writePlan:() => { writes++; },

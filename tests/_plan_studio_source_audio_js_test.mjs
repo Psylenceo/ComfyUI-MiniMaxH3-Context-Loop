@@ -92,6 +92,7 @@ const context = vm.createContext({
     formatClock:(value) => String(value), automaticSceneColor:() => "#fff",
     drawSourceWaveform:(_canvas, samples) => drawn.push(samples),
     selectScene() {}, sceneLocked:() => false,
+    foldedTimelineEntry:() => null,
     writePlan() { writes += 1; },
     trailingGapSegment:() => state.timelineSegments.find((item) => item.trailing),
     api:{

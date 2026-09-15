@@ -38,6 +38,7 @@ for (const filename of [
     const state = {plan, planNode:{}, active:0, view:"scene", disposed:false};
     const context = vm.createContext({
         state, node:{}, console,
+        chapterView:() => ({focused:""}),
         planRunName:() => run, runName:() => run, optimizerBusy:() => false,
         flushPlanEffects(){}, flushPromptAnalysis(){},
         flushHistoryDraft:() => new Promise(resolve => pending.push(resolve)),

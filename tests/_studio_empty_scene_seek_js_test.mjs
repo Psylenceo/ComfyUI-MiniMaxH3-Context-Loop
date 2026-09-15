@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import {studioChapterPlayback, studioChapterLocalSecond, studioChapterGlobalSecond} from "../web/h3_studio_chapters.mjs";
 import {
     locateStudioTimelineSegment, studioEditorialSceneStartSeconds,
     studioPlayerSegmentClock, studioSourceAudioSecond, studioSourceSecond,
@@ -66,6 +67,8 @@ const context = vm.createContext({
     state, video, generatedAudio, sourceVideo, sourceTimelineAudio, slider, clock,
     generatedToggle, sourceToggle:{checked:true}, motionToggle:{checked:false},
     Event, FPS:24, timelineModel:() => model, timing:() => model.result,
+    playbackModel:() => studioChapterPlayback(model, null),
+    studioChapterLocalSecond, studioChapterGlobalSecond, stopAtChapterEnd:() => false,
     locateStudioTimelineSegment, studioEditorialSceneStartSeconds,
     studioPlayerSegmentClock, studioSourceAudioSecond, studioSourceSecond,
     sourceAudio:() => hasSourceAudio ? descriptor : null,

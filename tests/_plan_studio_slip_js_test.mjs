@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import * as core from "../web/h3_chain_plan_studio_core.mjs";
+import * as chapters from "../web/h3_studio_chapters.mjs";
 
 const rows = [{id:"one", rawFrames:362, deliveredFrames:340},
     {id:"two", rawFrames:239, deliveredFrames:234}];
@@ -128,6 +129,9 @@ state.playerAudio = media("scene-audio");
 state.sourcePlayer = media("reference");
 state.sourceAudioPlayer = media("soundtrack");
 Object.assign(context, {
+    ...chapters,
+    playbackModel:() => chapters.studioChapterPlayback({result:{shots:rows}, segments:after,
+        totalSeconds:after.at(-1).endSeconds}, null),
     timelineModel:() => ({result:{shots:rows}, segments:after, totalSeconds:after.at(-1).endSeconds}),
     playerCheckpoint:() => ({video:"picture", audio:"scene-audio"}),
     videoUrl:(value) => value,
