@@ -8,6 +8,17 @@ They use fresh node serialization, the organized **Production Plan**, explicit
 For installation and first-run setup, see
 [Getting started](../docs/GETTING_STARTED.md).
 
+Need separate image/audio loaders without the Carousel? Use
+[Ref2V Tagged Source Audio](<Ref2V Tagged Source Audio - MiniMax H3 0.6.json>).
+Select your full soundtrack in **Load Audio**; Source Timeline and per-scene
+state are already wired. See its [wiring guide](<guides/Ref2V Tagged Source Audio - MiniMax H3 0.6.md>).
+
+**Sampler steps:** the Plan settings control the default; a scene's **Steps
+override** takes precedence. Clear a scene override to inherit the default.
+The displayed inherited value includes defaults saved inside older Plan JSON.
+Changing the default in Production Plan or Plan Studio updates that saved
+default too; it does not overwrite deliberate scene overrides.
+
 Each workflow has a compact **START HERE** note. The longer setup and wiring
 instructions are in its matching Markdown file under [`guides/`](guides/),
 so they no longer take up large empty canvas panels. Titles and preview sizes
@@ -119,6 +130,25 @@ are not first-install tests.
 Upscaled variants are saved below
 `output/h3_chains/<run>/upscaled/<profile>/` and never replace source
 checkpoints. See [Runs and recovery](../docs/RUNS_AND_RECOVERY.md).
+
+**Assemble an already-saved upscale**
+
+Add **MiniMax H3 Upscale Manifest Load**, paste the path to the saved
+`upscale_manifest.json`, and connect its **manifest** output directly to
+**H3 Chain Assemble**. This bypasses the upscale loop entirely: no scene needs
+to be regenerated, and no source Plan or model loaders are required.
+
+For a project-wide run the file is
+`output/h3_chains/<run>/upscaled/<profile>/upscale_manifest.json`.
+Chapter-scoped runs keep it under
+`output/h3_chains/<run>/chapters/<chapter>/upscaled/<profile>/`
+(inside the working branch directory when applicable). An unfinished run can
+use its saved `partial/through_clip_NNNN.manifest.json` instead; it stays partial.
+The node accepts an absolute path or one relative to ComfyUI's output folder.
+It reads and verifies only when queued, without scanning or rewriting projects.
+Keep the saved upscale's media and checkpoints; loading does not reconstruct
+deleted artifacts. Checkpoint Manager's processing tabs remain preview-only
+except for the existing DeRoPE source selection.
 
 The SeedVR2 workflow uses the current **SeedVR2 Video Path Upscaler** node
 (`SeedVR2VideoPathUpscaler`), not the retired `SeedVR2DirectVideoUpscaler` ID.

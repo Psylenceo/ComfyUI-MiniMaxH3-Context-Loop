@@ -2,7 +2,7 @@
   "id": "158840d8-7fc5-5e78-8fd8-64c8b310f7cd",
   "revision": 0,
   "last_node_id": 31,
-  "last_link_id": 59,
+  "last_link_id": 60,
   "nodes": [
     {
       "id": 1,
@@ -24,7 +24,7 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            43
+            44
           ]
         }
       ],
@@ -91,7 +91,7 @@
           "name": "SAMPLER",
           "type": "SAMPLER",
           "links": [
-            26
+            27
           ]
         }
       ],
@@ -124,8 +124,8 @@
           "type": "VAE",
           "links": [
             6,
-            17,
-            30
+            18,
+            31
           ]
         }
       ],
@@ -158,7 +158,7 @@
           "type": "VAE",
           "links": [
             7,
-            32
+            33
           ]
         }
       ],
@@ -179,7 +179,7 @@
       ],
       "size": [
         360,
-        216
+        256
       ],
       "flags": {},
       "order": 5,
@@ -204,6 +204,16 @@
           "name": "source_timeline",
           "type": "H3_SOURCE_TIMELINE",
           "link": null
+        },
+        {
+          "name": "tagged_references",
+          "type": "H3_TAGGED_REFERENCES",
+          "link": null
+        },
+        {
+          "name": "reference_schedule",
+          "type": "H3_REFERENCE_SCHEDULE",
+          "link": null
         }
       ],
       "outputs": [
@@ -211,7 +221,7 @@
           "name": "flow",
           "type": "H3_CHAIN_FLOW",
           "links": [
-            48
+            49
           ]
         },
         {
@@ -242,7 +252,7 @@
       "type": "MiniMaxH3ChainCurrent",
       "pos": [
         3820,
-        1608
+        1648
       ],
       "size": [
         460,
@@ -269,10 +279,11 @@
           "type": "H3_CHAIN_STATE",
           "links": [
             15,
-            36,
+            16,
             37,
-            45,
-            49
+            38,
+            46,
+            50
           ]
         },
         {
@@ -319,7 +330,7 @@
           "name": "steps",
           "type": "INT",
           "links": [
-            23
+            24
           ]
         },
         {
@@ -375,7 +386,7 @@
       "type": "MiniMaxH3ChainAssemble",
       "pos": [
         4390,
-        2396
+        2436
       ],
       "size": [
         440,
@@ -425,7 +436,8 @@
         "",
         "plan",
         "off",
-        "off"
+        "off",
+        false
       ]
     },
     {
@@ -457,7 +469,7 @@
           "name": "NOISE",
           "type": "NOISE",
           "links": [
-            24
+            25
           ]
         }
       ],
@@ -556,7 +568,7 @@
         {
           "name": "state",
           "type": "H3_CHAIN_STATE",
-          "link": null
+          "link": 15
         }
       ],
       "outputs": [
@@ -564,14 +576,14 @@
           "name": "positive",
           "type": "CONDITIONING",
           "links": [
-            16
+            17
           ]
         },
         {
           "name": "latent",
           "type": "LATENT",
           "links": [
-            18
+            19
           ]
         },
         {
@@ -632,22 +644,22 @@
         {
           "name": "state",
           "type": "H3_CHAIN_STATE",
-          "link": 15
+          "link": 16
         },
         {
           "name": "conditioning",
           "type": "CONDITIONING",
-          "link": 16
+          "link": 17
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 17
+          "link": 18
         },
         {
           "name": "latent",
           "type": "LATENT",
-          "link": 18
+          "link": 19
         },
         {
           "name": "audio_vae",
@@ -675,14 +687,14 @@
           "name": "conditioning",
           "type": "CONDITIONING",
           "links": [
-            21
+            22
           ]
         },
         {
           "name": "trim_frames",
           "type": "INT",
           "links": [
-            35
+            36
           ]
         },
         {
@@ -694,7 +706,7 @@
           "name": "latent",
           "type": "LATENT",
           "links": [
-            28
+            29
           ]
         },
         {
@@ -727,7 +739,7 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 19
+          "link": 20
         }
       ],
       "outputs": [
@@ -735,8 +747,8 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            20,
-            22
+            21,
+            23
           ]
         }
       ],
@@ -767,12 +779,12 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 20
+          "link": 21
         },
         {
           "name": "conditioning",
           "type": "CONDITIONING",
-          "link": 21
+          "link": 22
         }
       ],
       "outputs": [
@@ -780,7 +792,7 @@
           "name": "GUIDER",
           "type": "GUIDER",
           "links": [
-            25
+            26
           ]
         }
       ],
@@ -808,12 +820,12 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 22
+          "link": 23
         },
         {
           "name": "steps",
           "type": "INT",
-          "link": 23,
+          "link": 24,
           "widget": {
             "name": "steps"
           }
@@ -824,7 +836,7 @@
           "name": "SIGMAS",
           "type": "SIGMAS",
           "links": [
-            27
+            28
           ]
         }
       ],
@@ -856,27 +868,27 @@
         {
           "name": "noise",
           "type": "NOISE",
-          "link": 24
+          "link": 25
         },
         {
           "name": "guider",
           "type": "GUIDER",
-          "link": 25
+          "link": 26
         },
         {
           "name": "sampler",
           "type": "SAMPLER",
-          "link": 26
+          "link": 27
         },
         {
           "name": "sigmas",
           "type": "SIGMAS",
-          "link": 27
+          "link": 28
         },
         {
           "name": "latent_image",
           "type": "LATENT",
-          "link": 28
+          "link": 29
         }
       ],
       "outputs": [
@@ -884,10 +896,10 @@
           "name": "output",
           "type": "LATENT",
           "links": [
-            29,
-            31,
-            39,
-            51
+            30,
+            32,
+            40,
+            52
           ]
         },
         {
@@ -920,12 +932,12 @@
         {
           "name": "samples",
           "type": "LATENT",
-          "link": 29
+          "link": 30
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 30
+          "link": 31
         }
       ],
       "outputs": [
@@ -933,7 +945,7 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            33
+            34
           ]
         }
       ],
@@ -961,12 +973,12 @@
         {
           "name": "samples",
           "type": "LATENT",
-          "link": 31
+          "link": 32
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 32
+          "link": 33
         }
       ],
       "outputs": [
@@ -974,7 +986,7 @@
           "name": "AUDIO",
           "type": "AUDIO",
           "links": [
-            34
+            35
           ]
         }
       ],
@@ -1002,12 +1014,12 @@
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 33
+          "link": 34
         },
         {
           "name": "trim_frames",
           "type": "INT",
-          "link": 35,
+          "link": 36,
           "widget": {
             "name": "trim_frames"
           }
@@ -1015,12 +1027,12 @@
         {
           "name": "audio",
           "type": "AUDIO",
-          "link": 34
+          "link": 35
         },
         {
           "name": "state",
           "type": "H3_CHAIN_STATE",
-          "link": 36
+          "link": 37
         }
       ],
       "outputs": [
@@ -1028,23 +1040,23 @@
           "name": "images",
           "type": "IMAGE",
           "links": [
-            38,
-            50
+            39,
+            51
           ]
         },
         {
           "name": "audio",
           "type": "AUDIO",
           "links": [
-            40,
-            47
+            41,
+            48
           ]
         },
         {
           "name": "images_with_overlap",
           "type": "IMAGE",
           "links": [
-            41
+            42
           ]
         },
         {
@@ -1082,27 +1094,27 @@
         {
           "name": "state",
           "type": "H3_CHAIN_STATE",
-          "link": 37
+          "link": 38
         },
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 38
+          "link": 39
         },
         {
           "name": "sampled_latent",
           "type": "LATENT",
-          "link": 39
+          "link": 40
         },
         {
           "name": "audio",
           "type": "AUDIO",
-          "link": 40
+          "link": 41
         },
         {
           "name": "images_with_overlap",
           "type": "IMAGE",
-          "link": 41
+          "link": 42
         },
         {
           "name": "denoised_latent",
@@ -1115,7 +1127,7 @@
           "name": "segment",
           "type": "H3_CHAIN_SEGMENT",
           "links": [
-            46
+            47
           ]
         },
         {
@@ -1148,7 +1160,7 @@
         {
           "name": "manifest",
           "type": "H3_CHAIN_MANIFEST",
-          "link": 42
+          "link": 43
         },
         {
           "name": "source_audio",
@@ -1185,7 +1197,8 @@
         "",
         "plan",
         "off",
-        "off"
+        "off",
+        false
       ]
     },
     {
@@ -1193,7 +1206,7 @@
       "type": "ModelAttentionBackend",
       "pos": [
         3820,
-        2108
+        2148
       ],
       "size": [
         360,
@@ -1206,7 +1219,7 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 43
+          "link": 44
         }
       ],
       "outputs": [
@@ -1214,7 +1227,7 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            19
+            20
           ]
         }
       ],
@@ -1231,7 +1244,7 @@
       "type": "MiniMaxH3ChainManifestLoad",
       "pos": [
         3820,
-        2396
+        2436
       ],
       "size": [
         440,
@@ -1244,7 +1257,7 @@
         {
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
-          "link": 44
+          "link": 45
         },
         {
           "name": "source_audio",
@@ -1305,17 +1318,17 @@
         {
           "name": "state",
           "type": "H3_CHAIN_STATE",
-          "link": 45
+          "link": 46
         },
         {
           "name": "segment",
           "type": "H3_CHAIN_SEGMENT",
-          "link": 46
+          "link": 47
         },
         {
           "name": "audio",
           "type": "AUDIO",
-          "link": 47
+          "link": 48
         },
         {
           "name": "source_audio",
@@ -1328,7 +1341,7 @@
           "name": "segment",
           "type": "H3_CHAIN_SEGMENT",
           "links": [
-            52
+            53
           ]
         },
         {
@@ -1370,27 +1383,27 @@
         {
           "name": "flow",
           "type": "H3_CHAIN_FLOW",
-          "link": 48
+          "link": 49
         },
         {
           "name": "state",
           "type": "H3_CHAIN_STATE",
-          "link": 49
+          "link": 50
         },
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 50
+          "link": 51
         },
         {
           "name": "sampled_latent",
           "type": "LATENT",
-          "link": 51
+          "link": 52
         },
         {
           "name": "segment",
           "type": "H3_CHAIN_SEGMENT",
-          "link": 52
+          "link": 53
         }
       ],
       "outputs": [
@@ -1398,7 +1411,7 @@
           "name": "manifest",
           "type": "H3_CHAIN_MANIFEST",
           "links": [
-            42
+            43
           ]
         },
         {
@@ -1422,7 +1435,8 @@
         "Node name for S&R": "MiniMaxH3ChainLoopEnd"
       },
       "widgets_values": [
-        "off"
+        "off",
+        "recursive_legacy"
       ]
     },
     {
@@ -1443,7 +1457,7 @@
         {
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
-          "link": 53
+          "link": 54
         },
         {
           "name": "source_timeline",
@@ -1458,7 +1472,7 @@
         {
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
-          "link": 54
+          "link": 55
         },
         {
           "name": "reference_schedule",
@@ -1473,7 +1487,7 @@
         {
           "name": "project_assets",
           "type": "H3_PROJECT_ASSETS",
-          "link": 55
+          "link": 56
         }
       ],
       "outputs": [
@@ -1482,9 +1496,9 @@
           "type": "H3_CHAIN_PLAN",
           "links": [
             1,
-            44,
-            56,
-            59
+            45,
+            57,
+            60
           ]
         },
         {
@@ -1541,7 +1555,7 @@
         1,
         "",
         true,
-        "{\n  \"defaults\": {\n    \"steps\": 20\n  },\n  \"shots\": [\n    {\n      \"id\": \"reference_delivery\",\n      \"prompt\": \"subject_definitions:\\n@courier_arrival defines <Subject 1>, the exact adult bicycle courier, including his face, mustard-yellow waterproof jacket, dark teal trousers, charcoal helmet, olive messenger bag, silver bicycle, kraft parcel, proportions, and photographic rendering.\\n@greenhouse_delivery defines the greenhouse delivery destination, including the glass structure, wooden potting table, dense plants, warm practical bulbs, wet floor reflections, and the same courier's end pose.\\n<Subject 1> is the single courier shown by both references. Preserve his identity, clothing, equipment, and scale while allowing the described movement.\\n\\nsummary:\\n[reference generation] One continuous delivery moves <Subject 1> from the wet greenhouse entrance in @courier_arrival toward the completed parcel placement in @greenhouse_delivery.\\n\\nretention_analysis:\\n<Subject 1> (appears in [Shot 1]): fully_preserved - retain the exact face, adult age, body proportions, mustard jacket, teal trousers, helmet, bag, bicycle, and parcel across the complete shot.\\n@courier_arrival: fully_preserved - use its courier identity, wardrobe, bicycle geometry, exterior doorway, wet paving, camera height, and cool daylight as the opening state.\\n@greenhouse_delivery: reference - use its potting table, plants, warm bulbs, interior reflections, and delivery pose as the destination; do not copy the final pose before the action reaches it.\\n\\ndetailed_description:\\n[Shot 1] Begin at the greenhouse entrance with exactly one courier and one bicycle. He walks the bicycle through the open glass door, glances down to confirm the parcel, then turns toward the wooden potting table. The camera tracks laterally at walking speed with restrained handheld movement. He stops the bicycle with his left hand and sets the parcel on the clear corner of the table with his right hand. Preserve face, hands, clothing, bicycle structure, parcel dimensions, plant layout, lighting direction, and coherent reflections. End immediately after the parcel makes contact; no cut, duplicate subject, added customer, text, logo, or early freeze.\\n\\noverall_soundscape:\\nLight rain on greenhouse glass, wet tire roll, a quiet freewheel tick, rubber soles, door hinge, jacket movement, muted ventilation, and soft cardboard contact on wood. Keep every sound synchronized and spatially plausible.\\n\\nnon_diegetic_music:\\nNo non-diegetic music.\",\n      \"length\": 243,\n      \"steps\": 20,\n      \"seed\": \"6101\"\n    },\n    {\n      \"id\": \"reference_confirmation\",\n      \"prompt\": \"subject_definitions:\\n@courier_arrival preserves the exact identity, clothing, bicycle, parcel, exterior weather, and entrance geography established before the boundary.\\n@greenhouse_delivery defines the same greenhouse interior, potting table, plants, warm bulbs, and final delivery area.\\n<Subject 1> is the same single adult courier carried by the incoming H3 Motion Context and both references.\\n\\nsummary:\\n[reference generation] The uninterrupted delivery continues inside the greenhouse after the carried overlap and ends with the courier calmly confirming the parcel placement.\\n\\nretention_analysis:\\n<Subject 1> (appears in [Shot 1]): fully_preserved - preserve the exact face, mustard jacket, teal trousers, helmet, bag, body proportions, bicycle, and motion phase inherited from context.\\n@courier_arrival: reference - retain its cool exterior light and entrance geometry only where still visible behind the courier.\\n@greenhouse_delivery: fully_preserved - retain the greenhouse table, plant arrangement, warm practical lights, reflections, parcel position, and photographic rendering.\\n\\ndetailed_description:\\n[Shot 1] Continue directly from the incoming H3 Motion Context. The carried opening overlap already contains the threshold crossing; begin new action only after it and never reset the stride. The courier rolls the same bicycle beside the potting table, steadies it with his left hand, and places the kraft parcel on the dry corner with his right hand. He checks the label area without showing readable text, then gives a small satisfied smile. Keep exactly one person and one bicycle, stable hands, coherent wheels, continuous camera direction, and consistent light. No cut, duplicate, wardrobe change, or early freeze.\\n\\noverall_soundscape:\\nContinue rain-muted greenhouse ambience, footsteps, tire roll, freewheel ticks, clothing movement, ventilation, and the soft parcel contact without restarting any sound at the scene boundary.\\n\\nnon_diegetic_music:\\nNo non-diegetic music.\",\n      \"length\": 243,\n      \"steps\": 20,\n      \"seed\": \"6102\"\n    }\n  ]\n}",
+        "{\n  \"shots\": [\n    {\n      \"id\": \"reference_delivery\",\n      \"prompt\": \"subject_definitions:\\n@courier_arrival defines <Subject 1>, the exact adult bicycle courier, including his face, mustard-yellow waterproof jacket, dark teal trousers, charcoal helmet, olive messenger bag, silver bicycle, kraft parcel, proportions, and photographic rendering.\\n@greenhouse_delivery defines the greenhouse delivery destination, including the glass structure, wooden potting table, dense plants, warm practical bulbs, wet floor reflections, and the same courier's end pose.\\n<Subject 1> is the single courier shown by both references. Preserve his identity, clothing, equipment, and scale while allowing the described movement.\\n\\nsummary:\\n[reference generation] One continuous delivery moves <Subject 1> from the wet greenhouse entrance in @courier_arrival toward the completed parcel placement in @greenhouse_delivery.\\n\\nretention_analysis:\\n<Subject 1> (appears in [Shot 1]): fully_preserved - retain the exact face, adult age, body proportions, mustard jacket, teal trousers, helmet, bag, bicycle, and parcel across the complete shot.\\n@courier_arrival: fully_preserved - use its courier identity, wardrobe, bicycle geometry, exterior doorway, wet paving, camera height, and cool daylight as the opening state.\\n@greenhouse_delivery: reference - use its potting table, plants, warm bulbs, interior reflections, and delivery pose as the destination; do not copy the final pose before the action reaches it.\\n\\ndetailed_description:\\n[Shot 1] Begin at the greenhouse entrance with exactly one courier and one bicycle. He walks the bicycle through the open glass door, glances down to confirm the parcel, then turns toward the wooden potting table. The camera tracks laterally at walking speed with restrained handheld movement. He stops the bicycle with his left hand and sets the parcel on the clear corner of the table with his right hand. Preserve face, hands, clothing, bicycle structure, parcel dimensions, plant layout, lighting direction, and coherent reflections. End immediately after the parcel makes contact; no cut, duplicate subject, added customer, text, logo, or early freeze.\\n\\noverall_soundscape:\\nLight rain on greenhouse glass, wet tire roll, a quiet freewheel tick, rubber soles, door hinge, jacket movement, muted ventilation, and soft cardboard contact on wood. Keep every sound synchronized and spatially plausible.\\n\\nnon_diegetic_music:\\nNo non-diegetic music.\",\n      \"length\": 243,\n      \"seed\": \"6101\"\n    },\n    {\n      \"id\": \"reference_confirmation\",\n      \"prompt\": \"subject_definitions:\\n@courier_arrival preserves the exact identity, clothing, bicycle, parcel, exterior weather, and entrance geography established before the boundary.\\n@greenhouse_delivery defines the same greenhouse interior, potting table, plants, warm bulbs, and final delivery area.\\n<Subject 1> is the same single adult courier carried by the incoming H3 Motion Context and both references.\\n\\nsummary:\\n[reference generation] The uninterrupted delivery continues inside the greenhouse after the carried overlap and ends with the courier calmly confirming the parcel placement.\\n\\nretention_analysis:\\n<Subject 1> (appears in [Shot 1]): fully_preserved - preserve the exact face, mustard jacket, teal trousers, helmet, bag, body proportions, bicycle, and motion phase inherited from context.\\n@courier_arrival: reference - retain its cool exterior light and entrance geometry only where still visible behind the courier.\\n@greenhouse_delivery: fully_preserved - retain the greenhouse table, plant arrangement, warm practical lights, reflections, parcel position, and photographic rendering.\\n\\ndetailed_description:\\n[Shot 1] Continue directly from the incoming H3 Motion Context. The carried opening overlap already contains the threshold crossing; begin new action only after it and never reset the stride. The courier rolls the same bicycle beside the potting table, steadies it with his left hand, and places the kraft parcel on the dry corner with his right hand. He checks the label area without showing readable text, then gives a small satisfied smile. Keep exactly one person and one bicycle, stable hands, coherent wheels, continuous camera direction, and consistent light. No cut, duplicate, wardrobe change, or early freeze.\\n\\noverall_soundscape:\\nContinue rain-muted greenhouse ambience, footsteps, tire roll, freewheel ticks, clothing movement, ventilation, and the soft parcel contact without restarting any sound at the scene boundary.\\n\\nnon_diegetic_music:\\nNo non-diegetic music.\",\n      \"length\": 243,\n      \"seed\": \"6102\"\n    }\n  ]\n}",
         "ref2v_studio_minimax_h3_0_6_json",
         "",
         896,
@@ -1579,7 +1593,7 @@
         {
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
-          "link": 56
+          "link": 57
         }
       ],
       "outputs": [
@@ -1613,7 +1627,7 @@
         {
           "name": "chain_policy",
           "type": "H3_CHAIN_POLICY",
-          "link": 57
+          "link": 58
         },
         {
           "name": "plan_json_input",
@@ -1623,7 +1637,7 @@
         {
           "name": "project_assets",
           "type": "H3_PROJECT_ASSETS",
-          "link": 58
+          "link": 59
         }
       ],
       "outputs": [
@@ -1631,7 +1645,7 @@
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
           "links": [
-            53
+            54
           ]
         },
         {
@@ -1665,7 +1679,7 @@
         "Node name for S&R": "MiniMaxH3ChainPlanModern"
       },
       "widgets_values": [
-        "{\n  \"defaults\": {\n    \"steps\": 20\n  },\n  \"shots\": [\n    {\n      \"id\": \"reference_delivery\",\n      \"prompt\": \"subject_definitions:\\n@courier_arrival defines <Subject 1>, the exact adult bicycle courier, including his face, mustard-yellow waterproof jacket, dark teal trousers, charcoal helmet, olive messenger bag, silver bicycle, kraft parcel, proportions, and photographic rendering.\\n@greenhouse_delivery defines the greenhouse delivery destination, including the glass structure, wooden potting table, dense plants, warm practical bulbs, wet floor reflections, and the same courier's end pose.\\n<Subject 1> is the single courier shown by both references. Preserve his identity, clothing, equipment, and scale while allowing the described movement.\\n\\nsummary:\\n[reference generation] One continuous delivery moves <Subject 1> from the wet greenhouse entrance in @courier_arrival toward the completed parcel placement in @greenhouse_delivery.\\n\\nretention_analysis:\\n<Subject 1> (appears in [Shot 1]): fully_preserved - retain the exact face, adult age, body proportions, mustard jacket, teal trousers, helmet, bag, bicycle, and parcel across the complete shot.\\n@courier_arrival: fully_preserved - use its courier identity, wardrobe, bicycle geometry, exterior doorway, wet paving, camera height, and cool daylight as the opening state.\\n@greenhouse_delivery: reference - use its potting table, plants, warm bulbs, interior reflections, and delivery pose as the destination; do not copy the final pose before the action reaches it.\\n\\ndetailed_description:\\n[Shot 1] Begin at the greenhouse entrance with exactly one courier and one bicycle. He walks the bicycle through the open glass door, glances down to confirm the parcel, then turns toward the wooden potting table. The camera tracks laterally at walking speed with restrained handheld movement. He stops the bicycle with his left hand and sets the parcel on the clear corner of the table with his right hand. Preserve face, hands, clothing, bicycle structure, parcel dimensions, plant layout, lighting direction, and coherent reflections. End immediately after the parcel makes contact; no cut, duplicate subject, added customer, text, logo, or early freeze.\\n\\noverall_soundscape:\\nLight rain on greenhouse glass, wet tire roll, a quiet freewheel tick, rubber soles, door hinge, jacket movement, muted ventilation, and soft cardboard contact on wood. Keep every sound synchronized and spatially plausible.\\n\\nnon_diegetic_music:\\nNo non-diegetic music.\",\n      \"length\": 243,\n      \"steps\": 20,\n      \"seed\": \"6101\"\n    },\n    {\n      \"id\": \"reference_confirmation\",\n      \"prompt\": \"subject_definitions:\\n@courier_arrival preserves the exact identity, clothing, bicycle, parcel, exterior weather, and entrance geography established before the boundary.\\n@greenhouse_delivery defines the same greenhouse interior, potting table, plants, warm bulbs, and final delivery area.\\n<Subject 1> is the same single adult courier carried by the incoming H3 Motion Context and both references.\\n\\nsummary:\\n[reference generation] The uninterrupted delivery continues inside the greenhouse after the carried overlap and ends with the courier calmly confirming the parcel placement.\\n\\nretention_analysis:\\n<Subject 1> (appears in [Shot 1]): fully_preserved - preserve the exact face, mustard jacket, teal trousers, helmet, bag, body proportions, bicycle, and motion phase inherited from context.\\n@courier_arrival: reference - retain its cool exterior light and entrance geometry only where still visible behind the courier.\\n@greenhouse_delivery: fully_preserved - retain the greenhouse table, plant arrangement, warm practical lights, reflections, parcel position, and photographic rendering.\\n\\ndetailed_description:\\n[Shot 1] Continue directly from the incoming H3 Motion Context. The carried opening overlap already contains the threshold crossing; begin new action only after it and never reset the stride. The courier rolls the same bicycle beside the potting table, steadies it with his left hand, and places the kraft parcel on the dry corner with his right hand. He checks the label area without showing readable text, then gives a small satisfied smile. Keep exactly one person and one bicycle, stable hands, coherent wheels, continuous camera direction, and consistent light. No cut, duplicate, wardrobe change, or early freeze.\\n\\noverall_soundscape:\\nContinue rain-muted greenhouse ambience, footsteps, tire roll, freewheel ticks, clothing movement, ventilation, and the soft parcel contact without restarting any sound at the scene boundary.\\n\\nnon_diegetic_music:\\nNo non-diegetic music.\",\n      \"length\": 243,\n      \"steps\": 20,\n      \"seed\": \"6102\"\n    }\n  ]\n}",
+        "{\n  \"shots\": [\n    {\n      \"id\": \"reference_delivery\",\n      \"prompt\": \"subject_definitions:\\n@courier_arrival defines <Subject 1>, the exact adult bicycle courier, including his face, mustard-yellow waterproof jacket, dark teal trousers, charcoal helmet, olive messenger bag, silver bicycle, kraft parcel, proportions, and photographic rendering.\\n@greenhouse_delivery defines the greenhouse delivery destination, including the glass structure, wooden potting table, dense plants, warm practical bulbs, wet floor reflections, and the same courier's end pose.\\n<Subject 1> is the single courier shown by both references. Preserve his identity, clothing, equipment, and scale while allowing the described movement.\\n\\nsummary:\\n[reference generation] One continuous delivery moves <Subject 1> from the wet greenhouse entrance in @courier_arrival toward the completed parcel placement in @greenhouse_delivery.\\n\\nretention_analysis:\\n<Subject 1> (appears in [Shot 1]): fully_preserved - retain the exact face, adult age, body proportions, mustard jacket, teal trousers, helmet, bag, bicycle, and parcel across the complete shot.\\n@courier_arrival: fully_preserved - use its courier identity, wardrobe, bicycle geometry, exterior doorway, wet paving, camera height, and cool daylight as the opening state.\\n@greenhouse_delivery: reference - use its potting table, plants, warm bulbs, interior reflections, and delivery pose as the destination; do not copy the final pose before the action reaches it.\\n\\ndetailed_description:\\n[Shot 1] Begin at the greenhouse entrance with exactly one courier and one bicycle. He walks the bicycle through the open glass door, glances down to confirm the parcel, then turns toward the wooden potting table. The camera tracks laterally at walking speed with restrained handheld movement. He stops the bicycle with his left hand and sets the parcel on the clear corner of the table with his right hand. Preserve face, hands, clothing, bicycle structure, parcel dimensions, plant layout, lighting direction, and coherent reflections. End immediately after the parcel makes contact; no cut, duplicate subject, added customer, text, logo, or early freeze.\\n\\noverall_soundscape:\\nLight rain on greenhouse glass, wet tire roll, a quiet freewheel tick, rubber soles, door hinge, jacket movement, muted ventilation, and soft cardboard contact on wood. Keep every sound synchronized and spatially plausible.\\n\\nnon_diegetic_music:\\nNo non-diegetic music.\",\n      \"length\": 243,\n      \"seed\": \"6101\"\n    },\n    {\n      \"id\": \"reference_confirmation\",\n      \"prompt\": \"subject_definitions:\\n@courier_arrival preserves the exact identity, clothing, bicycle, parcel, exterior weather, and entrance geography established before the boundary.\\n@greenhouse_delivery defines the same greenhouse interior, potting table, plants, warm bulbs, and final delivery area.\\n<Subject 1> is the same single adult courier carried by the incoming H3 Motion Context and both references.\\n\\nsummary:\\n[reference generation] The uninterrupted delivery continues inside the greenhouse after the carried overlap and ends with the courier calmly confirming the parcel placement.\\n\\nretention_analysis:\\n<Subject 1> (appears in [Shot 1]): fully_preserved - preserve the exact face, mustard jacket, teal trousers, helmet, bag, body proportions, bicycle, and motion phase inherited from context.\\n@courier_arrival: reference - retain its cool exterior light and entrance geometry only where still visible behind the courier.\\n@greenhouse_delivery: fully_preserved - retain the greenhouse table, plant arrangement, warm practical lights, reflections, parcel position, and photographic rendering.\\n\\ndetailed_description:\\n[Shot 1] Continue directly from the incoming H3 Motion Context. The carried opening overlap already contains the threshold crossing; begin new action only after it and never reset the stride. The courier rolls the same bicycle beside the potting table, steadies it with his left hand, and places the kraft parcel on the dry corner with his right hand. He checks the label area without showing readable text, then gives a small satisfied smile. Keep exactly one person and one bicycle, stable hands, coherent wheels, continuous camera direction, and consistent light. No cut, duplicate, wardrobe change, or early freeze.\\n\\noverall_soundscape:\\nContinue rain-muted greenhouse ambience, footsteps, tire roll, freewheel ticks, clothing movement, ventilation, and the soft parcel contact without restarting any sound at the scene boundary.\\n\\nnon_diegetic_music:\\nNo non-diegetic music.\",\n      \"length\": 243,\n      \"seed\": \"6102\"\n    }\n  ]\n}",
         "ref2v_studio_minimax_h3_0_6_json",
         "",
         896,
@@ -1705,7 +1719,7 @@
           "name": "chain_policy",
           "type": "H3_CHAIN_POLICY",
           "links": [
-            57
+            58
           ]
         },
         {
@@ -1754,8 +1768,8 @@
           "name": "project_assets",
           "type": "H3_PROJECT_ASSETS",
           "links": [
-            55,
-            58
+            56,
+            59
           ]
         },
         {
@@ -1763,7 +1777,7 @@
           "type": "H3_TAGGED_REFERENCES",
           "links": [
             8,
-            54
+            55
           ]
         },
         {
@@ -1812,7 +1826,7 @@
         {
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
-          "link": 59
+          "link": 60
         }
       ],
       "outputs": [
@@ -1972,12 +1986,20 @@
       15,
       7,
       0,
+      10,
+      10,
+      "H3_CHAIN_STATE"
+    ],
+    [
+      16,
+      7,
+      0,
       11,
       0,
       "H3_CHAIN_STATE"
     ],
     [
-      16,
+      17,
       10,
       0,
       11,
@@ -1985,7 +2007,7 @@
       "CONDITIONING"
     ],
     [
-      17,
+      18,
       4,
       0,
       11,
@@ -1993,7 +2015,7 @@
       "VAE"
     ],
     [
-      18,
+      19,
       10,
       1,
       11,
@@ -2001,7 +2023,7 @@
       "LATENT"
     ],
     [
-      19,
+      20,
       21,
       0,
       12,
@@ -2009,7 +2031,7 @@
       "MODEL"
     ],
     [
-      20,
+      21,
       12,
       0,
       13,
@@ -2017,7 +2039,7 @@
       "MODEL"
     ],
     [
-      21,
+      22,
       11,
       0,
       13,
@@ -2025,7 +2047,7 @@
       "CONDITIONING"
     ],
     [
-      22,
+      23,
       12,
       0,
       14,
@@ -2033,7 +2055,7 @@
       "MODEL"
     ],
     [
-      23,
+      24,
       7,
       7,
       14,
@@ -2041,7 +2063,7 @@
       "INT"
     ],
     [
-      24,
+      25,
       9,
       0,
       15,
@@ -2049,7 +2071,7 @@
       "NOISE"
     ],
     [
-      25,
+      26,
       13,
       0,
       15,
@@ -2057,7 +2079,7 @@
       "GUIDER"
     ],
     [
-      26,
+      27,
       3,
       0,
       15,
@@ -2065,7 +2087,7 @@
       "SAMPLER"
     ],
     [
-      27,
+      28,
       14,
       0,
       15,
@@ -2073,7 +2095,7 @@
       "SIGMAS"
     ],
     [
-      28,
+      29,
       11,
       3,
       15,
@@ -2081,7 +2103,7 @@
       "LATENT"
     ],
     [
-      29,
+      30,
       15,
       0,
       16,
@@ -2089,7 +2111,7 @@
       "LATENT"
     ],
     [
-      30,
+      31,
       4,
       0,
       16,
@@ -2097,7 +2119,7 @@
       "VAE"
     ],
     [
-      31,
+      32,
       15,
       0,
       17,
@@ -2105,7 +2127,7 @@
       "LATENT"
     ],
     [
-      32,
+      33,
       5,
       0,
       17,
@@ -2113,7 +2135,7 @@
       "VAE"
     ],
     [
-      33,
+      34,
       16,
       0,
       18,
@@ -2121,7 +2143,7 @@
       "IMAGE"
     ],
     [
-      34,
+      35,
       17,
       0,
       18,
@@ -2129,7 +2151,7 @@
       "AUDIO"
     ],
     [
-      35,
+      36,
       11,
       1,
       18,
@@ -2137,7 +2159,7 @@
       "INT"
     ],
     [
-      36,
+      37,
       7,
       0,
       18,
@@ -2145,7 +2167,7 @@
       "H3_CHAIN_STATE"
     ],
     [
-      37,
+      38,
       7,
       0,
       19,
@@ -2153,7 +2175,7 @@
       "H3_CHAIN_STATE"
     ],
     [
-      38,
+      39,
       18,
       0,
       19,
@@ -2161,7 +2183,7 @@
       "IMAGE"
     ],
     [
-      39,
+      40,
       15,
       0,
       19,
@@ -2169,7 +2191,7 @@
       "LATENT"
     ],
     [
-      40,
+      41,
       18,
       1,
       19,
@@ -2177,7 +2199,7 @@
       "AUDIO"
     ],
     [
-      41,
+      42,
       18,
       2,
       19,
@@ -2185,7 +2207,7 @@
       "IMAGE"
     ],
     [
-      42,
+      43,
       24,
       0,
       20,
@@ -2193,7 +2215,7 @@
       "H3_CHAIN_MANIFEST"
     ],
     [
-      43,
+      44,
       1,
       0,
       21,
@@ -2201,7 +2223,7 @@
       "MODEL"
     ],
     [
-      44,
+      45,
       25,
       0,
       22,
@@ -2209,7 +2231,7 @@
       "H3_CHAIN_PLAN"
     ],
     [
-      45,
+      46,
       7,
       0,
       23,
@@ -2217,7 +2239,7 @@
       "H3_CHAIN_STATE"
     ],
     [
-      46,
+      47,
       19,
       0,
       23,
@@ -2225,7 +2247,7 @@
       "H3_CHAIN_SEGMENT"
     ],
     [
-      47,
+      48,
       18,
       1,
       23,
@@ -2233,7 +2255,7 @@
       "AUDIO"
     ],
     [
-      48,
+      49,
       6,
       0,
       24,
@@ -2241,7 +2263,7 @@
       "H3_CHAIN_FLOW"
     ],
     [
-      49,
+      50,
       7,
       0,
       24,
@@ -2249,7 +2271,7 @@
       "H3_CHAIN_STATE"
     ],
     [
-      50,
+      51,
       18,
       0,
       24,
@@ -2257,7 +2279,7 @@
       "IMAGE"
     ],
     [
-      51,
+      52,
       15,
       0,
       24,
@@ -2265,7 +2287,7 @@
       "LATENT"
     ],
     [
-      52,
+      53,
       23,
       0,
       24,
@@ -2273,7 +2295,7 @@
       "H3_CHAIN_SEGMENT"
     ],
     [
-      53,
+      54,
       27,
       0,
       25,
@@ -2281,7 +2303,7 @@
       "H3_CHAIN_PLAN"
     ],
     [
-      54,
+      55,
       29,
       1,
       25,
@@ -2289,7 +2311,7 @@
       "H3_TAGGED_REFERENCES"
     ],
     [
-      55,
+      56,
       29,
       0,
       25,
@@ -2297,7 +2319,7 @@
       "H3_PROJECT_ASSETS"
     ],
     [
-      56,
+      57,
       25,
       0,
       26,
@@ -2305,7 +2327,7 @@
       "H3_CHAIN_PLAN"
     ],
     [
-      57,
+      58,
       28,
       0,
       27,
@@ -2313,7 +2335,7 @@
       "H3_CHAIN_POLICY"
     ],
     [
-      58,
+      59,
       29,
       0,
       27,
@@ -2321,7 +2343,7 @@
       "H3_PROJECT_ASSETS"
     ],
     [
-      59,
+      60,
       25,
       0,
       30,
@@ -2348,7 +2370,7 @@
         3780,
         90,
         540,
-        2166
+        2206
       ],
       "color": "#393f58",
       "font_size": 24,
@@ -2418,7 +2440,7 @@
       "title": "RECOVERY • DISABLED / NO SAMPLING",
       "bounding": [
         3780,
-        2306,
+        2346,
         1090,
         490
       ],

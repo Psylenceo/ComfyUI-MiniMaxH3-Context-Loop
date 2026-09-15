@@ -8,12 +8,12 @@ import {
     dimensionsForMegapixels,
     formatMegapixels,
     imageMegapixels,
-} from "./h3_project_asset_editor_core.mjs?v=0.6.8";
+} from "./h3_project_asset_editor_core.mjs?v=0.6.9";
 import {
     publishProjectAssetCatalogChanged,
     serializedProjectAssetCatalog,
     serializedProjectAssetIdentity,
-} from "./h3_project_asset_sync_core.mjs?v=0.6.8";
+} from "./h3_project_asset_sync_core.mjs?v=0.6.9";
 
 const NODE_NAME = "MiniMaxH3ProjectAssetManager";
 const SEMANTIC_SETTING_WIDGETS = [
@@ -42,12 +42,12 @@ const VIDEO_ROLE_HELP = {
         + "scene when that scene's prompt includes this asset's tag. Pick "
         + "this when you want the generated scene to look like the "
         + "reference, not just move like it.",
-    motion: "Extracts only the pose, action, and motion timing from this "
-        + "clip and transfers it onto the Target Subject named below - the "
-        + "source's own appearance is deliberately suppressed (see "
-        + "Reference short edge). Pick this when you want a character to "
-        + "move the way the reference moves without copying who or what is "
-        + "in it.",
+    motion: "Uses this video as pose, action, and motion-timing evidence "
+        + "for the Target Subject named below. A smaller Reference short "
+        + "edge reduces source appearance influence, but this is semantic "
+        + "motion transfer, not pose extraction: identity, clothing, and "
+        + "background details can still influence the result. Pick this "
+        + "when the reference's movement is what you want to transfer.",
     source_track: "Not activated by any scene prompt - only one may be "
         + "enabled per project. This becomes the project's exact Source "
         + "Timeline (a prerecorded video or audio track, such as dialogue "

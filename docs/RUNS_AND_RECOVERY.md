@@ -245,8 +245,11 @@ still preserved as a generation dependency.
 If a branch ends with an empty next-scene slot and saved candidates
 exist elsewhere, the graph displays **Reuse saved clip**. Click it to preview
 the available candidates and choose **Attach selected candidate**. This is
-offered only when the candidate consumes neither predecessor video context nor
-generated-audio continuity. The manager creates a new immutable lineage record
+offered when the candidate uses no saved context, or every saved picture/audio
+context source is unchanged on the target path. This includes a reused take
+that still shares its original checkpoint: attaching it does not invalidate
+later scenes that used it. Changed, missing or unverifiable context sources
+remain blocked. The manager creates a new immutable lineage record
 pointing at the chosen parent; the original video, audio, prompt, and checkpoint
 files remain shared and are not regenerated or copied. Shared-file deletion is
 reference-aware, so those files are retained until the last lineage record that
@@ -806,6 +809,15 @@ under `upscaled/<profile>/final/`. Its normal `copy_to_output` and
 regular output tree. Legacy source-track runs without the embedded descriptor
 still need their original full AUDIO connected to Assemble.
 
+To assemble again after reopening ComfyUI, use **MiniMax H3 Upscale Manifest
+Load** → **H3 Chain Assemble**, without the upscale loop connected to Assemble.
+Set `manifest_path` to the profile's `upscale_manifest.json` (or a saved
+`partial/through_clip_NNNN.manifest.json` for a partial result). Absolute paths
+and paths relative to ComfyUI output are accepted. The loader preserves the
+saved source timeline, chapter, and upscale settings, including runs with
+`save_latent` off. It verifies the existing child artifacts when queued; it
+does not regenerate scenes, scan projects at startup, or rewrite checkpoints.
+
 ## Run Manager
 
 Connect the active Plan output to **MiniMax H3 Run Manager**. It discovers runs
@@ -901,6 +913,14 @@ prefix reconstructed by Manifest Load. Its filename supports date
 tokens such as `%date:yyyy-MM-dd%`, `%year%`, `%month%`, `%day%`, `%hour%`,
 `%minute%`, and `%second%`. Existing files are never overwritten; numbered
 suffixes are added automatically.
+
+Deferred upscale partials are accepted too: stopping after scene 1 of a
+two-scene source assembles that saved scene without requiring scene 2.
+Only a contiguous saved prefix is accepted; missing or changed artifacts
+inside that prefix still fail verification. Assembly leaves the upscale
+resume manifest untouched. The final JSON and status identify a partial
+delivery and its completed/planned scene counts. Chapter partials retain
+their original scene numbers and source-audio offset.
 
 ### Recovery blend schedules
 

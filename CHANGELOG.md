@@ -3,7 +3,36 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
-## Unreleased — Reference reconstruction and Windows save durability
+## Unreleased
+
+- Add #66's opt-in Assemble checkpoint cleanup (off by default). After a
+  completed export and requested copies are safely saved, delete only its
+  unshared checkpoint payloads; retain videos, prompts and metadata. Skip
+  partial exports, preserve checkpoints on export failure, and report freed
+  space. No cleanup inspection runs during workflow loading or previews.
+
+- Fix #53's Tagged Source Audio lip-sync example: connect Audio VAE to Apply
+  Scene Context and allow explicit soundtrack tags with a locked source target.
+  Preserve scene-window slicing, track identity checks, and the locked audio policy.
+
+## v0.6.9 — Plan controls, workflow loading and save durability
+
+- Coalesce repeated Plan editor and Studio refreshes during workflow restore,
+  preserving saved values and cancelling pending refreshes on node removal.
+- Address #52 and #64: editing Default steps updates the saved Plan default.
+  Show per-scene overrides explicitly and offer an action to clear only those
+  overrides without changing prompts, seeds or other settings.
+- Address #63: preserve converted generation-fingerprint input sockets when
+  hiding the Modern/Production Plan's backing widgets.
+- Address #53: add a no-Carousel Ref2V Tagged Source Audio workflow and wiring
+  guide. Update the affected examples against main's schemas and connect
+  Current Scene state for correctly timed tagged audio references.
+
+- Allow H3 Chain Assemble to deliver a verified partial upscale (for example,
+  scene 1 of 2) without requiring the unfinished tail. Preserve resume
+  manifests, chapter numbering/audio offsets and generated audio sidecars;
+  label partial deliveries with completed/planned counts. Still reject
+  noncontiguous scenes, inconsistent metadata and missing or changed files.
 
 - PR #48 integration refreshes browser helper cache tokens for the current
   package, including the new completion identity and requeue coordinator.

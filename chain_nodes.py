@@ -165,6 +165,7 @@ from .checkpoint_manager import (
     CheckpointDeleteBlocked,
     CheckpointGraphManager,
     checkpoint_audio_context_length,
+    checkpoint_same_context_source,
     checkpoint_revision_token,
     checkpoint_run_lock,
 )
@@ -3415,10 +3416,16 @@ def _tagged_audio_reference_value(
             "in Current Shot state." %
             (int(length), int(scene), current.get("raw_frames")))
     compatibility = plan.get("compatibility")
+    # A prompt-selected reference to the locked soundtrack is still valid.
+    # Lip-sync disables automatic loose reference/carry, not explicit @tags;
+    # Chain Context continues to encode and protect the source target. Keep
+    # the same-track and exact-window checks below for both policies.
     if (not isinstance(compatibility, dict) or
-            not _audio_policy_uses_source_reference(plan, current)):
+            not (_audio_policy_uses_source_reference(plan, current) or
+                 _audio_policy_locks_source_audio(plan, current))):
         raise ValueError(
             "Tagged audio @%s source_timeline requires Source reference=on "
+            "or Lock source audio (Lip-sync to source audio) "
             "in this scene's effective audio policy." %
             entry.get("tag", "audio"))
     expected_hash = str(compatibility.get("source_audio_hash") or "")
@@ -16288,6 +16295,10 @@ def _preflight_bind_source(
             "source audio.",
             "Connect one H3 Source Timeline to Loop Start.",
             solutions=(
+                "Without a Carousel: Load Audio -> Source Timeline.source_audio; "
+                "connect that timeline to both Preflight and Loop Start. "
+                "For Tagged Audio source_timeline mode, also connect "
+                "Current Scene.state -> Tagged Ref2VA.state.",
                 "Use the legacy source_audio input instead.",
                 "Change each reported setting at its reported scope if "
                 "source audio was not intended."),
@@ -26205,8 +26216,10 @@ class MiniMaxH3ChainAssemble:
         return {
             "required": {
                 "manifest": (MANIFEST_TYPE, {
-                    "tooltip": "Completed source or upscale manifest from "
-                               "Loop End or Manifest Load. Its format selects "
+                    "tooltip": "Complete or partial source/upscale manifest from "
+                               "Loop End or Manifest Load. Assembles the saved "
+                               "contiguous scenes; later unfinished scenes are not required. "
+                               "Its format selects "
                                "the correct verified segments and canonical "
                                "final folder automatically."}),
                 "audio_source": (["plan", "source", "generated", "none"],
@@ -26293,6 +26306,16 @@ class MiniMaxH3ChainAssemble:
                                "MP4 retained. Assemble then re-decodes the "
                                "existing checkpoint; it does not sample or "
                                "regenerate the scene."}),
+                "delete_checkpoints_after_assembly": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Permanently delete this completed manifest's "
+                               "checkpoint payloads after the final video and "
+                               "requested output copies are saved. Keeps videos, "
+                               "prompts, metadata and checkpoints shared with "
+                               "other saved branches. Skips partial exports. "
+                               "Deleted checkpoints cannot be used for resume, "
+                               "latent upscale or checkpoint-based reassembly. "
+                               "Leave OFF if further processing is planned."}),
             },
         }
 
@@ -26318,7 +26341,8 @@ class MiniMaxH3ChainAssemble:
                  copy_to_output=False, output_subfolder="",
                  source_timeline=None, blend_schedule="plan",
                  blend_video_vae=None, boundary_tone_match="off",
-                 color_stabilization="off"):
+                 color_stabilization="off",
+                 delete_checkpoints_after_assembly=False):
         upscale_manifest = None
         upscale_support = None
         manifest_format = str((manifest or {}).get("format") or "")
@@ -26334,6 +26358,16 @@ class MiniMaxH3ChainAssemble:
             manifest = upscale_support._assembly_manifest(
                 upscale_manifest, upscale_segments)
         segments = _validate_manifest(manifest)
+        checkpoint_cleanup = None
+        checkpoint_cleanup_status = ""
+        if delete_checkpoints_after_assembly:
+            from .assembly_checkpoint_cleanup import AssemblyCheckpointCleanup
+
+            try:
+                checkpoint_cleanup = AssemblyCheckpointCleanup(
+                    _output_root(), upscale_manifest or manifest)
+            except (OSError, TypeError, ValueError) as exc:
+                checkpoint_cleanup_status = "checkpoint cleanup skipped: %s" % exc
         geometry = common_saved_resolution(segments, "H3 Chain Assemble")
         if geometry:
             manifest = {**manifest, "compatibility": {
@@ -26382,7 +26416,7 @@ class MiniMaxH3ChainAssemble:
         selected = audio_source
         if selected == "plan":
             selected = _audio_policy_final(manifest)
-        preserve_generated = manifest.get("format") in (
+        preserve_generated = upscale_manifest is not None or manifest.get("format") in (
             "h3_chain_manifest_v3", CHAPTER_MANIFEST_FORMAT)
         generated_track = None
         generated_warning = ""
@@ -26676,6 +26710,16 @@ class MiniMaxH3ChainAssemble:
                            if subtitle_path is not None else "")
         if subtitle_copy is not None:
             subtitle_status += " + %s" % subtitle_copy
+        if checkpoint_cleanup is not None:
+            try:
+                checkpoint_cleanup_status = checkpoint_cleanup.finish([
+                    path for path in (final_path, output_copy, generated_sidecar_path,
+                                      subtitle_path, subtitle_copy) if path is not None])
+            except (OSError, TypeError, ValueError) as exc:
+                checkpoint_cleanup_status = (
+                    "checkpoint cleanup did not finish: %s; final export saved" % exc)
+        if checkpoint_cleanup_status:
+            copy_status += "; " + checkpoint_cleanup_status
         gap_status = ("; %d black editorial frames" % editorial_gap_frames
                       if editorial_gap_frames else "")
         trim_status = ("; %d latent-safe frames trimmed" %
@@ -26713,6 +26757,10 @@ class MiniMaxH3ChainAssemble:
             backend, blend_status, tone_status, color_status, trim_status,
             gap_status, order_status,
             final_path, sidecar_status, copy_status, subtitle_status)
+        if upscale_manifest is not None and upscale_manifest.get("format") == (
+                "h3_chain_upscale_partial_manifest_v1"):
+            status += "; partial upscale %d/%d scenes; remaining scenes can be resumed" % (
+                len(segments), int(upscale_manifest["clip_count"]))
         _LOG.info("H3 Chain %s", status)
         published_video = output_copy or final_path
         _publish_final_review_preview(manifest, published_video, status)
@@ -27459,7 +27507,9 @@ def _checkpoint_selection_manifest(value: Any) -> dict[str, Any] | None:
                 dependency.get("revision") or "").lower()
             if (dependency_scene in selected_revisions and
                     selected_revisions[dependency_scene] !=
-                    dependency_revision):
+                    dependency_revision and not checkpoint_same_context_source(
+                        dependency_records.get((dependency_scene, dependency_revision), {}),
+                        dependency_records.get((dependency_scene, selected_revisions[dependency_scene]), {}))):
                 raise ValueError(
                     "Selected checkpoint scene %d explicitly depends on "
                     "scene %d revision %s." %
@@ -27760,7 +27810,10 @@ async def _restore_checkpoint_revisions(request):
                     dependency.get("revision") or "").lower()
                 selected_or_active = by_scene.get(
                     dependency_scene, active_revisions.get(dependency_scene, ""))
-                if str(selected_or_active).lower() != dependency_revision:
+                if (str(selected_or_active).lower() != dependency_revision
+                        and not checkpoint_same_context_source(
+                            graph_records.get((dependency_scene, dependency_revision), {}),
+                            graph_records.get((dependency_scene, str(selected_or_active).lower()), {}))):
                     raise ValueError(
                         "Scene %d revision explicitly depends on scene %d "
                         "revision %s, which is not active in its chapter." %
@@ -27831,7 +27884,10 @@ async def _restore_checkpoint_revisions(request):
                 dependency_scene = int(dependency.get("scene", 0))
                 dependency_revision = str(
                     dependency.get("revision") or "").lower()
-                if proposed_active.get(dependency_scene) != dependency_revision:
+                if (proposed_active.get(dependency_scene) != dependency_revision
+                        and not checkpoint_same_context_source(
+                            graph_records.get((dependency_scene, dependency_revision), {}),
+                            graph_records.get((dependency_scene, proposed_active.get(dependency_scene)), {}))):
                     raise ValueError(
                         "Active scene %d explicitly depends on scene %d "
                         "revision %s. Activate a compatible branch in that "
