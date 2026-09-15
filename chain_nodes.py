@@ -10949,9 +10949,9 @@ def _visual_context_state(
             last_block["start_frame"]),
         "_visual_context_resolved_lead_start_frame": int(
             lead_block["start_frame"] if lead_block is not None else -1),
-        "_visual_context_exact_prefix": bool(
-            len(block_runtime) > 1
-            or any(block["authored_start"] for block in block_runtime)),
+        # A single builder block with an automatic start is also a cropped
+        # prefix, not a full source clip, when recovering missing RGB frames.
+        "_visual_context_exact_prefix": not legacy_whole_source,
         "visual_context_source_segment": last_block["segment"],
         "visual_context_block_segments": block_segments,
         **({"visual_context_lead_segment": lead_block["segment"]}
