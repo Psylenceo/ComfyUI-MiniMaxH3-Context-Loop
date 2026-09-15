@@ -132,6 +132,14 @@ assert.equal(sceneEditor.refreshCount, 1);
 assert.equal(richEditor.refreshCount, 1);
 assert.equal(studio.refreshCount, 1);
 
+// Assignment to a standalone Studio can leave Plan JSON unchanged (same
+// prompts/settings, different checkpoint aliases). Do not rely on polling:
+// checkpoint polling is suspended during generation.
+refreshRestoredPlanEditors(studio);
+assert.equal(studio.refreshCount, 2, "refresh the owner Studio exactly once");
+assert.equal(sceneEditor.refreshCount, 2);
+assert.equal(richEditor.refreshCount, 2);
+
 plan.inputs[0].link = null;
 const missing = restoreConnectedPolicyInputs(plan, {
     audio_policy: {final_audio: "generated"},

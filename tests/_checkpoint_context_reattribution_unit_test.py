@@ -16,7 +16,7 @@ spec.loader.exec_module(h)
 chain = h.chain
 
 
-async def main():
+async def main(after_activation=None):
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         h.h.folder_paths.output_directory = directory
@@ -183,6 +183,8 @@ async def main():
         final = h.snapshot(run)
         assert all(final[path] == value for path, value in before.items()
                    if not (path.startswith("checkpoints/clip_") and path.count(".") == 1))
+        if after_activation:
+            await after_activation(run, manager, originals, selected)
     print("Context reattribution: scenes 13–18, unchanged sources and aliases, safe rejection, chapter output/activation and media preservation pass")
 
 

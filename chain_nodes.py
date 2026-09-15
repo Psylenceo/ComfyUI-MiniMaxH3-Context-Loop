@@ -11175,7 +11175,8 @@ def _visual_context_state(
     return selected
 
 
-def _verify_segment_artifacts(segment: dict[str, Any], index: int) -> None:
+def _verify_segment_artifacts(
+        segment: dict[str, Any], index: int, *, verify_hashes: bool = True) -> None:
     if int(segment.get("index", -1)) != int(index):
         raise ValueError(
             "H3 chain metadata slot %d points to segment index %r." %
@@ -11193,8 +11194,7 @@ def _verify_segment_artifacts(segment: dict[str, Any], index: int) -> None:
             raise FileNotFoundError(
                 "H3 chain clip %d %s is missing: %s" %
                 (index, key, artifact))
-        actual_hash = _file_sha256(artifact)
-        if actual_hash != expected_hash:
+        if verify_hashes and _file_sha256(artifact) != expected_hash:
             raise ValueError(
                 "H3 chain clip %d %s failed its SHA-256 integrity check." %
                 (index, key))
@@ -11211,7 +11211,7 @@ def _verify_segment_artifacts(segment: dict[str, Any], index: int) -> None:
             raise FileNotFoundError(
                 "H3 chain clip %d blend segment is missing: %s" %
                 (index, artifact))
-        if _file_sha256(artifact) != expected_hash:
+        if verify_hashes and _file_sha256(artifact) != expected_hash:
             raise ValueError(
                 "H3 chain clip %d blend segment failed its SHA-256 integrity "
                 "check." % index)
@@ -11227,7 +11227,7 @@ def _verify_segment_artifacts(segment: dict[str, Any], index: int) -> None:
             raise FileNotFoundError(
                 "H3 chain clip %d generated-audio sidecar is missing: %s" %
                 (index, audio_path))
-        if _file_sha256(audio_path) != expected_hash:
+        if verify_hashes and _file_sha256(audio_path) != expected_hash:
             raise ValueError(
                 "H3 chain clip %d generated-audio sidecar failed its SHA-256 "
                 "integrity check." % index)
@@ -28879,7 +28879,8 @@ def _checkpoint_audio_sidecar(
 
 
 def _load_checkpoint_revision(
-        run_name: str, scene: Any, revision: Any, *, verify_artifacts: bool = True
+        run_name: str, scene: Any, revision: Any, *, verify_artifacts: bool = True,
+        verify_hashes: bool = True,
 ) -> tuple[dict[str, Any], str]:
     run_name = _strict_run_name(run_name)
     index = int(scene)
@@ -28909,7 +28910,7 @@ def _load_checkpoint_revision(
     if str(segment.get("revision") or "").lower() != token:
         raise ValueError("Checkpoint revision id does not match its metadata.")
     if verify_artifacts:
-        _verify_segment_artifacts(segment, index)
+        _verify_segment_artifacts(segment, index, verify_hashes=verify_hashes)
     return metadata, metadata_path
 
 
@@ -29487,8 +29488,11 @@ async def _restore_checkpoint_revisions(request):
         compatibility = None
         prompt_prefix = None
         for scene in range(scope_start_scene, resume_scene):
+            # Assignment changes pointers, not media. Check identity, lineage,
+            # required files and the small prompt sidecar here; generation,
+            # resume and output consumers still verify full media hashes.
             metadata, metadata_path = _load_checkpoint_revision(
-                run_name, scene, by_scene[scene])
+                run_name, scene, by_scene[scene], verify_hashes=not activate_only)
             current_compatibility = metadata.get("compatibility")
             if compatibility is None:
                 compatibility = current_compatibility
@@ -29830,6 +29834,41 @@ async def _chapter_snapshot_retirement(request):
         return web.json_response({"error": str(exc)}, status=404)
     except (OSError, TypeError, ValueError, KeyError) as exc:
         return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(payload)
+
+
+async def _obsolete_checkpoint_path(request):
+    from .obsolete_checkpoint_path import ObsoleteCheckpointPathManager
+
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("Obsolete path cleanup requires a JSON object.")
+        run_name = _strict_run_name(body.get("run_name", ""))
+        manager = ObsoleteCheckpointPathManager(_output_root())
+        if request.path.endswith("/obsolete-preview"):
+            payload = await asyncio.to_thread(
+                manager.preview, run_name, body.get("scene"), body.get("revision"))
+        else:
+            ownership_proof = _request_project_ownership(request)
+            rejection = _project_write_rejection(request, run_name, "delete an obsolete checkpoint path")
+            if rejection is not None:
+                return rejection
+
+            def delete_owned():
+                with checkpoint_run_lock(_output_root(), run_name), project_write_guard(
+                        _output_root(), run_name, ownership_proof, "delete an obsolete checkpoint path"):
+                    return manager.delete(run_name, body.get("scene"), body.get("revision"), body.get("snapshot"))
+
+            payload = await asyncio.to_thread(delete_owned)
+    except ProjectOwnershipError as exc:
+        return web.json_response({"error":str(exc), "code":"h3_project_read_only"}, status=423)
+    except CheckpointDeleteBlocked as exc:
+        return web.json_response({"error":str(exc), "preview":exc.preview}, status=409)
+    except FileNotFoundError as exc:
+        return web.json_response({"error":str(exc)}, status=404)
+    except (OSError, TypeError, ValueError, KeyError) as exc:
+        return web.json_response({"error":str(exc)}, status=400)
     return web.json_response(payload)
 
 
@@ -31967,6 +32006,7 @@ async def _working_branch_command(request):
 for _branch_route_name in (
         "_list_saved_checkpoints", "_restore_checkpoint_revisions",
         "_attribute_checkpoint_revision", "_preview_checkpoint_revision_deletion",
+        "_obsolete_checkpoint_path",
         "_delete_checkpoint_revision", "_update_run_editorial",
         "_get_prompt_history", "_update_prompt_history",
         "_plan_studio_presentation", "_plan_studio_checkpoint_thumbnail",
@@ -32030,6 +32070,12 @@ if (PromptServer is not None and web is not None and
     PromptServer.instance.routes.post(
         "/minimax_h3_context_loop/checkpoint-revisions/delete")(
             _delete_checkpoint_revision)
+    PromptServer.instance.routes.post(
+        "/minimax_h3_context_loop/checkpoint-revisions/obsolete-preview")(
+            _obsolete_checkpoint_path)
+    PromptServer.instance.routes.post(
+        "/minimax_h3_context_loop/checkpoint-revisions/obsolete-delete")(
+            _obsolete_checkpoint_path)
     PromptServer.instance.routes.post(
         "/minimax_h3_context_loop/chapter-snapshots/retire-preview")(
             _chapter_snapshot_retirement)

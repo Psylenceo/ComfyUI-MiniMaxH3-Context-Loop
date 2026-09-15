@@ -569,14 +569,18 @@ function mount(node) {
     const activate = button("Assign path", "Assign this chapter lineage to the named working branch; other working branches are unchanged", () => void activateSelected());
     const assignPlan = button("Assign to Plan Studio branch", "Assign this saved path to the connected Plan's branch, even when it is already active in the branch being browsed", () => void assignSelectedToPlan());
     const remove = button("Delete selected revision", "Delete an inactive leaf or roll back the active branch tip after confirmation", () => void deleteSelected(), "h3cm-delete-button");
+    const removeObsolete = button("Delete obsolete path…", "Preview removing this unused take and redundant downstream links; reattached scenes and shared files are kept", () => void obsoletePathAction(), "h3cm-delete-button");
+    const obsoletePanel = element("div", "h3cm-obsolete-preview");
+    let obsoleteIdentity = "", obsoleteConfirm = null;
+    obsoletePanel.hidden = true;
     load.disabled = true;
     activate.disabled = true;
     remove.disabled = true;
     assignPlan.disabled = true;
     assignmentActions.append(activate, assignPlan, load);
     assignmentPanel.append(assignmentContext, assignmentActions);
-    deletionActions.append(remove);
-    deletion.append(deletionActions, deletionTitle, deletionDetails);
+    deletionActions.append(remove, removeObsolete);
+    deletion.append(deletionActions, obsoletePanel, deletionTitle, deletionDetails);
     root.append(head, runRow, storagePanel, workingRow, workingHelp, finalCutRow, outputRow, stageTabs, stageNote, chapterTabs, scenes,
         assignmentPanel, status, main, deletion);
 
@@ -894,6 +898,8 @@ function mount(node) {
         activate.disabled = state.busy || Boolean(state.attribution) || !canActivateSelected();
         assignPlan.disabled = state.busy || Boolean(state.attribution) || !canAssignSelectedToPlan();
         remove.disabled = state.busy || Boolean(state.attribution) || !state.deletion?.allowed;
+        removeObsolete.disabled = state.busy || Boolean(state.attribution) || !obsoletePathIdentity();
+        if (obsoleteConfirm) obsoleteConfirm.disabled = state.busy || obsoleteIdentity !== obsoletePathIdentity();
         for (const control of retireButtons) control.disabled = state.busy || Boolean(state.attribution);
         if (state.attributionButton) {
             state.attributionButton.disabled = state.busy || !state.attribution?.candidate;
@@ -1584,6 +1590,13 @@ function mount(node) {
     }
 
     function renderDeletion() {
+        removeObsolete.hidden = state.stage !== "original" || state.selected?.take_kind === "editorial_alternate";
+        removeObsolete.disabled = state.busy || Boolean(state.attribution) || !obsoletePathIdentity();
+        if (obsoleteIdentity !== obsoletePathIdentity()) {
+            obsoletePanel.replaceChildren();
+            obsoletePanel.hidden = true;
+            obsoleteConfirm = null;
+        }
         deletionBody.replaceChildren();
         retireButtons = [];
         const processing = state.stage !== "original";
@@ -2290,6 +2303,66 @@ function mount(node) {
             status.textContent = result.message;
         } catch (error) {
             await refreshDeletionPreview();
+            status.className = "h3cm-status h3cm-error";
+            status.textContent = error.message;
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    function obsoletePathIdentity() {
+        const record = state.selected;
+        return state.stage === "original" && record && !record.active && !state.attribution
+            && record.take_kind !== "editorial_alternate"
+            ? JSON.stringify([state.runName, selectedWorkingBranch(), record.scene, record.revision]) : "";
+    }
+
+    async function obsoletePathAction(preview = null) {
+        const identity = obsoletePathIdentity();
+        if (state.busy || !identity || (preview && identity !== obsoleteIdentity)) return;
+        const [run, branch, scene, revision] = JSON.parse(identity);
+        if (preview && (!preview.allowed || !window.confirm(
+            `Permanently delete this obsolete path?\n\n${preview.revisions.map(item =>
+                `S${item.scene} · ${item.revision.slice(0, 8)}`).join("\n")}\n\n` +
+            `${preview.owned_file_count} files · ${formatCheckpointBytes(preview.reclaimed_bytes)}\n` +
+            "Reattached scenes and shared media are kept. This cannot be undone."))) return;
+        const token = state.requestToken;
+        setBusy(true, preview ? "Deleting obsolete path…" : "Checking obsolete path and shared files…");
+        try {
+            const path = "/minimax_h3_context_loop/checkpoint-revisions/obsolete-" + (preview ? "delete" : "preview");
+            const options = {method:"POST", headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({run_name:run, branch_id:branch, scene, revision,
+                    ...(preview ? {snapshot:preview.snapshot} : {})})};
+            const payload = preview ? await mutationRequest(node, run, path, options) : await jsonRequest(path, options);
+            if (identity !== obsoletePathIdentity() || token !== state.requestToken) return;
+            if (preview) {
+                obsoletePanel.replaceChildren(); obsoletePanel.hidden = true; obsoleteConfirm = null;
+                await refreshCheckpoints();
+                status.className = "h3cm-status";
+                status.textContent = `${payload.message} Reclaimed ${formatCheckpointBytes(payload.reclaimed_bytes)}.`;
+                return;
+            }
+            obsoleteIdentity = identity;
+            obsoleteConfirm = null;
+            obsoletePanel.replaceChildren(); obsoletePanel.hidden = false;
+            obsoletePanel.append(element("strong", "", "Obsolete path deletion preview"));
+            for (const item of payload.revisions ?? []) obsoletePanel.append(element("div", "",
+                `Remove link: S${item.scene} · ${item.revision.slice(0, 8)}`));
+            for (const item of payload.retained_revisions ?? []) obsoletePanel.append(element("div", "h3cm-muted",
+                `Keep reattached: S${item.scene} · ${item.revision.slice(0, 8)}`));
+            for (const reason of payload.blockers ?? []) obsoletePanel.append(element("div", "h3cm-error", reason));
+            const files = element("ul", "h3cm-files");
+            for (const file of payload.files ?? []) if (file.exists) files.append(element("li", "",
+                `${file.owned ? "Delete" : file.shared ? "Keep shared" : "Keep"}: ${file.path} · ${formatCheckpointBytes(file.size_bytes)}`));
+            obsoletePanel.append(files);
+            if (payload.allowed) {
+                obsoleteConfirm = button("Confirm obsolete path deletion", "Delete only the previewed files", () => void obsoletePathAction(payload), "h3cm-delete-button");
+                obsoletePanel.append(obsoleteConfirm);
+            }
+            status.textContent = payload.allowed ? "Review the obsolete path preview before confirming." : "Obsolete path cleanup is blocked; see the preview.";
+        } catch (error) {
+            if (identity !== obsoletePathIdentity()) return;
+            obsoletePanel.replaceChildren(); obsoletePanel.hidden = true; obsoleteConfirm = null;
             status.className = "h3cm-status h3cm-error";
             status.textContent = error.message;
         } finally {
