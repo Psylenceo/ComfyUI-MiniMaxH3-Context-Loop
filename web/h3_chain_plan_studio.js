@@ -1539,7 +1539,7 @@ function mount(node) {
             const query = new URLSearchParams({
                 run_name:currentRun, include_graph:"false",
             });
-            const response = await api.fetchApi(`/minimax_h3_context_loop/checkpoints?${query.toString()}`);
+            const response = await api.fetchApi(`/minimax_h3_context_loop/checkpoints?${query.toString()}`, {cache:"no-store"});
             const payload = await response.json();
             if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
             if (state.disposed || token !== state.checkpointToken || currentRun !== runName()) return;

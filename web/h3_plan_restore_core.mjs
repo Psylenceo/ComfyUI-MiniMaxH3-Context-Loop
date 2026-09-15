@@ -362,6 +362,8 @@ export function restoreConnectedPolicyInputs(
  * to display a stale pre-restore scene prompt. */
 export function refreshRestoredPlanEditors(planNode) {
     planNode?._h3ChainEditorRefresh?.();
+    // Standalone Studio is the Plan owner too; it must not be skipped below.
+    planNode?._h3PlanStudioRefresh?.();
     const graph = planNode?.graph?.rootGraph ?? planNode?.graph;
     for (const node of allNodes(graph)) {
         if (node === planNode) continue;

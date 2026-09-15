@@ -70,6 +70,7 @@ const source = fs.readFileSync(new URL("../web/h3_chain_checkpoint_manager.js", 
 let currentGraph = structuredClone(payload), runs = ["demo", "other"], failRequests = false;
 let confirms = true, mutations = 0, dirty = 0;
 let attachResponse = null;
+let obsoleteResponse = null, obsoleteError = 0, delayedObsolete = null;
 let processingDeletion = false, deleteConflict = false, delayedProcessingPreview = null;
 let retainedPixelTakes = [];
 let snapshotRetirement = false, snapshotRetired = false, retirementError = 0, delayedRetirementPreview = null;
@@ -130,6 +131,18 @@ const context = vm.createContext({
             data = {allowed:snapshotRetired, blockers:snapshotRetired ? [] : ["Snapshot pins this take"], files:[],
                 chapter_references:snapshotRetired ? [] : [{number:1, snapshot:a, path:snapshotAddress}]};
         }
+        else if (path.endsWith("/obsolete-preview")) {
+            assert.ok(obsoleteResponse, "cleanup must never scan automatically");
+            data = structuredClone(obsoleteResponse);
+            if (delayedObsolete) { const wait = delayedObsolete; delayedObsolete = null; await wait; }
+        }
+        else if (path.endsWith("/obsolete-delete")) {
+            mutations++;
+            assert.equal(JSON.parse(options.body).snapshot, "obsolete-token");
+            if (obsoleteError) return {ok:false, status:obsoleteError,
+                json:async () => ({error:"Obsolete preview changed or project read only"})};
+            data = {message:"Deleted obsolete path; reattached scenes kept.", reclaimed_bytes:100};
+        }
         else if (path.endsWith("/delete-preview")) data = {allowed:false, blockers:["test"]};
         else if (path.endsWith("/attribute") && attachResponse) {
             mutations++;
@@ -148,7 +161,7 @@ const context = vm.createContext({
     }},
     window:{setTimeout:callback => callback(), confirm:message => { confirmations.push(message); return confirms; }},
     projectMutationOptions:(_node, _run, options) => {
-        if (attachResponse || processingDeletion || snapshotRetirement) return options;
+        if (attachResponse || processingDeletion || snapshotRetirement || obsoleteResponse) return options;
         mutations++; throw new Error("Local output attempted project mutation");
     },
     promptCompanionSync:{},
@@ -681,3 +694,46 @@ assert.equal(displayed.flatMap(row => cardNames(row)).filter(name => name === "S
 assert.equal(value(branchView), outputBeforePreview);
 assert.equal(mutations, mutationsBeforePreview, "Rendering, headings and chapter tabs never mutate saved projects");
 console.log("Processing branch UI: shared colors, latest dates, real paths, missing slots, keyboard previews and output isolation pass");
+
+currentGraph = structuredClone(payload);
+const obsoleteNode = makeNode(); await settle();
+select(obsoleteNode, 2, c); await settle();
+const obsoletePin = value(obsoleteNode), obsoleteMutations = mutations;
+assert.ok(!requests.some(item => item.path.endsWith("/obsolete-preview")), "no background cleanup scan");
+obsoleteResponse = {allowed:true, snapshot:"obsolete-token", blockers:[],
+    revisions:[{scene:2, revision:c}], retained_revisions:[{scene:3, revision:d}],
+    files:[{path:"old.json", exists:true, owned:true, size_bytes:100},
+           {path:"shared.mp4", exists:true, owned:false, shared:true, size_bytes:500}],
+    owned_file_count:1, reclaimed_bytes:100};
+byText(obsoleteNode, "Delete obsolete path…").click(); await settle();
+assert.equal(mutations, obsoleteMutations, "preview is not deletion");
+assert.ok(elements(obsoleteNode).some(item => item.textContent.startsWith("Keep shared: shared.mp4")));
+confirms = false;
+byText(obsoleteNode, "Confirm obsolete path deletion").click(); await settle();
+assert.equal(mutations, obsoleteMutations, "cancel keeps every file");
+assert.equal(value(obsoleteNode), obsoletePin);
+confirms = true;
+for (const code of [409, 423]) {
+    obsoleteError = code;
+    byText(obsoleteNode, "Confirm obsolete path deletion").click(); await settle();
+    assert.match(byClass(obsoleteNode, "h3cm-status").textContent, /preview changed|read only/);
+    assert.equal(byClass(obsoleteNode, "h3cm-obsolete-preview").hidden, true);
+    assert.equal(value(obsoleteNode), obsoletePin);
+    byText(obsoleteNode, "Delete obsolete path…").click(); await settle();
+}
+obsoleteError = 0;
+byText(obsoleteNode, "Confirm obsolete path deletion").click(); await settle();
+assert.match(byClass(obsoleteNode, "h3cm-status").textContent, /reattached scenes kept/);
+assert.equal(value(obsoleteNode), obsoletePin, "cleanup does not change output selection");
+obsoleteResponse.allowed = false; obsoleteResponse.blockers = ["Tail not reattached"];
+byText(obsoleteNode, "Delete obsolete path…").click(); await settle();
+assert.equal(byText(obsoleteNode, "Confirm obsolete path deletion"), undefined);
+assert.ok(elements(obsoleteNode).some(item => item.textContent === "Tail not reattached"));
+let releaseObsolete;
+delayedObsolete = new Promise(resolve => { releaseObsolete = resolve; });
+byText(obsoleteNode, "Delete obsolete path…").click(); await settle();
+select(obsoleteNode, 3, d); await settle();
+releaseObsolete(); await settle();
+assert.equal(byClass(obsoleteNode, "h3cm-obsolete-preview").hidden, true,
+    "late preview cannot offer deletion of another selected path");
+console.log("Obsolete path UI: explicit preview, shared files, cancel, conflicts, ownership, success and stale selection pass");

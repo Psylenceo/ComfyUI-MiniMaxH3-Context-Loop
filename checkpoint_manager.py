@@ -460,6 +460,24 @@ class CheckpointGraphManager:
                 digest = str(hash_value or "")
                 candidates = by_hash.get((source_scene, digest), [])
                 key = candidates[0] if digest and len(candidates) == 1 else None
+                # After obsolete original links are removed, several retained
+                # aliases can still own the same context checkpoint. Prefer the
+                # consuming path's alias; never drop that dependency merely
+                # because the shared file has more than one surviving owner.
+                if digest and len(candidates) > 1 and len({
+                        self._attribution_source(records[item])
+                        for item in candidates}) == 1:
+                    ancestor = parent_key
+                    seen = set()
+                    while ancestor in records and ancestor not in seen:
+                        if ancestor in candidates:
+                            key = ancestor
+                            break
+                        seen.add(ancestor)
+                        ancestor = records[ancestor]["_parent"]
+                    if key is None:
+                        key = min(candidates, key=lambda item: (
+                            not records[item]["active"], item))
             if key in records and key not in found:
                 found.append(key)
 
@@ -1425,7 +1443,8 @@ class CheckpointGraphManager:
         return references
 
     def deletion_preview(self, run_name: Any, scene: Any,
-                         revision: Any) -> dict[str, Any]:
+                         revision: Any, *, _scan=None,
+                         _skip_dependency_check=False) -> dict[str, Any]:
         run_dir, run = self._run_dir(run_name)
         scene_number = int(scene)
         token = str(revision or "").strip().lower()
@@ -1434,7 +1453,7 @@ class CheckpointGraphManager:
         with checkpoint_run_lock(self.output_root, run):
             if not os.path.isdir(run_dir):
                 raise FileNotFoundError("H3 run %r does not exist." % run)
-            scan = self._scan(run)
+            scan = _scan if _scan is not None else self._scan(run)
             key = (scene_number, token)
             record = scan["records"].get(key)
             if record is None:
@@ -1444,7 +1463,8 @@ class CheckpointGraphManager:
             artifacts = self._artifacts(scan, record)
             chapter_start, chapter_end = self._chapter_bounds(
                 scan, scene_number)
-            descendant_keys = self._descendant_keys(scan["records"], key)
+            descendant_keys = ([] if _skip_dependency_check else
+                               self._descendant_keys(scan["records"], key))
             dependents = []
             for child_key in descendant_keys:
                 child = scan["records"][child_key]
