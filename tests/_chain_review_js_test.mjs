@@ -57,11 +57,17 @@ const plan = {
         {id: "two", prompt: ["Old two."], seed: "2"},
     ],
 };
-applyReviewEdit(plan, 2, "New two.\n\nCAMERA: Close-up.", "9007199254740993", 56);
+applyReviewEdit(
+    plan, 2, "New two.\n\nCAMERA: Close-up.", "9007199254740993", 56,
+    "a simple plain-language idea",
+);
 assert.deepEqual(plan.shots[0].prompt, ["Old one."]);
 assert.deepEqual(plan.shots[1].prompt, ["New two.", "", "CAMERA: Close-up."]);
 assert.equal(plan.shots[1].seed, "9007199254740993");
 assert.equal(plan.shots[1].length, 56);
+assert.equal(plan.shots[1].basic_prompt, "a simple plain-language idea");
+assert.equal(plan.shots[0].basic_prompt, undefined,
+    "an untouched scene must not gain a basic_prompt field");
 applyReviewEdit(plan, 1, "", "3");
 assert.deepEqual(plan.shots[0].prompt, [""]);
 assert.equal(plan.shots[0].seed, "3");
@@ -281,7 +287,7 @@ assert.match(reviewSource, /_h3QueuedReview/);
 assert.match(reviewSource, /setInterval[\s\S]*fetchPending/);
 assert.match(reviewSource, /addEventListener\("status", fetchPending\)/);
 assert.match(reviewSource, /async nodeCreated\(node\)/);
-assert.match(reviewSource, /gates\.length === 1/);
+assert.match(reviewSource, /candidates\.length === 1/);
 assert.match(reviewSource, /data\?\.run_name/);
 assert.match(reviewSource, /mountedReviewNodes/);
 assert.match(reviewSource, /split\(\/\[\.:\]\//);
@@ -381,10 +387,13 @@ assert.doesNotMatch(submitSource, /processRequeue\(/,
     "Review approval must not bypass Loop End; top-level requeue is driven by the Loop End terminal coordinator");
 assert.match(
     submitSource,
-    /updatePlan\(\s*node, submittedIndex, acceptedPrompt, body\.seed, body\.length\)/,
+    /updatePlan\(\s*node, submittedIndex, acceptedPrompt, body\.seed, body\.length,\s*acceptedBasicPrompt\)/,
 );
 assert.match(reviewSource, /publishCompanionPrompt/);
+assert.match(reviewSource, /publishCompanionBasicPrompt/);
 assert.match(reviewSource, /publishPlanCompanionScene/);
+assert.match(reviewSource, /basic_prompt: submittedBasicPrompt/);
+assert.match(reviewSource, /_h3PromptCompanionSetBasicPrompt/);
 assert.match(reviewSource, /_h3PromptCompanionSetScenePrompt/);
 assert.match(reviewSource, /reviewDurationText\(data\.raw_frames\)/);
 assert.match(reviewSource, /h3r-video-panel/);
@@ -446,12 +455,58 @@ assert.match(reviewSource, /videoPanel\.offsetHeight, true/);
 assert.doesNotMatch(reviewSource, /\/h3_motion_context\/review/);
 const fallbackStart = reviewSource.indexOf("function reviewFallbackNode");
 const fallbackSource = reviewSource.slice(fallbackStart, reviewSource.indexOf("function routeReview", fallbackStart));
-assert.match(fallbackSource, /matchingRun\.length === 1\) return matchingRun\[0\];[\s\S]*data\?\.durable === true\) return null;[\s\S]*matchingLeaf[\s\S]*gates\.length === 1/,
+assert.match(fallbackSource, /matchingRun\.length === 1\) return matchingRun\[0\];[\s\S]*data\?\.durable === true\) return null;[\s\S]*matchingLeaf[\s\S]*candidates\.length === 1/,
     "durable recovery may use only an authoritative run match, not leaf or singleton fallback");
+assert.match(fallbackSource,
+    /const candidates = expectedRun[\s\S]*actualRun !== expectedRun|const candidates = expectedRun[\s\S]*!actualRun \|\| actualRun === expectedRun/,
+    "a gate whose connected Plan is known to belong to a different, named run " +
+    "must be excluded from leaf-id and singleton fallback - a same-leaf-id or " +
+    "lone gate is not sufficient proof it belongs to the reviewed project, " +
+    "or a review can be delivered to the wrong project's gate");
+assert.doesNotMatch(
+    fallbackSource.slice(fallbackSource.indexOf("matchingLeaf")),
+    /gates\.filter\(\(item\) => String\(item\.id\) === leaf\)/,
+    "leaf-id fallback must filter the run-identity-checked candidates list, " +
+    "not the raw, unfiltered gates list");
+assert.match(reviewSource,
+    /function forgetRoutedNode\(node\) \{[\s\S]*routedReviewNodes\.delete\(token\)/,
+    "cached routing decisions must be revalidated (forgotten) when a gate " +
+    "node's identity can no longer be trusted");
+assert.match(reviewSource,
+    /mountedReviewNodes\.delete\(this\);\s*forgetRoutedNode\(this\);/,
+    "a removed Review Gate node must drop any cached routing pointing at it");
+assert.match(reviewSource,
+    /nodeType\.prototype\.onConfigure = function \(\) \{[\s\S]{0,400}forgetRoutedNode\(this\)/,
+    "reconfiguring a gate (e.g. rewiring it to a different Plan) must " +
+    "invalidate any cached routing decision for that node");
+assert.match(reviewSource,
+    /nodeType\.prototype\.onGraphConfigured = function \(\) \{[\s\S]{0,400}routedReviewNodes\.clear\(\)/,
+    "loading/pasting a graph must drop the entire routing cache, since ids " +
+    "and Plan wiring can be remapped wholesale");
+assert.match(reviewSource, /function appRootGraph\(\)/);
+assert.match(reviewSource, /app\.graph\?\.rootGraph \?\? app\.graph/);
+for (const fn of [
+    "findNodeByQualifiedId", "upstreamPlanNode", "prepareResume",
+    "reviewFallbackNode",
+]) {
+    const start = reviewSource.indexOf(`function ${fn}(`);
+    const body = reviewSource.slice(start, reviewSource.indexOf("\n}", start));
+    assert.doesNotMatch(body, /allNodes\(app\.graph\)|= app\.graph;/,
+        `${fn} must traverse from appRootGraph(), not app.graph directly - ` +
+        "app.graph can be a subgraph's own graph rather than the true root, " +
+        "which breaks node_id-based review routing (found in production as " +
+        "\"could not be routed to display node\")");
+}
 const routeStart = reviewSource.indexOf("function routeReview(data)");
 const routeSource = reviewSource.slice(routeStart, reviewSource.indexOf("function routeReviewResolved", routeStart));
 assert.match(routeSource, /data\?\.durable !== true[\s\S]*Pending token/,
     "expected unrelated durable inventory must not warn on every poll");
+assert.match(routeSource, /deliverReview\(fallback, data, \{verifyRun: false\}\)/,
+    "reviewFallbackNode already applied its own run_name/id/singleton " +
+    "matching before returning a node; deliverReview must not re-reject " +
+    "that same node via a second strict run_name check, or a Review Gate " +
+    "with a stale/reset Plan run_name widget can never route at all even " +
+    "when it is the only gate in the graph");
 const reviewHandlerStart = reviewSource.indexOf("node._h3ReviewHandler =");
 const reviewHandlerSource = reviewSource.slice(reviewHandlerStart);
 assert.match(reviewHandlerSource, /const candidateBatchComplete = Boolean\(current\?\.candidate_generation_complete\) \|\|[\s\S]*current\.candidates\.length >=[\s\S]*candidate_count/);

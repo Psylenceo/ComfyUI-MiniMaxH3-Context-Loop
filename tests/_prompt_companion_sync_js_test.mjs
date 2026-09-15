@@ -7,6 +7,7 @@ import {
     adjacentPlanCompanions,
     connectedPlanStudios,
     connectedPromptEditors,
+    markShotFieldEdited,
     planHasNonPromptChanges,
     publishCompanionPrompt,
     publishCompanionScene,
@@ -86,6 +87,39 @@ assert.equal(localPlan.shots[0], editedShot, "active shot identity survives reba
 assert.deepEqual(localPlan.shots[0], {id:"two", prompt:["edited two"], seed:"22", steps:20});
 assert.deepEqual(localPlan.shots[1], {id:"one", prompt:["live one"], seed:"11"});
 assert.equal(rebaseScenePrompt({shots:[{id:"gone",prompt:[]}]}, livePlan, 0), -1);
+
+// An edit to one prompt field must not overwrite a newer, concurrent edit
+// made to the *other* field through a different UI (e.g. Plan Studio).
+{
+    const h3OnlyEdit = {id:"one", prompt:"new H3 edit", basic_prompt:"old basic"};
+    markShotFieldEdited(h3OnlyEdit, "prompt");
+    const local = {shots:[h3OnlyEdit]};
+    const live = {shots:[{id:"one", prompt:"old H3", basic_prompt:"new basic from Studio"}]};
+    assert.equal(rebaseScenePrompt(local, live, 0), 0);
+    assert.equal(live.shots[0].prompt, "new H3 edit");
+    assert.equal(live.shots[0].basic_prompt, "new basic from Studio",
+        "an H3-only edit must not discard a newer basic-draft edit");
+}
+{
+    const basicOnlyEdit = {id:"one", prompt:"stale H3", basic_prompt:"new basic edit"};
+    markShotFieldEdited(basicOnlyEdit, "basic_prompt");
+    const local = {shots:[basicOnlyEdit]};
+    const live = {shots:[{id:"one", prompt:"newer H3 from elsewhere", basic_prompt:"old basic"}]};
+    assert.equal(rebaseScenePrompt(local, live, 0), 0);
+    assert.equal(live.shots[0].prompt, "newer H3 from elsewhere",
+        "a basic-only edit must not carry forward stale H3 text");
+    assert.equal(live.shots[0].basic_prompt, "new basic edit");
+}
+{
+    // Without any edited-field tracking (a caller that predates it), both
+    // fields still get copied, preserving the pre-existing behavior.
+    const untracked = {id:"one", prompt:"untracked H3", basic_prompt:"untracked basic"};
+    const local = {shots:[untracked]};
+    const live = {shots:[{id:"one", prompt:"old H3", basic_prompt:"old basic"}]};
+    assert.equal(rebaseScenePrompt(local, live, 0), 0);
+    assert.equal(live.shots[0].prompt, "untracked H3");
+    assert.equal(live.shots[0].basic_prompt, "untracked basic");
+}
 
 assert.equal(planHasNonPromptChanges(
     {shared:"same", shots:[{id:"one", prompt:["old"], seed:"11", length:90}]},
