@@ -348,7 +348,7 @@ function connectedInputValue(node, name) {
     return undefined;
 }
 
-function inputSource(node, name) {
+export function inputSource(node, name) {
     return inputConnection(node, name)?.source ?? null;
 }
 

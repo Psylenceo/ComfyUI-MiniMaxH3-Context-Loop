@@ -58,10 +58,10 @@ remain editorial only and do not change generation identity.
 
 ## Per-scene LoRA routes
 
-Each scene has a **Scene LoRA route** selector: Base or LoRA A-D. Connect
+Each scene has a **Scene LoRA route** selector: Base or LoRA A-Z. Connect
 Current Shot `state` to **MiniMax H3 Scene LoRA Scheduler**, connect the normal
 base MODEL to `base_model`, and connect MODEL outputs from ordinary ComfyUI
-LoRA loaders to the A-D inputs. The scheduler only routes those prepared
+LoRA loaders to the A-Z inputs. The scheduler only routes those prepared
 models; it never chooses a file or applies a LoRA.
 
 One route can contain a stack of ordinary LoRA loaders. The same LoRA at two
@@ -69,6 +69,18 @@ strengths can be represented by two branches. Inputs are lazy, so a connected
 branch is not evaluated until a scene selects it. Put patches shared by every
 scene after the scheduler. When using Drift-Control, send the scheduled MODEL
 through Chain Context's MODEL input/output before the sampler.
+
+For deferred upscale or DeRoPE, copy the same scheduler and MODEL/LoRA lanes
+into that workflow. Connect **Upscale Current** or **Pixel Current** `state`
+to the scheduler, and use its `model` output on the pass-2 MODEL path
+(including both guidance and scheduling when those are separate nodes).
+It selects the lane saved with each source checkpoint, not the current Plan's
+edited lane. Chapter/range processing keeps the original scene numbering.
+Old checkpoints without a saved lane use Base. LoRA files and strengths still
+come from your copied loaders; the scheduler does not load another stack.
+The loaders and scheduler can also live inside a subgraph: expose the
+scheduler's `state` input and `model` output on the subgraph boundary. Plan
+lane discovery and copied/reloaded scheduler sockets work across that boundary.
 
 ## Scene Prompt Editor
 

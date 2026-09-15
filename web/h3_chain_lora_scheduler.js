@@ -4,6 +4,7 @@ import {
     LORA_SCHEDULER_NODE,
     connectedLoRARoutes,
     loraInputRoute,
+    loraSchedulerNodes,
     nextLoRARoute,
 } from "./h3_lora_scheduler_core.mjs?v=0.7.0";
 
@@ -19,6 +20,9 @@ function publishRoutes(node, routes) {
 }
 
 function stabilizeRouteInputs(node) {
+    // Copied/reloaded generation nodes may retain the old single-state type.
+    const stateInput = node.inputs?.find((input) => input.name === "state");
+    if (stateInput) stateInput.type = "H3_CHAIN_UPSCALE_STATE,H3_CHAIN_STATE";
     const routes = connectedLoRARoutes(node);
     const next = nextLoRARoute(node);
     for (let index = (node.inputs?.length ?? 0) - 1; index >= 0; index -= 1) {
@@ -82,10 +86,9 @@ app.registerExtension({
         if ((node?.comfyClass ?? node?.type) === LORA_SCHEDULER_NODE) mount(node);
     },
     async afterConfigureGraph() {
-        for (const node of app.graph?._nodes ?? []) {
-            if ((node?.comfyClass ?? node?.type) === LORA_SCHEDULER_NODE) {
-                setTimeout(() => node._h3LoRASchedulerRefresh?.(), 0);
-            }
+        for (const node of loraSchedulerNodes(app.graph)) {
+            mount(node);
+            setTimeout(() => node._h3LoRASchedulerRefresh?.(), 0);
         }
     },
 });

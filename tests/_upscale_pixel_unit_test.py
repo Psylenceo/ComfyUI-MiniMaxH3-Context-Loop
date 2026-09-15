@@ -383,7 +383,8 @@ def main():
         folder_paths.output_directory = temporary
         plan = chain.MiniMaxH3ChainPlan().build(
             json.dumps({"shots": [{"id": "pixel_%d" % i, "prompt": "A quiet room.",
-                                    "length": 5, "steps": 2, "seed": str(i)}
+                                    "length": 5, "steps": 2, "seed": str(i),
+                                    "lora_route": "b" if i == 1 else "z"}
                                    for i in (1, 2)]}),
             "pixel_test", "pixel-test-cache", 32, 32, 1,
             "video", "head", "disabled", "generated_audio", 1,
@@ -443,6 +444,9 @@ def main():
         for axis in ("width", "height"):
             assert schema["optional"][f"conditioning_{axis}"][1]["default"] == 0
         current = reader.current(state, VideoVAE())
+        scheduler = chain.MiniMaxH3ChainLoRAScheduler()
+        lane_b, lane_z = object(), object()
+        assert scheduler.select(current[0], None, lora_b=lane_b)[0] is lane_b
         assert current[1].shape == (5, 32, 32, 3)
         assert current[2]["sample_rate"] == 8000 and current[4] == 1
         source_tensors = upscale._load_source_tensors(manifest["segments"][0])
@@ -593,6 +597,7 @@ def main():
         fails(lambda: adapter.adapt(manifest, "pixel", "h3_latent", "{}", 2, 0, False, 18),
               "different profile settings")
         second = reader.current(resumed, VideoVAE())
+        assert scheduler.select(second[0], None, lora_z=lane_z)[0] is lane_z
         assert second[7] > 0, "fixture must exercise repeated prefix trimming"
         frames = second[1].repeat_interleave(2, dim=1).repeat_interleave(3, dim=2)
         saved2 = saver.save(resumed, frames)["result"][0]

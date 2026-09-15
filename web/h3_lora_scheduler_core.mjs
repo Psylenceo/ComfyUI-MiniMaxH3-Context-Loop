@@ -1,3 +1,5 @@
+import {inputSource} from "./h3_reference_preview_core.mjs";
+
 export const LORA_SCHEDULER_NODE = "MiniMaxH3ChainLoRAScheduler";
 export const LORA_ROUTE_LETTERS = Object.freeze([
     ..."abcdefghijklmnopqrstuvwxyz",
@@ -38,6 +40,10 @@ function allNodes(graph, result = []) {
     return result;
 }
 
+export function loraSchedulerNodes(graph) {
+    return allNodes(graph).filter((node) => nodeType(node) === LORA_SCHEDULER_NODE);
+}
+
 function hasUpstreamNode(start, target) {
     if (!start || !target) return false;
     const queue = [start];
@@ -49,10 +55,7 @@ function hasUpstreamNode(start, target) {
         seen.add(node);
         for (const input of node.inputs ?? []) {
             if (input.link == null) continue;
-            const link = node.graph?.links?.[input.link];
-            const parent = link
-                ? node.graph?.getNodeById?.(link.origin_id) ?? null
-                : null;
+            const parent = inputSource(node, input.name);
             if (parent) queue.push(parent);
         }
     }
@@ -64,8 +67,7 @@ export function availableLoRARoutes(
 ) {
     const ownerList = owners.filter(Boolean);
     const available = new Set(["base"]);
-    for (const scheduler of allNodes(graph)) {
-        if (nodeType(scheduler) !== LORA_SCHEDULER_NODE) continue;
+    for (const scheduler of loraSchedulerNodes(graph)) {
         if (ownerList.length && !ownerList.some(
             (owner) => hasUpstreamNode(scheduler, owner),
         )) continue;

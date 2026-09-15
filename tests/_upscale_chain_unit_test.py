@@ -270,12 +270,14 @@ def main():
         plan = chain.MiniMaxH3ChainPlan().build(
             json.dumps({"shots": [{
                 "id": "upscale_scene_1",
+                "lora_route": "c",
                 "prompt": "A clean deferred upscale test begins.",
                 "length": 5,
                 "steps": 2,
                 "seed": "7",
             }, {
                 "id": "upscale_scene_2",
+                "lora_route": "z",
                 "prompt": "The same test continues without a cut.",
                 "length": 5,
                 "steps": 2,
@@ -352,6 +354,11 @@ def main():
         assert source_manifest["segments"][0]["revision"] == source["revision"]
         assert source_manifest["segments"][1]["revision"] == source_2["revision"]
         current = upscale.MiniMaxH3ChainUpscaleCurrent().current(upscale_state)
+        scheduler = chain.MiniMaxH3ChainLoRAScheduler()
+        lane_c, lane_z = object(), object()
+        assert source_manifest["segments"][0]["lora_route"] == "c"
+        assert scheduler.select(current[0], None, lora_c=lane_c)[0] is lane_c
+        assert scheduler.select({**current[0], "index": 2}, None, lora_z=lane_z)[0] is lane_z
         assert torch.all(chain._streams_from_latent(current[1])[0] == 0.75)
         assert getattr(current[1]["samples"], "is_nested", False)
         assert torch.all(current[2]["samples"] == 0.75)
@@ -1142,6 +1149,8 @@ def main():
         assert selected_manifest["segments"][0]["revision"] == source["revision"]
         _, processed_state, _, _ = adapter.adapt(processed, "after_motion", "h3_latent", "{}", 1, 0, True, 18)
         read = upscale.MiniMaxH3ChainUpscaleCurrent().current(processed_state)
+        assert scheduler.select(native_state, None, lora_c=lane_c)[0] is lane_c
+        assert scheduler.select(read[0], None, lora_c=lane_c)[0] is lane_c
         assert torch.all(read[2]["samples"] == 0.6)
         assert torch.all(read[3]["samples"] == 0.4)
         assert torch.all(read[13]["waveform"] == 0.3)

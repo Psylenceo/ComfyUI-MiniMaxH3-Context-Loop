@@ -6,6 +6,7 @@ import json
 import pathlib
 import sys
 import types
+from unittest.mock import patch
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -257,6 +258,8 @@ else:
 
 scheduler = chain.MiniMaxH3ChainLoRAScheduler()
 scheduler_inputs = scheduler.INPUT_TYPES()
+assert str(scheduler_inputs["required"]["state"][0]) == (
+    "H3_CHAIN_UPSCALE_STATE,H3_CHAIN_STATE")
 assert scheduler_inputs["required"]["base_model"][1]["lazy"] is True
 assert scheduler_inputs["optional"]["lora_a"][1]["lazy"] is True
 assert scheduler_inputs["optional"]["lora_z"][1]["lazy"] is True
@@ -288,6 +291,54 @@ assert chain.CHAIN_NODE_CLASS_MAPPINGS[
     "MiniMaxH3ChainLoRAScheduler"] is chain.MiniMaxH3ChainLoRAScheduler
 assert chain.CHAIN_NODE_DISPLAY_NAME_MAPPINGS[
     "MiniMaxH3ChainLoRAScheduler"] == "MiniMax H3 Scene LoRA Scheduler"
+
+# Deferred processing selects the pinned source lane, without reading files
+# or loading a MODEL. Scene indexes need not start at 1 (chapter/range input).
+saved = {"scene_start": 8, "scene_end": 10, "segments": [
+    {"index": 8, "lora_route": "A"},
+    {"index": 9, "lora_route": "z"},
+    {"index": 10},  # Older checkpoint, or the implicit Base route.
+]}
+with patch.object(chain, "_st_load", side_effect=AssertionError("read tensors")), \
+        patch.object(chain, "_read_json", side_effect=AssertionError("read project")):
+    for scope in ({}, {"upscale_range": {"scene_start": 8, "scene_end": 10}},
+                  {"chapter": {"start_scene": 8, "end_scene": 10}}):
+        for index, route in ((8, "a"), (9, "z"), (10, "base")):
+            state = {"index": index, "source_manifest": {**saved, **scope},
+                     "plan": {"shots": [{"lora_route": "d"}] * 10},
+                     "segments": [{"index": index, "lora_route": "d"}]}
+            input_name = "base_model" if route == "base" else "lora_" + route
+            waiting = {} if route == "base" else {input_name: None}
+            assert scheduler.check_lazy_status(state, None, **waiting) == [input_name]
+            inputs = {"lora_a": None, "lora_z": None}
+            if route != "base":
+                inputs[input_name] = hero_model
+            selected, status = scheduler.select(state, base_model, **inputs)
+            assert selected is (base_model if route == "base" else hero_model)
+            assert "scene %d" % index in status
+            assert scheduler.check_lazy_status(state, base_model, **inputs) == []
+    # DeRoPE-derived source keeps the resolved picture's lane, not the
+    # original base take used for audio in a final-cut ALT.
+    processed = {"index": 8, "source_manifest": {"segments": [{
+        "index": 8, "lora_route": "z", "processing_source": {
+            "stage": "derope", "original": {"lora_route": "a"}},
+    }]}}
+    assert scheduler.select(processed, None, lora_z=hero_model)[0] is hero_model
+    bad_states = [
+        ({"index": 7, "source_manifest": saved}, "between 8 and 10"),
+        ({"index": 11, "source_manifest": saved}, "between 8 and 10"),
+        ({"index": 8, "source_manifest": {"segments": [
+            {"index": 8, "lora_route": "hero"}]}}, "LoRA route"),
+        ({"index": 8, "source_manifest": saved}, "lora_a input is not connected"),
+        ({"index": 8, "source_manifest": {"segments": []}}, "at least one scene"),
+    ]
+    for bad_state, message in bad_states:
+        try:
+            scheduler.select(bad_state, base_model)
+        except ValueError as exc:
+            assert message in str(exc), str(exc)
+        else:
+            raise AssertionError("Invalid processing lane was silently accepted")
 
 print(
     "generation profiles, legacy manual policy, and dynamic lazy scene LoRA routing: "

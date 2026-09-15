@@ -19890,7 +19890,7 @@ class MiniMaxH3ChainCurrent:
 
 
 class MiniMaxH3ChainLoRAScheduler:
-    """Select a pre-patched MODEL branch from the active scene declaration."""
+    """Select a MODEL lane from a live scene or its saved processing source."""
 
     _ROUTE_INPUTS = {
         "base": "base_model",
@@ -19899,11 +19899,13 @@ class MiniMaxH3ChainLoRAScheduler:
 
     @classmethod
     def INPUT_TYPES(cls):
+        from .upscale_nodes import DEROPE_STATE_TYPE
         return {
             "required": {
-                "state": (STATE_TYPE, {
-                    "tooltip": "Current Shot state. The active scene's "
-                               "lora_route selects one MODEL branch."}),
+                "state": (DEROPE_STATE_TYPE, {
+                    "tooltip": "Current Shot, Upscale Current or Pixel Current "
+                               "state, including DeRoPE workflows. Selects the "
+                               "live scene's or saved source clip's LoRA lane."}),
                 "base_model": ("MODEL", {
                     "lazy": True,
                     "tooltip": "Unpatched/base MODEL route. Keep using the "
@@ -19937,15 +19939,26 @@ class MiniMaxH3ChainLoRAScheduler:
         "loaders. The frontend reveals the next route socket when the current "
         "one is connected, and Plan scenes offer the routes that actually "
         "exist. Inputs are lazy, so an unused branch is not evaluated merely "
-        "because it is connected.")
+        "because it is connected. For upscale or DeRoPE, copy the generation "
+        "MODEL/LoRA lanes and connect processing state; the saved source "
+        "clip selects the same lane. Old clips without a saved lane use Base.")
 
     @classmethod
     def _selection(cls, state: Any) -> tuple[int, str, str]:
-        if not isinstance(state, dict) or not isinstance(
-                state.get("plan"), dict):
+        if not isinstance(state, dict):
             raise ValueError(
-                "H3 Scene LoRA Scheduler requires Current Shot state.")
+                "H3 Scene LoRA Scheduler requires Current Shot or Upscale state.")
         index = int(state.get("index", 0))
+        if isinstance(state.get("source_manifest"), dict):
+            from .upscale_nodes import _source_segment
+            # This is the pinned source revision, not the editable Plan or
+            # the growing list of finished upscale outputs. It also handles
+            # chapter/range manifests whose first scene is not scene 1.
+            route = _shot_lora_route(_source_segment(state, index))
+            return index, route, cls._ROUTE_INPUTS[route]
+        if not isinstance(state.get("plan"), dict):
+            raise ValueError(
+                "H3 Scene LoRA Scheduler requires Current Shot or Upscale state.")
         shots = state["plan"].get("shots")
         if (not isinstance(shots, list) or index < 1 or index > len(shots)):
             raise ValueError(
