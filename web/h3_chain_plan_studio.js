@@ -2363,14 +2363,12 @@ function mount(node) {
         handle.addEventListener("pointerdown", (event) => {
             if (event.button !== 0 || sceneLocked(index) || !options.length) return;
             event.preventDefault(); event.stopPropagation();
-            const model = timelineModel();
-            const contentWidth = Math.max(
-                1, Number(state.timelineContent?.dataset.timelineWidth)
-                    || state.timelineContent?.clientWidth || 1,
-            );
-            const secondsPerPixel = model.totalSeconds / contentWidth;
             const originX = event.clientX;
-            const originWidth = card.getBoundingClientRect().width;
+            // Pointer coordinates include canvas zoom; CSS widths do not.
+            const screenWidth = Math.max(1, card.getBoundingClientRect().width);
+            const originalWidth = card.style.getPropertyValue("--h3-scene-width");
+            const layoutWidth = parseFloat(originalWidth) || card.offsetWidth;
+            const framesPerPixel = currentOut / screenWidth;
             let targetOut = currentOut;
             let moved = false;
             state.timelineDragging = true;
@@ -2381,11 +2379,11 @@ function mount(node) {
                 if (!moved) return;
                 targetOut = studioNearestLatentSafeOutFrame(
                     row.rawFrames, fullFrames,
-                    currentOut + deltaX * secondsPerPixel * FPS,
+                    currentOut + deltaX * framesPerPixel,
                 );
                 card.style.setProperty(
                     "--h3-scene-width",
-                    `${targetOut / FPS / secondsPerPixel}px`,
+                    `${layoutWidth * targetOut / currentOut}px`,
                 );
                 handle.title = `${targetOut}/${fullFrames} frames used · ${(targetOut / FPS).toFixed(3)}s · full sampled checkpoint retained`;
             };
@@ -2396,8 +2394,8 @@ function mount(node) {
                 handle.releasePointerCapture?.(upEvent.pointerId);
                 state.timelineDragging = false;
                 handle.title = defaultTitle;
-                card.style.setProperty("--h3-scene-width", `${originWidth}px`);
-                if (moved && targetOut !== currentOut) {
+                card.style.setProperty("--h3-scene-width", originalWidth);
+                if (upEvent.type !== "pointercancel" && moved && targetOut !== currentOut) {
                     setSceneTrim(index, targetOut);
                 }
             };
