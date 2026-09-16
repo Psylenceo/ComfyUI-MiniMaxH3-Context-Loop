@@ -1,6 +1,6 @@
 import {app} from "/scripts/app.js";
 import {api} from "/scripts/api.js";
-import {activeSceneFromOutput} from "./h3_chain_cancel_reroll_core.mjs?v=0.6.9";
+import {activeSceneFromOutput} from "./h3_chain_cancel_reroll_core.mjs?v=0.6.10";
 import {
     DEFAULT_CLEANUP_DELAY_MS,
     HANDOFF_API_BASE,
@@ -14,9 +14,9 @@ import {
     handleTopLevelRequeueSuccessScheduling,
     loopEndMatchesObservedCurrent,
     topLevelRequeueCompletionMatches,
-} from "./h3_chain_top_level_requeue_core.mjs?v=0.6.9";
-import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.9";
-import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome, releaseHandoffChecked} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.9";
+} from "./h3_chain_top_level_requeue_core.mjs?v=0.6.10";
+import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.10";
+import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome, releaseHandoffChecked} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.10";
 
 // Top-level scene requeue coordinator (M3, candidate_count = 1).
 //

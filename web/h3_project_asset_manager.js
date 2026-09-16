@@ -8,12 +8,12 @@ import {
     dimensionsForMegapixels,
     formatMegapixels,
     imageMegapixels,
-} from "./h3_project_asset_editor_core.mjs?v=0.6.9";
+} from "./h3_project_asset_editor_core.mjs?v=0.6.10";
 import {
     publishProjectAssetCatalogChanged,
     serializedProjectAssetCatalog,
     serializedProjectAssetIdentity,
-} from "./h3_project_asset_sync_core.mjs?v=0.6.9";
+} from "./h3_project_asset_sync_core.mjs?v=0.6.10";
 
 const NODE_NAME = "MiniMaxH3ProjectAssetManager";
 const SEMANTIC_SETTING_WIDGETS = [
