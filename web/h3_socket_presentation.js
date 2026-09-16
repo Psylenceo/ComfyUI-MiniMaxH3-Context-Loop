@@ -19,6 +19,9 @@ const WATCHED_POLICY_NODES = new Set([
     LEGACY_POLICY_NODE, PLAN_NODE, MODERN_PLAN_NODE,
 ]);
 const WIDGET_LABELS = Object.freeze({
+    MiniMaxH3ChainChapterDelivery: Object.freeze({
+        enabled:"Export current chapter",
+    }),
     [PROFILE_POLICY_NODE]: Object.freeze({
         scene_continuity:"Scene continuity",
         audio_profile:"Audio profile",

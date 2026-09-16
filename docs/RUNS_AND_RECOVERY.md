@@ -276,14 +276,17 @@ and feed its `delivery_manifest` to Assemble, Export PNG Sequence + Audio, or
 Full-Chain Latent Video Adapter. The chapter boundaries come directly from Plan
 Studio; there is no second chapter definition to keep synchronized.
 
-- `chapter_number = 0` selects the chapter containing the manifest's last
-  generated scene. The chapter does not have to be complete.
-- `chapter_number = 1`, `2`, `3`, and so on selects that particular chapter
-  even when later chapters already exist. If it is unfinished, only its
-  contiguous generated scenes are selected. A chapter with no generated scenes
-  still reports an error.
-- `enabled = false` passes the complete incoming manifest through and preserves
-  the traditional whole-Run final.
+- **Export current chapter on** selects the chapter containing the manifest's
+  last generated scene. The chapter does not have to be complete. As generation
+  moves into a new chapter, delivery follows it automatically.
+- **Export current chapter off** passes everything in the incoming manifest
+  through for export. Connect a full Run manifest for a whole-Run final; an
+  already chapter-scoped input still contains only that chapter.
+
+Existing workflows keep their on/off value (`enabled` in API prompts). The old
+chapter-number control is removed and saved numbers no longer pin exports to an
+earlier chapter. Use **Chapter Recovery Load** to export an earlier sealed
+chapter explicitly.
 
 Each selection creates a content-addressed, immutable recovery manifest. It freezes
 the selected scenes, checkpoint revisions, trims, placements, final-cut

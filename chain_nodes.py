@@ -23884,16 +23884,13 @@ class MiniMaxH3ChainChapterDelivery:
                                "Manifest Load, or Checkpoint Manager."}),
                 "enabled": ("BOOLEAN", {
                     "default": True,
-                    "tooltip": "On seals and outputs one chapter. Off passes "
-                               "the complete incoming Run manifest through for "
-                               "the traditional ever-growing final."}),
-                "chapter_number": ("INT", {
-                    "default": 0, "min": 0, "max": MAX_SHOTS,
-                    "tooltip": "0 selects the chapter containing the last "
-                               "generated scene. Use 1, 2, 3, and so on to "
-                               "export a particular chapter. Unfinished "
-                               "chapters export their generated scenes now; "
-                               "later exports can include new scenes."}),
+                    "display_name": "Export current chapter",
+                    "label_on": "on", "label_off": "off",
+                    "tooltip": "On exports only the chapter containing the "
+                               "last generated scene in the incoming manifest, "
+                               "including an unfinished chapter. Off exports "
+                               "everything in the incoming manifest. The "
+                               "current chapter follows new scenes automatically."}),
             },
         }
 
@@ -23901,9 +23898,9 @@ class MiniMaxH3ChainChapterDelivery:
     RETURN_NAMES = ("delivery_manifest", "manifest_json", "chapter_number",
                     "chapter_manifest_path", "status")
     OUTPUT_TOOLTIPS = (
-        "Selected immutable chapter manifest, or the full input when disabled.",
+        "Current immutable chapter manifest when on; the full input when off.",
         "Human-readable delivery manifest JSON.",
-        "Resolved chapter number; zero when chapter delivery is disabled.",
+        "Resolved current chapter number; zero when the toggle is off.",
         "Immutable recovery manifest path for the sealed chapter.",
         "Selected chapter range, snapshot id, and recovery location.",
     )
@@ -23914,23 +23911,29 @@ class MiniMaxH3ChainChapterDelivery:
         "snapshot includes the available scenes, even before the chapter is "
         "finished, with their exact checkpoint lineage and editorial state, and "
         "routes every downstream MP4, PNG/WAV, or full-chain upscale export "
-        "into a separate chapter folder. Disable it for a whole-Run final.")
+        "into a separate chapter folder. Export current chapter on follows "
+        "the last generated scene automatically; off exports the full incoming "
+        "manifest. No chapter number needs updating as the Plan grows.")
 
     @classmethod
     def IS_CHANGED(cls, *args, **kwargs):
         return float("NaN")
 
     def select(self, manifest, enabled=True, chapter_number=0):
+        # Keep the original toggle key/position for saved graphs and API prompts.
+        # Accept an obsolete chapter argument from older callers, but never let
+        # that stale number pin delivery to a previous chapter again.
         if not bool(enabled):
             document = _json_document(manifest)
             if not isinstance(document, dict):
                 raise ValueError("H3 Chapter Delivery requires a manifest.")
-            status = "chapter delivery disabled; passing through the full Run"
+            status = ("export current chapter off; passing through everything "
+                      "in the input manifest")
             return (document, json.dumps(
                 document, ensure_ascii=False, indent=2, sort_keys=True),
                 0, "", status)
         chapter_manifest, path = _chapter_manifest_from_manifest(
-            manifest, int(chapter_number))
+            manifest, 0)
         chapter = chapter_manifest["chapter"]
         status = (
             "saved Chapter %d %r, scenes %d:%d, snapshot %s -> %s" %

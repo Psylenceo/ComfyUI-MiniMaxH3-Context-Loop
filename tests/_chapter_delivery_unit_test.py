@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Chapter delivery, selection, isolation, and recovery regressions."""
 
+import copy
 import hashlib
 import importlib.util
+import os
 import pathlib
 import re
 import sys
 import tempfile
 import types
+from unittest.mock import patch
 
 import torch
 
@@ -50,6 +53,8 @@ def make_segment(output, index, delivered=10):
     run = output / "h3_chains" / "chapter_delivery"
     segment_path = run / "segments" / ("clip_%04d.mp4" % index)
     checkpoint_path = run / "checkpoints" / ("clip_%04d.safetensors" % index)
+    segment_path = pathlib.Path(chain._absolute_output_path(str(segment_path)))
+    checkpoint_path = pathlib.Path(chain._absolute_output_path(str(checkpoint_path)))
     segment_path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     segment_path.write_bytes(("video-%d" % index).encode("ascii"))
@@ -128,11 +133,19 @@ def main():
     assert chain.CHAIN_NODE_CLASS_MAPPINGS[
         "MiniMaxH3ChainChapterLoad"] is chain.MiniMaxH3ChainChapterLoad
     schema = chain.MiniMaxH3ChainChapterDelivery.INPUT_TYPES()
-    assert schema["required"]["chapter_number"][1]["default"] == 0
+    assert list(schema["required"]) == ["manifest", "enabled"]
+    toggle = schema["required"]["enabled"]
+    assert toggle[0] == "BOOLEAN" and toggle[1]["default"] is True
+    assert toggle[1]["display_name"] == "Export current chapter"
+    assert toggle[1]["label_on"] == "on" and toggle[1]["label_off"] == "off"
 
     with tempfile.TemporaryDirectory() as temporary:
         output = pathlib.Path(temporary)
         folder_paths.output_directory = temporary
+        layout = os.environ.get("H3_TEST_LAYOUT", "legacy")
+        assert layout in ("legacy", "organized")
+        if layout == "organized":
+            chain.create_project(output / "h3_chains/chapter_delivery")
         segments = [make_segment(output, index) for index in range(1, 7)]
         chain._atomic_json(
             chain._run_editorial_path("chapter_delivery"), make_editorial())
@@ -213,13 +226,40 @@ def main():
         assert "Chapter 2 scenes 4-6" in media_metadata["comment"]
 
         delivery = chain.MiniMaxH3ChainChapterDelivery()
-        passed, _json, number, path, status = delivery.select(
-            complete, enabled=False, chapter_number=2)
+        before = copy.deepcopy(complete)
+        with patch.object(chain, "_chapter_manifest_from_manifest",
+                          side_effect=AssertionError("Off must not seal a chapter")):
+            passed, _json, number, path, status = delivery.select(
+                complete, enabled=False, chapter_number=2)
         assert passed == complete and number == 0 and path == ""
-        assert "disabled" in status
+        assert "off" in status
+        assert complete == before
+
+        # The same enabled node follows the manifest tip as generation advances,
+        # including old workflows that carried a now-obsolete chapter number.
+        for source, expected_number, expected_scenes in [
+                (partial_three, 1, [1, 2, 3]),
+                (partial_four, 2, [4]),
+                (complete, 2, [4, 5, 6])]:
+            before = copy.deepcopy(source)
+            for obsolete_number in [0, 1, 99]:
+                selected, _json, number, path, _status = delivery.select(
+                    source, enabled=True, chapter_number=obsolete_number)
+                assert number == expected_number
+                assert [item["index"] for item in selected["segments"]] == expected_scenes
+                assert pathlib.Path(path).is_file()
+                assert source == before
+
+        # Off is pass-through, not a request to reconstruct scenes that are not
+        # present in an already chapter-scoped input.
+        passed, _json, number, path, _status = delivery.select(
+            chapter_one, enabled=False)
+        assert passed == chapter_one and number == 0 and path == ""
 
         export_dir = chain._new_export_directory(chapter_two, "plates")
-        assert "/chapters/02_aftermath/frames/plates" in export_dir
+        expected = ("/chapters/02_aftermath/frames/plates" if layout == "legacy" else
+                    "/exports/frames/original__02_aftermath/generation/plates")
+        assert expected in export_dir, export_dir
 
         source_audio = {
             "waveform": torch.arange(60, dtype=torch.float32).reshape(1, 1, 60),
@@ -236,8 +276,26 @@ def main():
             lambda: chain._load_chapter_manifest("chapter_delivery", 3),
             "No sealed Chapter 3")
 
-    print("H3 chapter delivery: explicit/auto selection, isolated output, "
-          "source-audio offset, immutable recovery, and pass-through passed")
+        # Add Chapter 3 without changing any delivery-node setting. Until it has
+        # a generated scene, Chapter 2 is still current; afterwards use Chapter 3.
+        editorial = make_editorial()
+        editorial["chapters"].append({
+            "id": "ending", "title": "Ending", "start_scene": 6,
+            "start_scene_id": "scene_06", "text": "Third delivery",
+        })
+        chain._atomic_json(chain._run_editorial_path("chapter_delivery"), editorial)
+        for source, expected_number, expected_scenes in [
+                (partial_four, 2, [4]), (complete, 3, [6])]:
+            selected, _json, number, _path, _status = delivery.select(source)
+            assert number == expected_number
+            assert [item["index"] for item in selected["segments"]] == expected_scenes
+        recovered, _json, _path, _status = chain.MiniMaxH3ChainChapterLoad().load(
+            "chapter_delivery", 1, chapter_one["chapter_manifest_id"])
+        assert recovered == chapter_one, "Earlier sealed chapters remain recoverable"
+
+    print("H3 chapter delivery (%s): current/all toggle, automatic chapter advance, "
+          "legacy workflows, isolated output, source-audio offset, immutable "
+          "recovery, and pass-through passed" % layout)
 
 
 if __name__ == "__main__":
