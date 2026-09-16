@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import * as core from "../web/h3_checkpoint_manager_core.mjs";
+import {bindNodeWheel} from "../web/h3_dom_wheel.mjs";
 import * as workingBranches from "../web/h3_working_branches.mjs";
 import * as checkpointGraph from "../web/h3_checkpoint_graph.mjs";
 
@@ -82,6 +83,7 @@ const confirmations = [];
 let extension;
 const requests = [];
 const context = vm.createContext({
+    bindNodeWheel,
     ...core, ...workingBranches, ...checkpointGraph, URLSearchParams, console,
     document:{head:new Element("head"), getElementById:() => null, createElement:tag => new Element(tag)},
     app:{registerExtension(value){ extension = value; }, graph:{setDirtyCanvas(){}}},

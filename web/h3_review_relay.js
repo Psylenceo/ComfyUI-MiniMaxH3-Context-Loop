@@ -1,4 +1,5 @@
 import {app} from "../../scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "../../scripts/api.js";
 
 const NODE_NAME = "MiniMaxH3ReviewRelay";
@@ -63,9 +64,10 @@ function mount(node) {
         control.style.borderRadius = "4px";
         control.style.padding = "5px";
     }
-    for (const name of ["pointerdown", "mousedown", "wheel", "keydown"]) {
+    for (const name of ["pointerdown", "mousedown", "keydown"]) {
         root.addEventListener(name, event => event.stopPropagation());
     }
+    bindNodeWheel(root, node, app);
     const domWidget = node.addDOMWidget("h3_review_relay", "h3-review-relay", root, {serialize:false});
     domWidget.computeSize = width => [width, 690];
     if (node.size?.[0] < 520 || node.size?.[1] < 720) node.setSize?.([620, 760]);

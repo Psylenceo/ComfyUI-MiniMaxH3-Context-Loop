@@ -1,4 +1,5 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {
     canCaptureFrame, captureCarousels, captureTargetProject, carouselProject,
@@ -842,7 +843,7 @@ function mount(node) {
     ]) {
         root.addEventListener(eventName, (event) => event.stopPropagation());
     }
-    root.addEventListener("wheel", (event) => event.stopPropagation());
+    bindNodeWheel(root, node, app);
 
     const head = document.createElement("div");
     head.className = "h3r-head";

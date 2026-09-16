@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import {bindNodeWheel} from "../web/h3_dom_wheel.mjs";
 
 class Element {
     constructor(tag) {
@@ -51,7 +52,7 @@ const app = {configuringGraph:false,registerExtension:value=>{extension=value;},
     queuePrompt:()=>assert.fail("Relay must never queue the current canvas")};
 const source = fs.readFileSync(new URL("../web/h3_review_relay.js", import.meta.url), "utf8")
     .replace(/^import .*;\n/gm, "");
-vm.runInNewContext(source,{app,api,window,document,console,URLSearchParams,AbortController});
+vm.runInNewContext(source,{app,api,window,document,console,URLSearchParams,AbortController,bindNodeWheel});
 class Node {
     constructor() { this.graph = {}; this.size=[200,200]; this.widgets=[]; }
     addDOMWidget(name,type,root,options) { this.root=root; this.options=options; return {}; }

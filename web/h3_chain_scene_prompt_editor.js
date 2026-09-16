@@ -1,4 +1,5 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {workingBranchId} from "./h3_working_branches.mjs?v=0.7.20";
 import {
@@ -741,7 +742,7 @@ function mount(node) {
             event.stopPropagation();
         });
     }
-    root.addEventListener("wheel", (event) => event.stopPropagation());
+    bindNodeWheel(root, node, app);
 
     const state = {
         plan: null,

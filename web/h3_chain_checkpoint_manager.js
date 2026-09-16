@@ -1,4 +1,5 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {mountStorageInspector} from "./h3_storage_inspector.mjs?v=0.1.0";
 import {branchRequestPath, branchSelectionJson} from "./h3_working_branches.mjs?v=0.7.18";
@@ -379,6 +380,7 @@ function mount(node) {
     }
     restoreFinalCutChoice();
     const root = element("div", "h3cm-root");
+    bindNodeWheel(root, node, app);
     const head = element("div", "h3cm-head");
     const title = element("div", "h3cm-title", "Checkpoint Manager");
     const summary = element("div", "h3cm-summary", "Select a saved run");
