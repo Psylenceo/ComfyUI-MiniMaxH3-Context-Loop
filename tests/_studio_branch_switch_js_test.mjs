@@ -45,6 +45,7 @@ const context = vm.createContext({
     applyEditorialPayload:() => false,
     cacheStudioPresentation(records, editorial) { cached.push({records, editorial}); },
     renderStatus(){}, renderTimeline(){},
+    syncTimelineTrimControls(){}, refreshSceneTrimControls(){},
     renderPanel() { panelRenders += 1; },
     checkpointThumbnailUrl:(_index, record) => record?.video ?? "",
     playerCheckpoint:index => state.checkpoints.get(index + 1),
