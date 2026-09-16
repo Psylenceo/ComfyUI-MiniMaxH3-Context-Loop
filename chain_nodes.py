@@ -23750,8 +23750,20 @@ class MiniMaxH3ChainLoopEnd:
                 _atomic_json(manifest_path, manifest)
         manifest_json = json.dumps(manifest, ensure_ascii=False, indent=2,
                                    sort_keys=True)
-        return (manifest, manifest_json, next_state["previous_frames"],
-                next_state["previous_latent"])
+        result = (manifest, manifest_json, next_state["previous_frames"],
+                  next_state["previous_latent"])
+        if execution_mode == "top_level_requeue":
+            # Only normal completion reaches here. Approve & Stop blocks Loop
+            # End at the gate. The browser restores its original resume
+            # controls after this prompt (including downstream export) succeeds.
+            return {"result": result, "ui": {"h3_chain_top_level_complete": [{
+                "run_name": plan["run_name"],
+                "scene": index,
+                "end_clip": end_clip,
+                "workflow_fingerprint": str(plan.get("plan_hash") or ""),
+                "working_branch_id": str(plan.get("_branch_id") or "main"),
+            }]}}
+        return result
 
 
 class MiniMaxH3ChainManifestLoad:

@@ -189,6 +189,28 @@ def requeue_mode(root):
         execution_mode="top_level_requeue")
     assert not (isinstance(final_result, dict) and
                 "h3_chain_top_level_requeue" in final_result.get("ui", {}))
+    assert len(final_result["result"]) == 4
+    assert final_result["ui"] == {"h3_chain_top_level_complete": [{
+        "run_name": plan["run_name"], "scene": 2, "end_clip": 2,
+        "workflow_fingerprint": plan["plan_hash"],
+        "working_branch_id": "main",
+    }]}
+    assert final_result["result"][0]["clip_count"] == 2
+    assert final_result["result"][0]["format"] == "h3_chain_manifest_v3"
+
+    # Finishing a selected range is completion even before the Plan's end.
+    range_state, range_images, range_latent, range_segment = make_inputs(plan)
+    range_state["end_clip"] = 1
+    range_result = chain.MiniMaxH3ChainLoopEnd().end(
+        None, range_state, range_images, range_latent, range_segment,
+        execution_mode="top_level_requeue")
+    assert range_result["ui"]["h3_chain_top_level_complete"][0]["end_clip"] == 1
+    assert range_result["result"][0]["format"] == "h3_chain_partial_manifest_v3"
+
+    # Recursive mode's tuple contract and lack of an auto-reset signal stay.
+    recursive_result = chain.MiniMaxH3ChainLoopEnd().end(
+        None, final_state, final_images, final_latent, final_segment)
+    assert isinstance(recursive_result, tuple) and len(recursive_result) == 4
 
     records = list((run_dir / "orchestration").glob("next_scene_0002_*.json"))
     assert len(records) == 1, "next_scene handoff must be durable"

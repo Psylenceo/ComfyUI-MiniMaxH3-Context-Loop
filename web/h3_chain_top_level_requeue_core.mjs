@@ -40,6 +40,68 @@ export function topLevelRequeueCompletionMatches(record, payload) {
         && String(payload?.workflow_fingerprint ?? "") === String(record.workflowFingerprint));
 }
 
+// Final range completion is distinct from a next-scene handoff. Review Stop
+// blocks Loop End altogether, even on the last scene, and never emits this.
+export function topLevelRequeueFinishedMatches(record, payload) {
+    return Boolean(record?.runName && record?.workflowFingerprint
+        && Number(record.clipIndex) >= 1
+        && Number(record.clipIndex) === Number(record.endClip)
+        && String(payload?.run_name ?? "") === String(record.runName)
+        && Number(payload?.scene) === Number(record.clipIndex)
+        && Number(payload?.end_clip) === Number(record.endClip)
+        && String(payload?.workflow_fingerprint ?? "") === String(record.workflowFingerprint)
+        && String(payload?.working_branch_id ?? "main") === String(record.workingBranchId ?? "main"));
+}
+
+// Remember only controls changed by this browser's automatic requeue.
+// Nothing is written to the Plan or project. Node identity prevents an old
+// prompt from resetting another tab/reloaded graph with the same node IDs.
+export function createRequeueSelectionTracker() {
+    const selections = new WeakMap();
+    const widget = (node, name) => node?.widgets?.find(item => item.name === name);
+    const read = node => ({
+        startClip: widget(node, "start_clip")?.value,
+        sceneRange: widget(node, "scene_range")?.value ?? "",
+    });
+    const same = (a, b) => a.startClip === b.startClip && a.sceneRange === b.sceneRange;
+    const scope = record => JSON.stringify([
+        record.runName, record.workingBranchId ?? "main",
+        record.workflowIdentity ?? null, record.endClip,
+    ]);
+    return {
+        remember(node, record, resume) {
+            const current = read(node);
+            const previous = selections.get(node);
+            const key = scope(record);
+            selections.set(node, {
+                key,
+                original: previous?.key === key && same(current, previous.last)
+                    ? previous.original : current,
+                last: {startClip: resume.startClip, sceneRange: resume.sceneRange},
+            });
+        },
+        restore(node, record) {
+            const saved = selections.get(node);
+            selections.delete(node);
+            if (!saved || saved.key !== scope(record) || !same(read(node), saved.last)) return false;
+            const start = widget(node, "start_clip");
+            const range = widget(node, "scene_range");
+            if (!start) return false;
+            start.value = saved.original.startClip;
+            start.callback?.(start.value);
+            if (range) {
+                range.value = saved.original.sceneRange;
+                range.callback?.(range.value);
+            }
+            node.graph?.setDirtyCanvas?.(true, true);
+            return true;
+        },
+        discard(node) {
+            if (node) selections.delete(node);
+        },
+    };
+}
+
 export function handleTopLevelRequeueSuccessScheduling({record, scheduleRequeue}) {
     if (!shouldScheduleTopLevelRequeueSuccess(record)) return false;
     scheduleRequeue(record);
