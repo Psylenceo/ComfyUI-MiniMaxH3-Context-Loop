@@ -188,7 +188,9 @@ class ReferenceObjectsTest(unittest.TestCase):
             self.chain._reference_payload_from_cache(changed)
         changed = copy.deepcopy(cache)
         changed["tensor_objects"]["block_000_latent"]["tensors"] = "../foreign.safetensors"
-        with self.assertRaisesRegex(ValueError, "outside"):
+        # The layout adapter can reject the output-root escape before the
+        # narrower cache-store containment check does.
+        with self.assertRaisesRegex(ValueError, "outside|escapes"):
             self.chain._reference_payload_from_cache(changed)
         foreign = self.root / "foreign" / path.name
         foreign.parent.mkdir()

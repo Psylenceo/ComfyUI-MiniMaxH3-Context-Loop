@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+from pathlib import Path
+from .chain_layout import resolve_path
 
 from . import processing_persistence as persistence
 
@@ -20,7 +22,7 @@ def owner_key(state, source_contract):
 
 def register(root, run_name, directory, safe_path):
     """Caller holds the run lock; catalog supports custom output folders too."""
-    path = safe_path(root, root / "h3_chains" / run_name / "png_exports.json")
+    path = safe_path(root, Path(resolve_path(root / "h3_chains" / run_name / "png_exports.json")))
     value = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {
         "format": FORMAT, "run_name": run_name, "directories": []}
     if (not isinstance(value, dict) or value.get("format") != FORMAT

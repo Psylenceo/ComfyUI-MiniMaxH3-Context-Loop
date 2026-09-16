@@ -4,6 +4,7 @@
 import copy
 import importlib
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -29,9 +30,12 @@ class AlternateUpscaleTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        folder_paths.output_directory = self.temp.name
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name) / "source"
+        folder_paths.output_directory = str(self.root)
         self.run = "alternate_upscale_test"
+        mode = os.environ.get("H3_TEST_LAYOUT", "organized")
+        if mode in {"legacy", "converted"}:
+            (self.root / "h3_chains" / self.run).mkdir(parents=True)
         plan = chain.MiniMaxH3ChainPlan().build(
             json.dumps({"shots": [
                 {"id": "first", "prompt": "The original red folder.", "length": 5, "steps": 2, "seed": "7"},
@@ -56,9 +60,40 @@ class AlternateUpscaleTests(unittest.TestCase):
         self.adapter = upscale.MiniMaxH3ChainUpscaleAdapter()
         self.saver = upscale.MiniMaxH3ChainUpscaleSegmentSave()
         self.alt = self.make_alternate()
+        if mode == "converted":
+            conversion = importlib.import_module(package.__name__ + ".chain_layout_conversion")
+            destination = Path(self.temp.name) / "copy"
+            conversion.convert_copy(self.root / "h3_chains" / self.run, destination)
+            self.root = destination
+            folder_paths.output_directory = str(self.root)
         self.original_files = {path: path.read_bytes() for path in (
-            self.root / item[key] for item in self.bases
+            self.artifact(item[key]) for item in self.bases
             for key in ("checkpoint", "revision_metadata", "metadata", "segment"))}
+
+    def artifact(self, address):
+        return Path(chain._absolute_output_path(address))
+
+    def test_conversion_reuses_an_existing_derope_pass(self):
+        if os.environ.get("H3_TEST_LAYOUT", "organized") != "legacy":
+            self.skipTest("Conversion starts from a legacy source.")
+        _, state, _, _ = self.adapt(profile="motion", recipe='{"derope":true}', save_latent=True)
+        saved = self.saver.save(state, self.frames, av_latent(0.6))["result"][0]
+        metadata_path = self.artifact(saved["revision_metadata"])
+        metadata = chain._read_json(str(metadata_path))
+        choice = {"stage": "derope", "profile_path": metadata_path.parent.parent.relative_to(self.root).as_posix(),
+                  "branch": {"kind": "metadata", "path": saved["revision_metadata"],
+                             "lineage": metadata["processing_lineage"]}}
+        converter = importlib.import_module(package.__name__ + ".chain_layout_conversion")
+        destination = Path(self.temp.name) / "processing-copy"
+        converter.convert_copy(self.root / "h3_chains" / self.run, destination)
+        self.root = destination
+        folder_paths.output_directory = str(destination)
+        selected = sources.derope_source_manifest(self.manifest, choice, chain, upscale)
+        self.assertEqual(selected["segments"][0]["revision"], saved["revision"])
+        _, current_state, _, _ = self.adapt(selected, profile="after-motion")
+        current = upscale.MiniMaxH3ChainUpscaleCurrent().current(current_state)
+        self.assertTrue(torch.all(current[2]["samples"] == 0.6))
+        self.assertEqual(self.artifact(saved["revision_metadata"]).read_bytes(), metadata_path.read_bytes())
 
     def make_alternate(self, scene=1):
         base = self.bases[scene - 1]
@@ -95,14 +130,14 @@ class AlternateUpscaleTests(unittest.TestCase):
         self.assertEqual(self.original_files, {p: p.read_bytes() for p in self.original_files})
 
     def branch_with_selected_alt(self):
-        store = chain.WorkingBranches(self.temp.name, self.run)
+        store = chain.WorkingBranches(str(self.root), self.run)
         branch = store.create("main", "960x544", {"plan_json": json.dumps({
             "shots": [{"id": "first"}, {"id": "second"}]})}, 2)
         # Original is assigned a different scene 1; the local output remains
         # the old two-scene path now assigned to the named working branch.
-        metadata = copy.deepcopy(chain._read_json(str(self.root / self.bases[0]["metadata"])))
+        metadata = copy.deepcopy(chain._read_json(str(self.artifact(self.bases[0]["metadata"]))))
         metadata["segment"]["revision"] = "0" * 32
-        chain._atomic_json(str(self.root / self.bases[0]["metadata"]), metadata)
+        chain._atomic_json(str(self.artifact(self.bases[0]["metadata"])), metadata)
         # Original's old choice is unrelated, just like the reported project.
         editorial = chain._load_run_editorial(self.run)
         editorial["replacements"][0]["base_revision"] = "0" * 32
@@ -149,7 +184,7 @@ class AlternateUpscaleTests(unittest.TestCase):
 
     def test_ambiguous_cut_requires_choice_and_missing_choice_fails(self):
         branch = self.branch_with_selected_alt()
-        store = chain.WorkingBranches(self.temp.name, self.run)
+        store = chain.WorkingBranches(str(self.root), self.run)
         duplicate = store.create(branch["id"], "Different cut", {"plan_json": json.dumps({
             "shots": [{"id": "first"}, {"id": "second"}]})}, 2)
         with self.assertRaisesRegex(ValueError, "multiple final-cut branches"):
@@ -170,7 +205,7 @@ class AlternateUpscaleTests(unittest.TestCase):
     def test_named_cut_missing_alt_never_falls_back_to_base(self):
         self.branch_with_selected_alt()
         source = self.manager.passthrough(json.dumps(self.selection))[0]
-        (self.root / self.alt["revision_metadata"]).unlink()
+        self.artifact(self.alt["revision_metadata"]).unlink()
         with self.assertRaisesRegex(FileNotFoundError, "alternate revision is missing"):
             self.adapt(source)
 
@@ -191,7 +226,7 @@ class AlternateUpscaleTests(unittest.TestCase):
         self.assertIn("ALT ", current[-1])
 
     def test_alt_conditioning_uses_own_prompt_and_fingerprint(self):
-        path = self.root / self.alt["revision_metadata"]
+        path = self.artifact(self.alt["revision_metadata"])
         meta = chain._read_json(str(path))
         meta["compatibility"]["generation_fingerprint"] = "f" * 64
         chain._atomic_json(str(path), meta)
@@ -235,16 +270,16 @@ class AlternateUpscaleTests(unittest.TestCase):
                                  for path, key in reads))
             reads.clear()
             audio = upscale._load_source_tensors(source, ("delivered_audio",))
-            self.assertEqual(reads, [(str(self.root / self.bases[0]["checkpoint"]), "delivered_audio")])
+            self.assertEqual(reads, [(str(self.artifact(self.bases[0]["checkpoint"])), "delivered_audio")])
             self.assertTrue(torch.all(audio["delivered_audio"] == 0.2))
 
     def test_terminal_alt_video_keeps_denoised_base_audio(self):
-        path = self.root / self.alt["checkpoint"]
+        path = self.artifact(self.alt["checkpoint"])
         tensors = chain._st_load(str(path))
         tensors.pop("denoised_video")
         tensors.pop("denoised_audio")
         chain._st_save(tensors, str(path))
-        metadata_path = self.root / self.alt["revision_metadata"]
+        metadata_path = self.artifact(self.alt["revision_metadata"])
         metadata = chain._read_json(str(metadata_path))
         metadata["segment"]["checkpoint_sha256"] = chain._file_sha256(str(path))
         chain._atomic_json(str(metadata_path), metadata)
@@ -260,8 +295,8 @@ class AlternateUpscaleTests(unittest.TestCase):
         self.assertTrue(torch.all(tensors["delivered_audio"] == 0.2))
         resumed = self.adapt(start=2)[1]
         self.assertEqual(resumed["segments"][0]["revision"], saved["revision"])
-        graph = chain.CheckpointGraphManager(self.temp.name).graph(self.run, adopt_legacy=False)
-        catalog = variants.saved_checkpoint_variants(self.temp.name, self.run, graph["revisions"])
+        graph = chain.CheckpointGraphManager(str(self.root)).graph(self.run, adopt_legacy=False)
+        catalog = variants.saved_checkpoint_variants(str(self.root), self.run, graph["revisions"])
         record = next(v for v in catalog["variants"] if v["revision"] == saved["revision"])
         self.assertEqual(record["originals"], [{"scene": 1, "revision": self.bases[0]["revision"]}])
         # An ALT baked into HQ must not be swapped back to its low-res media at assembly.
@@ -287,7 +322,7 @@ class AlternateUpscaleTests(unittest.TestCase):
         self.assertEqual(self.adapt()[1]["segments"], [])
 
     def test_missing_selected_alt_fails_without_silent_base_fallback(self):
-        (self.root / self.alt["revision_metadata"]).unlink()
+        self.artifact(self.alt["revision_metadata"]).unlink()
         with self.assertRaisesRegex(FileNotFoundError, "alternate revision is missing"):
             self.adapt()
 

@@ -13,6 +13,11 @@ import re
 import shutil
 import uuid
 
+try:
+    from .chain_layout import output_path, resolve_path
+except ImportError:
+    from chain_layout import output_path, resolve_path
+
 
 FORMAT = "h3_reference_cache_v3"
 
@@ -51,7 +56,7 @@ def objects_digest(objects):
 class ReferenceTensorStore:
     def __init__(self, output_root, objects_root, file_sha256):
         self.output_root = os.path.realpath(output_root)
-        self.root = os.path.realpath(objects_root)
+        self.root = os.path.realpath(resolve_path(objects_root))
         self.file_sha256 = file_sha256
         if os.path.commonpath((self.output_root, self.root)) != self.output_root:
             raise ValueError("H3 reference objects escape the output directory.")
@@ -73,7 +78,7 @@ class ReferenceTensorStore:
     def verify(self, record):
         objects_digest({"object": record})
         expected = self._path(record["tensor_sha256"])
-        actual = os.path.realpath(os.path.join(self.output_root, record["tensors"]))
+        actual = output_path(self.output_root, record["tensors"])
         if actual != expected:
             raise ValueError("H3 reference tensor object is outside its cache store.")
         if (not os.path.isfile(expected) or

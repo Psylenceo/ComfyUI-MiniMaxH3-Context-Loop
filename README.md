@@ -214,8 +214,10 @@ Existing workflows without a scene source keep their previous behavior.
   before startup with a comma-separated
   `H3_PROMPT_OPTIMIZER_ALLOWED_ORIGINS` value such as
   `http://127.0.0.1:1234,https://api.example.com`.
-- The normal final MP4 is written under the run's `final/` folder. **Assemble**
-  can also copy it to the regular ComfyUI output folder.
+- New projects put scene MP4s in `generation/clips/` and assembled videos in
+  `exports/videos/<scope>/`. Existing projects keep their original paths,
+  including `final/`. **Assemble** can also copy to the regular ComfyUI output
+  folder. See [simple layout and optional copy conversion](docs/SIMPLE_CHAIN_LAYOUT.md).
 - The exact saved checkpoint supplies the next scene's continuity. Preview or
   assembly filters never rewrite that checkpoint.
 - Plan Studio can render a picture-only **Alternate final-cut take** without

@@ -9,8 +9,10 @@ from pathlib import Path
 import re
 
 if __package__:
+    from .chain_layout import resolve_path, profile_contains
     from .artifact_paths import artifact_address
 else:  # Standalone catalogue diagnostics.
+    from chain_layout import resolve_path, profile_contains
     from artifact_paths import artifact_address
 
 STAGES = ("derope", "latent_upscale", "pixel_upscale", "other")
@@ -24,7 +26,7 @@ def processing_lineage(segments):
             for item in segments]
 
 
-def validate_processing_lineage(value):
+def validate_processing_lineage(value, output_root=None):
     if not isinstance(value, list) or not value:
         raise ValueError("Saved processing branch has no lineage.")
     for item in value:
@@ -37,7 +39,12 @@ def validate_processing_lineage(value):
     first = value[0]["scene"]
     if [item["scene"] for item in value] != list(range(first, first + len(value))):
         raise ValueError("Saved processing branch is not contiguous.")
-    return [{**item, "metadata_path": artifact_address(item["metadata_path"])} for item in value]
+    def address(value):
+        value = artifact_address(value)
+        if output_root is not None:
+            value = Path(resolve_path(Path(output_root) / value)).relative_to(output_root).as_posix()
+        return value
+    return [{**item, "metadata_path": address(item["metadata_path"])} for item in value]
 
 
 def processing_stage(config):
@@ -110,7 +117,7 @@ def saved_checkpoint_variants(output_root, run_name, originals):
                 branches.append({"path": path.relative_to(root).as_posix(), "kind": "manifest",
                                  "stage": "derope", "profile": profile.name,
                                  "profile_path": profile.relative_to(root).as_posix(),
-                                 "lineage": validate_processing_lineage(processing_lineage(saved["segments"]))})
+                                 "lineage": validate_processing_lineage(processing_lineage(saved["segments"]), root)})
             except (OSError, ValueError, TypeError, KeyError) as exc:
                 warnings.append("%s: %s" % (path.name, exc))
 
@@ -154,7 +161,7 @@ def saved_checkpoint_variants(output_root, run_name, originals):
                     if (scene != int(match[1]) or not re.fullmatch(r"[0-9a-f]{32}", revision)
                             or (match[2] and match[2] != revision)):
                         raise ValueError("Saved processing scene/revision does not match its file.")
-                    canonical = inside(root / artifact_address(segment["revision_metadata"]), profile)
+                    canonical = inside(Path(resolve_path(root / artifact_address(segment["revision_metadata"]))), profile)
                     if canonical != folder / ("clip_%04d.%s.json" % (scene, revision)):
                         raise ValueError("Saved processing revision address is inconsistent.")
                     # Ignore mutable pointer copies; their immutable revision
@@ -173,7 +180,9 @@ def saved_checkpoint_variants(output_root, run_name, originals):
                         if not isinstance(address, str) or not address:
                             missing.append(field)
                             continue
-                        artifact = inside(root / artifact_address(address), profile)
+                        artifact = Path(resolve_path(root / artifact_address(address))).resolve()
+                        if not profile_contains(profile, artifact):
+                            raise ValueError("Saved processing artifact escapes its profile directory.")
                         if not artifact.is_file():
                             missing.append(field)
                             continue
@@ -210,7 +219,7 @@ def saved_checkpoint_variants(output_root, run_name, originals):
                         branches.append({"path": identity, "kind": "metadata",
                                          "stage": stage, "profile": profile.name,
                                          "profile_path": record["profile_path"],
-                                         "lineage": validate_processing_lineage(metadata["processing_lineage"])})
+                                         "lineage": validate_processing_lineage(metadata["processing_lineage"], root)})
                     elif record["stage"] == "derope":
                         legacy_branches(profile)
                 except (OSError, ValueError, TypeError, KeyError) as exc:

@@ -12,6 +12,7 @@ from .checkpoint_manager import (
 )
 from .checkpoint_variants import validate_processing_lineage
 from .artifact_paths import artifact_address, is_link_or_junction
+from .chain_layout import resolve_path, state_root, logical_parts, profile_artifact
 
 
 REVISION = re.compile(r"clip_(\d{4})\.([0-9a-f]{32})\.json")
@@ -46,7 +47,7 @@ class ProcessingCheckpointManager:
     def _path(self, address):
         if not isinstance(address, str) or not address:
             raise ValueError("A saved processing artifact address is required.")
-        parts = PurePosixPath(artifact_address(address)).parts
+        parts = Path(resolve_path(self.root / artifact_address(address))).relative_to(self.root).parts
         path = self.root
         for part in parts:
             path /= part
@@ -71,7 +72,7 @@ class ProcessingCheckpointManager:
     def _target(self, run, address):
         address = artifact_address(address)
         path = self._path(address)
-        parts = PurePosixPath(address).parts
+        parts = logical_parts(address)
         if len(parts) > 4 and parts[2] == "branches" and re.fullmatch(r"[0-9a-f]{32}", parts[3]):
             parts = parts[:2] + parts[4:]
         if not (parts[:2] == ("h3_chains", run) and (
@@ -84,7 +85,7 @@ class ProcessingCheckpointManager:
         return path, path.parent.parent
 
     def _documents(self, run):
-        run_dir = self._path("h3_chains/" + run)
+        run_dir = Path(state_root(self._path("h3_chains/" + run)))
         scopes = [run_dir]
         branches = run_dir / "branches"
         if branches.is_dir():
@@ -160,7 +161,7 @@ class ProcessingCheckpointManager:
             if not segment.get(field):
                 continue  # Missing optional or already-lost artifacts do not prevent cleanup.
             path = self._path(segment[field])
-            if path != profile / folder / (stem + suffix):
+            if path != Path(profile_artifact(profile, folder, stem + suffix)):
                 raise ValueError("Processed take does not own its %s path." % field)
             owned[path] = label
         pointer = profile / "checkpoints" / ("clip_%04d.json" % scene)
@@ -171,7 +172,7 @@ class ProcessingCheckpointManager:
             if not isinstance(value, str):
                 return False
             try:
-                return artifact_address(value) in addresses
+                return self._address(self._path(value)) in addresses
             except ValueError:
                 return False
 

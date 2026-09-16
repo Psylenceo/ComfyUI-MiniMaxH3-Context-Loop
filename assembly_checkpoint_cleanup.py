@@ -11,6 +11,7 @@ import re
 import stat
 
 from .artifact_paths import artifact_address, is_link_or_junction
+from .chain_layout import resolve_path, state_root
 from .checkpoint_manager import checkpoint_run_lock, checkpoint_revision_token, _strict_run_name
 from .processing_persistence import sync_file, sync_directory
 
@@ -45,6 +46,7 @@ class AssemblyCheckpointCleanup:
         self.output = Path(output_root).resolve()
         self.run_name = _strict_run_name(manifest.get("run_name"))
         self.root = self.output / "h3_chains" / self.run_name
+        self.state = Path(state_root(self.root))
         source = manifest.get("source_manifest") or manifest
         self.branch = str(source.get("_branch_id", manifest.get("_branch_id", "main")))
         self.reason = ""
@@ -62,7 +64,7 @@ class AssemblyCheckpointCleanup:
         for segment in segments:
             address = artifact_address(segment.get("checkpoint"))
             path = self._path(self.output / address)
-            parts = path.relative_to(self.root).parts
+            parts = path.relative_to(self.state).parts
             if len(parts) > 2 and parts[0] == "branches" and re.fullmatch(r"[0-9a-f]{32}", parts[1]):
                 parts = parts[2:]
             managed = (len(parts) == 2 and parts[0] == "checkpoints" or
@@ -73,12 +75,15 @@ class AssemblyCheckpointCleanup:
             digest = str(segment.get("checkpoint_sha256") or "")
             if not re.fullmatch(r"[0-9a-f]{64}", digest):
                 raise ValueError("checkpoint has no verified identity")
-            self.files[address] = {
+            self.files[self._identity(address)] = {
                 "path": path, "stamp": _stamp(path), "hash": digest,
                 "revision": checkpoint_revision_token(segment.get("index"), segment),
             }
 
     def _path(self, path):
+        # Resolve layout addresses lexically, retaining the link checks below.
+        # output_path()/Path.resolve() would follow links before we check them.
+        path = Path(resolve_path(path))
         # Do not follow symlinks/junctions, including parents inside the run.
         relative = path.relative_to(self.output)
         if relative.parts[:2] != ("h3_chains", self.run_name):
@@ -89,6 +94,14 @@ class AssemblyCheckpointCleanup:
             if is_link_or_junction(current):
                 raise ValueError("linked checkpoint/metadata path; files kept")
         return path
+
+    def _identity(self, value):
+        # Converted immutable metadata keeps legacy addresses; newer records
+        # use .h3 addresses. Both denote the same owner, without rewriting JSON.
+        prefix = "h3_chains/%s/" % self.run_name
+        if value.startswith(prefix + ".h3/"):
+            return prefix + value[len(prefix + ".h3/"):]
+        return value
 
     def _documents(self):
         """Read only known metadata directories, never frames/assets/caches."""
@@ -120,7 +133,7 @@ class AssemblyCheckpointCleanup:
                             if name == "branches" and not re.fullmatch(r"[0-9a-f]{32}", child.name):
                                 continue
                             yield from documents(child, child.name if name == "branches" else branch)
-        yield from documents(self.root, "main")
+        yield from documents(self.state, "main")
 
     def _protected(self):
         identities = {}
@@ -138,16 +151,16 @@ class AssemblyCheckpointCleanup:
                        else document.get("segments") or [])
             own_records = bool(records) and all(
                 isinstance(item, dict)
-                and (address := artifact_address(item.get("checkpoint"))) in self.files
+                and (address := self._identity(artifact_address(item.get("checkpoint")))) in self.files
                 and item.get("checkpoint_sha256") == self.files[address]["hash"]
                 for item in records)
-            inventory_record = path.parent == self.root / "checkpoints" and _REVISION_JSON.fullmatch(path.name)
+            inventory_record = path.parent == self.state / "checkpoints" and _REVISION_JSON.fullmatch(path.name)
             if own_records and (branch == self.branch or inventory_record):
                 # This completed lineage's pointers, immutable metadata and
                 # partial snapshots are not other owners. Do not erase them.
                 continue
             for value in _strings(document):
-                protected.update(identities.get(value, ()))
+                protected.update(identities.get(self._identity(value), ()))
         return protected
 
     def finish(self, published_files):

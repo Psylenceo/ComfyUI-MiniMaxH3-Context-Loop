@@ -14,9 +14,11 @@ import re
 import uuid
 
 if __package__:
+    from .chain_layout import output_path, logical_parts, state_root
     from . import processing_persistence as persistence
     from .reference_cache_store import FORMAT, ReferenceTensorStore, objects_digest, tensor_digest
 else:  # Standalone maintenance CLI, without importing ComfyUI or loading models.
+    from chain_layout import output_path, logical_parts, state_root
     import processing_persistence as persistence
     from reference_cache_store import FORMAT, ReferenceTensorStore, objects_digest, tensor_digest
 
@@ -72,7 +74,7 @@ class ReferenceCacheMigrator:
     def absolute(self, path):
         value = Path(path)
         value = value if value.is_absolute() else self.root / value
-        resolved = value.resolve()
+        resolved = Path(output_path(self.root, value))
         if not resolved.is_relative_to(self.root):
             raise ValueError("Reference-cache path escapes the output directory.")
         return resolved
@@ -159,7 +161,7 @@ class ReferenceCacheMigrator:
 
     def _legacy_target(self, metadata_path, metadata):
         path = self.absolute(metadata_path)
-        parts = path.relative_to(self.root).parts
+        parts = logical_parts(path.relative_to(self.root))
         managed = ((len(parts) == 3 and parts[0] == "h3_reference_cache") or
                    (len(parts) == 4 and parts[0] == "h3_chains" and parts[2] == "reference_cache"))
         if not managed or not re.fullmatch(r"scene_\d+\.[^.]+\.json", path.name):
@@ -242,8 +244,8 @@ class ReferenceCacheMigrator:
         if shared.is_dir():
             parents.extend(path for path in shared.iterdir() if path.is_dir() and path.name != "objects")
         if runs.is_dir():
-            parents.extend(path / "reference_cache" for path in runs.iterdir()
-                           if path.is_dir() and (path / "reference_cache").is_dir())
+            parents.extend(Path(state_root(path)) / "reference_cache" for path in runs.iterdir()
+                           if path.is_dir() and (Path(state_root(path)) / "reference_cache").is_dir())
         for parent in parents:
             for path in parent.iterdir():
                 if re.fullmatch(r"scene_\d+\.[^.]+\.json", path.name):

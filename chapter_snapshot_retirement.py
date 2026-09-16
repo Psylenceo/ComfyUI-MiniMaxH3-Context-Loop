@@ -5,6 +5,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 from .artifact_paths import artifact_address, is_link_or_junction
+from .chain_layout import resolve_path, logical_parts
 
 from .checkpoint_manager import (
     CheckpointDeleteBlocked, CheckpointGraphManager, _fingerprint,
@@ -19,7 +20,7 @@ class ChapterSnapshotManager:
     def _path(self, address):
         if not isinstance(address, str) or not address:
             raise ValueError("Select a saved chapter snapshot.")
-        parts = PurePosixPath(artifact_address(address)).parts
+        parts = Path(resolve_path(self.root / artifact_address(address))).relative_to(self.root).parts
         path = self.root
         for part in parts:
             path /= part
@@ -32,7 +33,7 @@ class ChapterSnapshotManager:
     def _preview(self, run, address):
         address = artifact_address(address)
         path = self._path(address)
-        parts = PurePosixPath(address).parts
+        parts = logical_parts(address)
         if len(parts) > 4 and parts[2] == "branches" and re.fullmatch(r"[0-9a-f]{32}", parts[3]):
             parts = parts[:2] + parts[4:]
         if not (len(parts) == 6 and parts[:3] == ("h3_chains", run, "chapters")

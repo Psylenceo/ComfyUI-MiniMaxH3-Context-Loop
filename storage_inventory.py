@@ -46,6 +46,8 @@ _PATH_FIELDS = {
 
 def _scope(address):
     parts = PurePosixPath(address).parts
+    if parts and parts[0] == ".h3":
+        parts = parts[1:]
     if len(parts) > 2 and parts[0] == "branches" and _BRANCH.fullmatch(parts[1]):
         return parts[1], parts[2:]
     return "main", parts
@@ -67,8 +69,12 @@ def _classification(address):
         category = "exports"
     elif top in {"recovery_archives", "reviews", "prompt_history", "authoring_backups"}:
         category = "recovery"
-    elif top == "project_assets":
+    elif top in {"project_assets", "assets"}:
         category = "assets"
+    elif top in {"exports", "processing"}:
+        category = top
+    elif top == "generation":
+        category = "takes"
     elif top == "reference_cache":
         category = "conditioning_cache"
     elif top in {".plan_studio_thumbnails", ".plan_studio_source_previews"}:
@@ -231,7 +237,11 @@ class _Inventory:
             return None, "invalid"
         prefix = "h3_chains/" + self.run + "/"
         if address.startswith(prefix):
-            return address[len(prefix):], "project"
+            try:
+                from .chain_layout import resolve_path
+            except ImportError:
+                from chain_layout import resolve_path
+            return Path(resolve_path(self.root / address[len(prefix):])).relative_to(self.root).as_posix(), "project"
         if address.startswith("h3_chains/") or field == "directories":
             return address, "external"
         if field == "file" or (field == "path" and PurePosixPath(document).name == "export.json"):

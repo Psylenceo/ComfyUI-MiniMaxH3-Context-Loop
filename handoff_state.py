@@ -380,8 +380,12 @@ class HandoffStore:
     def orchestration_dir(self, run_name: Any) -> str:
         """Absolute, containment-checked orchestration directory."""
         normalized = _validate_run_name(run_name)
-        path = os.path.realpath(os.path.join(
-            self._root, "h3_chains", normalized, HANDOFF_ORCHESTRATION_DIR))
+        try:
+            from .chain_layout import resolve_path
+        except ImportError:
+            from chain_layout import resolve_path
+        path = os.path.realpath(resolve_path(os.path.join(
+            self._root, "h3_chains", normalized, HANDOFF_ORCHESTRATION_DIR)))
         if os.path.commonpath((self._root, path)) != self._root:
             raise HandoffError("H3 orchestration path escapes the output "
                                "directory.")

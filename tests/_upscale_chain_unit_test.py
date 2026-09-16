@@ -120,7 +120,7 @@ def reload_saved_upscale(chain, upscale, manifest, path):
     return loaded
 
 
-def check_partial_assembly(chain, upscale, partial):
+def check_partial_assembly(chain, upscale, partial, storage_layout):
     """Scene 1/2 is deliverable, without turning its resume manifest complete."""
     case = TestCase()
     before = chain._json_document(partial)
@@ -204,7 +204,9 @@ def check_partial_assembly(chain, upscale, partial):
     result = chain.MiniMaxH3ChainAssemble().assemble(
         chapter, "generated", "partial_chapter", 96)
     assert pathlib.Path(result["result"][0]).is_file()
-    assert "/chapters/02_second/" in result["result"][0].replace("\\", "/")
+    chapter_scope = ("/exports/videos/original__02_second/pass-"
+                     if storage_layout == "organized" else "/chapters/02_second/")
+    assert chapter_scope in result["result"][0].replace("\\", "/")
     assert partial == before and partial_path.read_bytes() == saved_partial
 
 
@@ -267,6 +269,15 @@ def main():
 
     with tempfile.TemporaryDirectory() as temporary:
         folder_paths.output_directory = temporary
+        storage_layout = os.environ.get("H3_TEST_LAYOUT", "organized")
+        assert storage_layout in {"legacy", "organized"}, storage_layout
+        project_root = pathlib.Path(temporary) / "h3_chains" / "upscale_test"
+        if storage_layout == "legacy":
+            # Existing project folders must keep their historical layout.
+            project_root.mkdir(parents=True)
+        cache_prefix = "h3_chains/upscale_test/" + (
+            ".h3/reference_cache/" if storage_layout == "organized"
+            else "reference_cache/")
         plan = chain.MiniMaxH3ChainPlan().build(
             json.dumps({"shots": [{
                 "id": "upscale_scene_1",
@@ -426,10 +437,8 @@ def main():
             denoised_latent=av_latent(0.75))["result"][0]
         adopted_cache = cached_source["reference_cache"]
         assert adopted_cache != cache_descriptor
-        assert adopted_cache["metadata"].startswith(
-            "h3_chains/upscale_test/reference_cache/")
-        assert adopted_cache["tensors"].startswith(
-            "h3_chains/upscale_test/reference_cache/")
+        assert adopted_cache["metadata"].startswith(cache_prefix)
+        assert adopted_cache["tensors"].startswith(cache_prefix)
         assert chain._load_reference_cache_descriptor(
             adopted_cache)["run_name"] == "upscale_test"
         cached_second_state = chain._initial_state(prepared_plan, 2)
@@ -461,10 +470,8 @@ def main():
         })
         migrated_manifest = manager.passthrough(legacy_selection)[0]
         migrated_cache = migrated_manifest["segments"][0]["reference_cache"]
-        assert migrated_cache["metadata"].startswith(
-            "h3_chains/upscale_test/reference_cache/")
-        assert migrated_cache["tensors"].startswith(
-            "h3_chains/upscale_test/reference_cache/")
+        assert migrated_cache["metadata"].startswith(cache_prefix)
+        assert migrated_cache["tensors"].startswith(cache_prefix)
         assert pathlib.Path(chain._absolute_output_path(
             cache_descriptor["metadata"])).is_file()
         assert pathlib.Path(chain._absolute_output_path(
@@ -1025,7 +1032,7 @@ def main():
         partial = upscale.MiniMaxH3ChainUpscaleLoopEnd().end(
             flow, upscale_state, hq_images, hq_segment)[0]
         assert partial["format"] == "h3_chain_upscale_partial_manifest_v1"
-        check_partial_assembly(chain, upscale, partial)
+        check_partial_assembly(chain, upscale, partial, storage_layout)
 
         flow, upscale_state, source_manifest, _status = adapter.adapt(
             selected_manifest, "quality", "h3_latent", '{"scale":2}',
@@ -1054,9 +1061,10 @@ def main():
         merged = merged_result["result"][0]
         merged_path = pathlib.Path(merged)
         assert merged_path.is_file() and merged_path.stat().st_size > 0
-        assert merged_path.parent == (
-            pathlib.Path(temporary) / "h3_chains" / "upscale_test" /
-            "upscaled" / "quality" / "final")
+        expected_export = (project_root / "exports/videos/original/pass-quality"
+                           if storage_layout == "organized" else
+                           project_root / "upscaled/quality/final")
+        assert merged_path.parent == expected_export
         output_copy = (pathlib.Path(temporary) / "published_upscale" /
                        merged_path.name)
         assert output_copy.is_file() and output_copy.stat().st_size > 0
@@ -1256,7 +1264,7 @@ def main():
         pathlib.Path(chain._absolute_output_path(motion["checkpoint"])).unlink()
         rejected(lambda: sources.derope_source_manifest(selected_manifest, legacy_choice, chain, upscale), "missing")
 
-    print("H3 upscale child run: denoised source preference, optional HQ latent, "
+    print("H3 upscale child run (%s): denoised source preference, optional HQ latent, " % storage_layout +
           "self-contained audio, unified manifest, assembler, and output copy pass")
 
 

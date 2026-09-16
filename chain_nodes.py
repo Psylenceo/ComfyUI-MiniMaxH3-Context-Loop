@@ -41,6 +41,12 @@ from typing import Any
 
 import folder_paths
 
+from .chain_layout import (
+    create_project, output_path as layout_output_path,
+    resolve_path as layout_path, state_root as layout_state_root,
+    frame_export_directory,
+)
+
 try:
     import av
 except ImportError:  # ComfyUI normally ships PyAV.
@@ -8276,6 +8282,7 @@ def _run_manager_source_track_timeline(
 
 
 def _project_run_dir(plan: dict[str, Any]) -> str:
+    """Shared state: the legacy project root, or its organized .h3 directory."""
     root = os.path.realpath(_output_root())
     run_name = _strict_run_name(plan.get("run_name"))
     path = os.path.realpath(os.path.join(root, "h3_chains", run_name))
@@ -8285,7 +8292,7 @@ def _project_run_dir(plan: dict[str, Any]) -> str:
         inside = False
     if not inside:
         raise ValueError("H3 chain run path escapes the ComfyUI output directory.")
-    return path
+    return layout_state_root(path)
 
 
 def _run_dir(plan: dict[str, Any]) -> str:
@@ -8352,8 +8359,8 @@ def _request_is_loopback(request: Any) -> bool:
 
 def _open_run_output_directory(run_name: Any) -> dict[str, Any]:
     normalized = _strict_run_name(run_name)
-    path = _run_dir({"run_name": normalized})
-    os.makedirs(path, exist_ok=True)
+    path = os.path.join(_output_root(), "h3_chains", normalized)
+    create_project(path)
     opened, error = _launch_directory(path)
     return {
         "ok": True,
@@ -8527,18 +8534,7 @@ def _relative_output_path(path: str) -> str:
 
 
 def _absolute_output_path(path: str) -> str:
-    root = os.path.realpath(_output_root())
-    if os.path.isabs(path):
-        resolved = os.path.realpath(path)
-    else:
-        resolved = os.path.realpath(os.path.join(root, path))
-    try:
-        inside = os.path.commonpath((root, resolved)) == root
-    except ValueError:
-        inside = False
-    if not inside:
-        raise ValueError("H3 chain artifact path escapes the output directory.")
-    return resolved
+    return layout_output_path(_output_root(), path)
 
 
 def _video_output_item(path: str) -> dict[str, str]:
@@ -8592,11 +8588,11 @@ def _artifact_paths(plan: dict[str, Any], index: int) -> dict[str, str]:
     run_dir = _project_run_dir(plan)
     return {
         "run_dir": run_dir,
-        "segment": os.path.join(run_dir, "segments", "clip_%04d.mp4" % index),
+        "segment": layout_path(os.path.join(run_dir, "segments", "clip_%04d.mp4" % index)),
         "blend_segment": os.path.join(
             run_dir, "blend_segments", "clip_%04d.mp4" % index),
-        "generated_audio": os.path.join(
-            run_dir, "generated_audio", "clip_%04d.wav" % index),
+        "generated_audio": layout_path(os.path.join(
+            run_dir, "generated_audio", "clip_%04d.wav" % index)),
         "checkpoint": os.path.join(run_dir, "checkpoints",
                                    "clip_%04d.safetensors" % index),
         "metadata": os.path.join(_run_dir(plan), "checkpoints", "clip_%04d.json" % index),
@@ -10117,6 +10113,7 @@ def _write_run_archives(
     older recovery tools, while every committed scene keeps exact snapshot
     paths that are never overwritten.
     """
+    create_project(os.path.join(_output_root(), "h3_chains", _strict_run_name(plan["run_name"])))
     token = str(revision or uuid.uuid4().hex).lower()
     snapshot_paths = _run_archive_snapshot_paths(plan, token)
     documents = _run_archive_documents(plan, api_prompt, extra_pnginfo)
@@ -19543,6 +19540,7 @@ class MiniMaxH3ChainLoopStart:
                     "errors": [issue],
                 }))
             runtime_timeline = None
+            create_project(os.path.join(_output_root(), "h3_chains", _strict_run_name(plan["run_name"])))
             if source_timeline is not None:
                 prepared_plan, runtime_timeline = _plan_with_source_timeline(
                     prepared_plan, source_timeline)
@@ -20870,6 +20868,7 @@ class MiniMaxH3ChainSegmentSave:
                     "audio. Final assembly will use the legacy hard-cut audio "
                     "path for this boundary.", index, continuation_mode)
 
+        create_project(os.path.join(_output_root(), "h3_chains", _strict_run_name(plan["run_name"])))
         paths = _artifact_paths(plan, index)
         os.makedirs(os.path.dirname(paths["segment"]), exist_ok=True)
         os.makedirs(os.path.dirname(paths["blend_segment"]), exist_ok=True)
@@ -23111,8 +23110,8 @@ def _persist_chapter_manifest_locked(manifest: dict[str, Any]) -> tuple[
                 or _chapter_manifest_digest(existing) != snapshot_id
                 or str(existing.get("chapter_manifest_id") or "") !=
                    snapshot_id
-                or str(existing.get("chapter_manifest_path") or "") !=
-                   _relative_output_path(path)):
+                or _absolute_output_path(str(existing.get("chapter_manifest_path") or "")) !=
+                   os.path.realpath(path)):
             raise ValueError(
                 "Stored H3 chapter manifest %s failed its identity check." %
                 snapshot_id)
@@ -23296,8 +23295,8 @@ def _load_chapter_manifest(
                str(manifest.get("chapter_manifest_id") or "")
             or str(manifest.get("chapter_manifest_id") or "") !=
                file_snapshot_id
-            or str(manifest.get("chapter_manifest_path") or "") !=
-               _relative_output_path(path)):
+            or _absolute_output_path(str(manifest.get("chapter_manifest_path") or "")) !=
+               os.path.realpath(path)):
         raise ValueError("Sealed H3 chapter manifest failed its identity check.")
     _validate_manifest(manifest)
     return manifest, path
@@ -24802,8 +24801,8 @@ def _blend_video_records(
                     raise RuntimeError(
                         "H3 Chain scheduled blend recovery has no temporary "
                         "artifact owner.")
-                final_dir = os.path.join(
-                    _chapter_delivery_root(manifest), "final")
+                final_dir = layout_path(os.path.join(
+                    _chapter_delivery_root(manifest), "final"))
                 os.makedirs(final_dir, exist_ok=True)
                 path = os.path.join(
                     final_dir, ".scheduled_blend_clip_%04d.%s.mkv" %
@@ -25846,7 +25845,7 @@ def _checkpoint_export_segments(manifest: dict[str, Any]) -> list[dict[str, Any]
 def _png_export_hash_cache_path(manifest: dict[str, Any]) -> str:
     run_name = _strict_run_name(manifest.get("run_name"))
     root = _output_root()
-    path = os.path.abspath(os.path.join(
+    path = layout_path(os.path.join(
         root, "h3_chains", run_name, ".png_export_hash_cache.json"))
     if os.path.commonpath([root, path]) != root:
         raise ValueError("H3 PNG export hash-cache path escapes output.")
@@ -25912,10 +25911,9 @@ def _verify_png_export_checkpoint(
     return "verified SHA-256", True
 
 
-def _new_export_directory(manifest: dict[str, Any], export_name: str) -> str:
+def _new_export_directory(manifest: dict[str, Any], export_name: str, audio_only=False) -> str:
     name = _safe_name(export_name, "png_sequence")
-    base = os.path.abspath(os.path.join(
-        _chapter_delivery_root(manifest), "frames", name))
+    base = os.path.join(frame_export_directory(_chapter_delivery_root(manifest), audio_only), name)
     root = _output_root()
     if os.path.commonpath([root, base]) != root:
         raise ValueError("H3 PNG export path escapes the ComfyUI output directory.")
@@ -26051,11 +26049,12 @@ def _png_export_incremental_identity(
     }
 
 
-def _find_incremental_png_export(manifest, export_name, identity, verification):
+def _find_incremental_png_export(manifest, export_name, identity, verification, audio_only=False):
     """Reuse only a successful, unchanged prefix; never repair files in place."""
     chapter_root = _chapter_delivery_root(manifest)
-    root = os.path.realpath(os.path.join(chapter_root, "frames"))
-    if os.path.commonpath([chapter_root, root]) != chapter_root:
+    expected = frame_export_directory(chapter_root, audio_only)
+    root = os.path.realpath(expected)
+    if os.path.commonpath([os.path.dirname(expected), root]) != os.path.dirname(expected):
         raise ValueError("H3 chapter frames directory escapes its chapter.")
     if not os.path.isdir(root):
         return None
@@ -26484,9 +26483,12 @@ class MiniMaxH3ChainExportPNG:
             manifest, segments, editorial_segments, video_vae, audio_vae,
             first_frame_number, compression, embed_workflow, png_bit_depth) if incremental else None)
         previous_export = (_find_incremental_png_export(
-            manifest, export_name, identity, verification) if incremental else None)
+            manifest, export_name, identity, verification, not video_enabled) if incremental else None)
+        if incremental and not video_enabled and previous_export is None:
+            # Converted audio-only exports retain their historic directory.
+            previous_export = _find_incremental_png_export(manifest, export_name, identity, verification)
         if previous_export is None:
-            output_dir = _new_export_directory(manifest, export_name)
+            output_dir = _new_export_directory(manifest, export_name, not video_enabled)
             previous = {}
         else:
             output_dir, previous = previous_export
@@ -27958,8 +27960,8 @@ class MiniMaxH3ChainAssemble:
                 upscale_manifest["profile"], 1,
                 upscale_manifest.get("source_manifest"))["final"]
         else:
-            final_dir = os.path.join(
-                _chapter_delivery_root(manifest), "final")
+            final_dir = layout_path(os.path.join(
+                _chapter_delivery_root(manifest), "final"))
         os.makedirs(final_dir, exist_ok=True)
         final_name = _safe_name(_expand_filename_date(filename), "final")
         final_path = os.path.join(final_dir, final_name + ".mp4")
@@ -28863,7 +28865,7 @@ async def _list_pending_reviews(_request):
             _strict_run_name(run_name)
         except ValueError:
             continue
-        snapshots = list(_load_review_snapshots(run_dir))
+        snapshots = list(_load_review_snapshots(_project_run_dir({"run_name": run_name})))
         try:
             branches = WorkingBranches(_output_root(), run_name).listing()["branches"]
             for branch in branches:
@@ -29076,7 +29078,7 @@ def _load_checkpoint_revision(
     if re.fullmatch(r"[0-9a-f]{32}", token) is None:
         raise ValueError("Checkpoint revision must be a 32-character revision id.")
     checkpoint_dir = os.path.join(
-        _output_root(), "h3_chains", run_name, "checkpoints")
+        _project_run_dir({"run_name": run_name}), "checkpoints")
     metadata_path = os.path.join(
         checkpoint_dir, "clip_%04d.%s.json" % (index, token))
     if not os.path.isfile(metadata_path):
@@ -30151,8 +30153,8 @@ def _saved_checkpoint_listing(
         if (match := re.match(r"clip_(\d{4})(?:\.|$)", filename))
     }
     for artifact_kind in ("segments", "blend_segments", "generated_audio"):
-        artifact_dir = os.path.join(
-            _output_root(), "h3_chains", run_name, artifact_kind)
+        artifact_dir = layout_path(os.path.join(
+            _project_run_dir({"run_name": run_name}), artifact_kind))
         if os.path.isdir(artifact_dir):
             checkpoint_scene_numbers.update(
                 int(match.group(1)) for filename in os.listdir(artifact_dir)
@@ -30207,9 +30209,9 @@ def _saved_checkpoint_listing(
                         index, segment, review_dir, review_filenames)
                     if preview is not None:
                         item["preview_video"] = _video_output_item(preview)
-                partial_path = os.path.join(
+                partial_path = layout_path(os.path.join(
                     _run_dir({"run_name": run_name}), "final",
-                    "partial_through_clip_%04d.mp4" % index)
+                    "partial_through_clip_%04d.mp4" % index))
                 if os.path.isfile(partial_path):
                     item["partial_video"] = _video_output_item(partial_path)
                 checkpoints.append(item)
@@ -30809,7 +30811,7 @@ def _plan_studio_checkpoint_thumbnail_record(
         raise ValueError(
             "Checkpoint revision must be a 32-character revision id.")
     metadata_path = os.path.join(
-        _output_root(), "h3_chains", run_name, "checkpoints",
+        _project_run_dir({"run_name": run_name}), "checkpoints",
         "clip_%04d.%s.json" % (index, token))
     if not os.path.isfile(metadata_path):
         active_path = os.path.join(
@@ -31843,6 +31845,8 @@ def _capture_frame_video_path(filename: Any, subfolder: Any, kind: Any) -> str:
     if os.path.isabs(name) or os.path.isabs(sub):
         raise ValueError("Video source must be relative to its selected media directory.")
     candidate = os.path.join(root, sub, name) if sub else os.path.join(root, name)
+    if str(kind or "output").strip().lower() == "output":
+        candidate = layout_output_path(root, candidate)
     candidate = os.path.realpath(candidate)
     if os.path.commonpath((os.path.realpath(root), candidate)) != os.path.realpath(root):
         raise ValueError("Video source is outside its selected media directory.")

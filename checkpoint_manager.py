@@ -9,6 +9,11 @@ import os
 import re
 import threading
 import uuid
+
+try:
+    from .chain_layout import state_root, resolve_path, output_path
+except ImportError:
+    from chain_layout import state_root, resolve_path, output_path
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Any
@@ -236,17 +241,13 @@ class CheckpointGraphManager:
         path = os.path.realpath(os.path.join(self.chains_root, run))
         if not self._inside(self.output_root, path):
             raise ValueError("H3 checkpoint run path escapes the output directory.")
-        return path, run
+        return state_root(path), run
 
     def _artifact_path(self, value: Any) -> str:
         text = str(value or "").strip()
         if not text:
             raise ValueError("Checkpoint artifact path is empty.")
-        path = os.path.realpath(
-            text if os.path.isabs(text) else os.path.join(self.output_root, text))
-        if not self._inside(self.output_root, path):
-            raise ValueError("Checkpoint artifact path escapes the output directory.")
-        return path
+        return output_path(self.output_root, text)
 
     def _output_item(self, path: str) -> dict[str, str]:
         relative = os.path.relpath(path, self.output_root)
@@ -968,7 +969,7 @@ class CheckpointGraphManager:
     def _artifacts(self, scan: dict[str, Any], record: dict[str, Any]
                    ) -> list[dict[str, Any]]:
         run_dir = scan["run_dir"]
-        allowed_roots = [os.path.realpath(os.path.join(run_dir, name)) for name in (
+        allowed_roots = [os.path.realpath(resolve_path(os.path.join(run_dir, name))) for name in (
             "segments", "checkpoints", "generated_audio", "blend_segments",
             "reviews", "recovery_archives")]
         paths: dict[str, tuple[str, bool]] = {
@@ -1522,7 +1523,10 @@ class CheckpointGraphManager:
             relative = value.replace("\\", "/")
             if not (relative.startswith("h3_chains/") or os.path.isabs(relative)):
                 return False
-            return os.path.realpath(os.path.join(self.output_root, relative)) in paths
+            try:
+                return output_path(self.output_root, relative) in paths
+            except ValueError:
+                return False
 
         references = []
         if not scan.get("_branch_snapshot_scan"):

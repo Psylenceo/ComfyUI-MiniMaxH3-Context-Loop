@@ -12,6 +12,11 @@ import json
 import os
 import re
 
+try:
+    from .chain_layout import state_root
+except ImportError:
+    from chain_layout import state_root
+
 
 _SCOPE = ContextVar("h3_working_branch", default=None)
 
@@ -39,7 +44,7 @@ def branch_scope(run, selected="main"):
 
 def working_directory(project_directory, run, selected=None):
     selected = branch_id(current_branch(run) if selected is None else selected)
-    root = os.path.realpath(project_directory)
+    root = os.path.realpath(state_root(project_directory))
     if selected == "main":
         return root
     path = os.path.realpath(os.path.join(root, "branches", selected))
