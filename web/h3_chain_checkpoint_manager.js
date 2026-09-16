@@ -1,4 +1,5 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {
     CHECKPOINT_STAGES,
@@ -323,6 +324,7 @@ function mount(node) {
         initialRefresh:true, attribution:null, attributionButton:null,
     };
     const root = element("div", "h3cm-root");
+    bindNodeWheel(root, node, app);
     const head = element("div", "h3cm-head");
     const title = element("div", "h3cm-title", "Checkpoint Manager");
     const summary = element("div", "h3cm-summary", "Select a saved run");

@@ -1,4 +1,5 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {
     MAX_SHOTS,
@@ -737,7 +738,7 @@ function mount(node) {
             event.stopPropagation();
         });
     }
-    root.addEventListener("wheel", (event) => event.stopPropagation());
+    bindNodeWheel(root, node, app);
 
     const state = {
         plan: null,

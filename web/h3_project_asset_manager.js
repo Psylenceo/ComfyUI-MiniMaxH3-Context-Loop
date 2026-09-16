@@ -1,4 +1,5 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {
     coupledOutputDimensions,
@@ -383,6 +384,7 @@ function mount(node) {
     [runNameWidget, catalogWidget, operationWidget].forEach(collapseWidget);
 
     const root = el("div", "h3pa-root");
+    bindNodeWheel(root, node, app);
     const top = el("div", "h3pa-row");
     const runNameInput = el("input", "h3pa-project");
     runNameInput.placeholder = "Run name";

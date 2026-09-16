@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import * as core from "../web/h3_checkpoint_manager_core.mjs";
+import {bindNodeWheel} from "../web/h3_dom_wheel.mjs";
 
 const a = "a".repeat(32), b = "b".repeat(32), c = "c".repeat(32), d = "d".repeat(32);
 const payload = {
@@ -79,7 +80,7 @@ const confirmations = [];
 let extension;
 const requests = [];
 const context = vm.createContext({
-    ...core, URLSearchParams, console,
+    ...core, bindNodeWheel, URLSearchParams, console,
     document:{head:new Element("head"), getElementById:() => null, createElement:tag => new Element(tag)},
     app:{registerExtension(value){ extension = value; }, graph:{setDirtyCanvas(){}}},
     api:{apiURL:path => path, fetchApi:async (path, options={}) => {

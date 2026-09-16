@@ -1,4 +1,5 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.6.10";
 import {
@@ -550,7 +551,7 @@ function mountEditor(node) {
     ]) {
         root.addEventListener(eventName, (event) => event.stopPropagation());
     }
-    root.addEventListener("wheel", (event) => event.stopPropagation());
+    bindNodeWheel(root, node, app);
     const savedLayout = planLayout(node);
     const state = {
         plan: null,

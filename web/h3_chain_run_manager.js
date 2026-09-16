@@ -1,4 +1,5 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {
     ASSET_ROLES,
@@ -237,7 +238,7 @@ function mount(node) {
     for (const eventName of [
         "pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick",
     ]) root.addEventListener(eventName, (event) => event.stopPropagation());
-    root.addEventListener("wheel", (event) => event.stopPropagation());
+    bindNodeWheel(root, node, app);
 
     for (const name of ASSET_WIDGETS) collapseWidget(widgetByName(node, name));
     const state = {
