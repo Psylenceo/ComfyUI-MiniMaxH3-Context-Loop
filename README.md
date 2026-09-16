@@ -36,6 +36,17 @@ Already merged upstream:
 
 ## Changelog
 
+### 0.6.10 — Checkpoint recovery and Plan editing fixes
+
+- Recover expanded visual context when resuming saved scenes (#72).
+- Improve deferred Carousel reference recovery and add a saved upscale loader
+  (#65); fix the tagged source-audio lip-sync example (#53).
+- Add persistent scene collapse controls to the base Plan editors (#69).
+- Improve checkpoint reattribution and add previewed obsolete-path cleanup,
+  plus opt-in checkpoint cleanup after completed assembly (#66).
+- Correct zoomed trim dragging and refresh trim controls as checkpoints load.
+  The remaining disabled-trim report in #68 is still under investigation.
+
 ### 0.6.9 — Plan controls and workflow loading fixes
 
 - Combine repeated Plan refreshes during workflow loading.

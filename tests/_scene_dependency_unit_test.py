@@ -536,6 +536,96 @@ finally:
     chain._st_load = original_loader
     chain._streams_from_latent = original_streams
 
+# Issue #72: a single auto-positioned builder block is an exact latent crop,
+# including when resume needs more RGB context than the saved 22-frame tail.
+expanded_video = torch.arange(72, dtype=torch.float32).reshape(
+    1, 1, 72, 1, 1).expand(1, 24, 72, 2, 2).clone()
+expanded_audio = torch.zeros(1, 32, 2, 405)
+expanded_frames = torch.arange(199, 221, dtype=torch.float32).reshape(
+    22, 1, 1, 1).expand(22, 2, 2, 3).clone()
+
+
+class ExpandedContextVAE:
+    def __init__(self):
+        self.decoded = []
+
+    def decode(self, video):
+        self.decoded.append(video.detach().clone())
+        frames = 5 + 17 * ((int(video.shape[2]) - 2) // 5)
+        return torch.arange(frames, dtype=torch.float32).reshape(
+            frames, 1, 1, 1).expand(frames, 2, 2, 3).clone()
+
+    def encode(self, _frames):
+        raise AssertionError("context recovery must not re-encode RGB")
+
+
+chain._streams_from_latent = lambda value: value["samples"]
+try:
+    for unbatched in (False, True):
+        chain._st_load = lambda _path: {
+            "video": expanded_video[0] if unbatched else expanded_video,
+            "audio": expanded_audio, "context_frames": expanded_frames,
+        }
+        for wanted in (22, 39, 56):
+            expanded_plan = chain._normalize_plan(
+                json.dumps({"shots": [
+                    {"id": name, "prompt": name, "length": 243,
+                     "audio_context_length": 0,
+                     **({"context_length": wanted,
+                         "visual_context_blocks": [
+                             {"source": "four", "frames": wanted}]}
+                        if name == "five" else {})}
+                    for name in ("one", "two", "three", "four", "five")
+                ]}),
+                "expanded-builder-test", 64, 64, 22, "video", "head",
+                "disabled", "generated_audio", 0, 1.0, 8, 11, 18,
+                "body:auto:v1", 0, "masked_av")
+            segments = [
+                {"index": scene,
+                 "id": expanded_plan["shots"][scene - 1]["id"],
+                 "checkpoint": "scene_%d.safetensors" % scene,
+                 "raw_frames": 243,
+                 "delivered_frames": 243 if scene == 1 else 221}
+                for scene in range(1, 5)
+            ]
+            resumed = {
+                "plan": expanded_plan, "index": 5, "segments": segments,
+                "previous_frames": expanded_frames,
+                "previous_latent": {
+                    "samples": [expanded_video, expanded_audio]},
+            }
+            selected = chain._visual_context_state(resumed)
+            crop = selected["previous_latent"]["samples"][0]
+            assert crop.shape[2] == 2 + 5 * ((wanted - 5) // 17)
+            start = selected["_visual_context_resolved_start_frame"]
+            first_step = chain._h3_native_frame_boundary_step(22 + start)
+            assert torch.equal(
+                crop, expanded_video[:, :, first_step:first_step + crop.shape[2]])
+            decoder = ExpandedContextVAE()
+            recovered = chain._previous_context_frames(selected, decoder, wanted)
+            assert recovered.shape[0] == wanted
+            if wanted == 22:
+                assert not decoder.decoded
+                assert torch.equal(recovered, expanded_frames)
+            else:
+                assert selected["_visual_context_exact_prefix"] is True
+                assert len(decoder.decoded) == 1
+                assert torch.equal(decoder.decoded[0], crop)
+                assert chain._previous_context_frames(
+                    selected, decoder, wanted) is recovered
+                assert len(decoder.decoded) == 1
+            assert selected["previous_latent"]["samples"][1] is expanded_audio
+            assert resumed["previous_frames"] is expanded_frames
+            assert resumed["previous_latent"]["samples"][0] is expanded_video
+            assert selected["segments"] == segments
+    assert torch.equal(expanded_video, torch.arange(72).reshape(
+        1, 1, 72, 1, 1).expand_as(expanded_video))
+    assert torch.equal(expanded_frames, torch.arange(199, 221).reshape(
+        22, 1, 1, 1).expand_as(expanded_frames))
+finally:
+    chain._st_load = original_loader
+    chain._streams_from_latent = original_streams
+
 # Two independent saved picture tails can form one H3-phase-safe prefix. The
 # first block may come from a chronologically newer scene than the second;
 # their explicit order in the Plan is what matters. Audio stays the complete

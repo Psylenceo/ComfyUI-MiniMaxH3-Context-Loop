@@ -1,6 +1,7 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
-import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.6.9";
+import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.6.10";
 import {
     H3_CONTEXT_LENGTHS,
     MAX_SHOTS,
@@ -35,8 +36,8 @@ import {
     shotLengthMode,
     sharedPrompt,
     visualContextCompositions,
-} from "./h3_chain_plan_core.mjs?v=0.6.9";
-import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.6.9";
+} from "./h3_chain_plan_core.mjs?v=0.6.10";
+import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.6.10";
 import {
     applySceneAudioOverride,
     applySceneLipSync,
@@ -47,21 +48,21 @@ import {
     sceneAudioPolicy,
     sceneTransitionPreset,
     transitionPresetLabel,
-} from "./h3_policy_core.mjs?v=0.6.9";
+} from "./h3_policy_core.mjs?v=0.6.10";
 import {
     resolveAudioContextLength,
     resolveAudioPolicy,
     resolveTransitionPolicy,
-} from "./h3_socket_presentation_core.mjs?v=0.6.9";
+} from "./h3_socket_presentation_core.mjs?v=0.6.10";
 import {
     availableLoRARoutes,
     loraRouteLabel,
-} from "./h3_lora_scheduler_core.mjs?v=0.6.9";
+} from "./h3_lora_scheduler_core.mjs?v=0.6.10";
 import {
     MODERN_PLAN_NODE as MODERN_NODE_NAME,
     MODERN_PLAN_WIDGET_NAMES as MODERN_BACKING_WIDGETS,
     upgradeLegacyPlanNode,
-} from "./h3_plan_upgrade_core.mjs?v=0.6.9";
+} from "./h3_plan_upgrade_core.mjs?v=0.6.10";
 
 // This scene editor is an original implementation. Its quick @ reference and
 // # dialogue interactions are inspired by nkxx188/ComfyUI-MiniMaxH3-Easy,
@@ -126,7 +127,7 @@ function injectStyles() {
         }
         .h3c-editor button:hover { border-color: var(--h3c-accent); }
         .h3c-editor button:disabled { cursor: not-allowed; opacity: .4; }
-        .h3c-header, .h3c-toolbar, .h3c-card-head, .h3c-prompt-tools,
+        .h3c-header, .h3c-toolbar, .h3c-card-head, .h3c-prefix-head, .h3c-prompt-tools,
         .h3c-json-actions, .h3c-footer { display: flex; align-items: center; gap: 6px; }
         .h3c-header { justify-content: space-between; margin-bottom: 8px; }
         .h3c-header-actions { display:flex; align-items:center; justify-content:flex-end;
@@ -174,6 +175,10 @@ function injectStyles() {
         .h3c-label { display: block; margin-bottom: 4px; color: var(--h3c-muted); font-weight: 650; }
         .h3c-help { margin-top: 4px; color: var(--h3c-muted); }
         .h3c-prefix { min-height: 88px; }
+        .h3c-prefix-head { margin-bottom: 7px; }
+        .h3c-prefix-head .h3c-label { margin-bottom: 0; }
+        .h3c-prefix-section.h3c-collapsed .h3c-prefix-head { margin-bottom: 0; }
+        .h3c-prefix-body[hidden] { display: none; }
         .h3c-toolbar { position: sticky; top: -10px; z-index: 4; padding: 7px 0; background: var(--h3c-bg); flex-wrap: wrap; }
         .h3c-toolbar .h3c-spacer { flex: 1; }
         .h3c-card {
@@ -547,7 +552,7 @@ function mountEditor(node) {
     ]) {
         root.addEventListener(eventName, (event) => event.stopPropagation());
     }
-    root.addEventListener("wheel", (event) => event.stopPropagation());
+    bindNodeWheel(root, node, app);
     const savedLayout = planLayout(node);
     const state = {
         plan: null,
@@ -1943,6 +1948,7 @@ function mountEditor(node) {
         );
 
         const prefix = element("textarea", "h3c-prefix");
+        prefix.setAttribute("aria-label", "Shared prompt");
         prefix.value = sharedPrompt(state.plan).text;
         prefix.placeholder = "Identity, wardrobe, style and continuity rules shared by every scene…";
         prefix.title = "Text automatically prepended to every scene prompt. Put identity, wardrobe, reference definitions, audio rules, style, and global continuity here instead of repeating them.";
@@ -1952,11 +1958,34 @@ function mountEditor(node) {
             syncPlan();
         });
         bindTextareaHeight(prefix, "shared", 88);
-        const prefixSection = element("section", "h3c-section");
-        prefixSection.append(
-            field("Shared prompt — automatically prepended to every scene", prefix),
-            promptTools(prefix, null),
+        const prefixSection = element("section", "h3c-section h3c-prefix-section");
+        const prefixHead = element("div", "h3c-prefix-head");
+        const prefixBody = element("div", "h3c-prefix-body");
+        const prefixCollapse = button("", "", () => {
+            const layout = planLayout(node);
+            node.properties[LAYOUT_PROPERTY] = {
+                ...layout, sharedPromptCollapsed: layout.sharedPromptCollapsed !== true,
+            };
+            refreshPrefixCollapsed();
+            graphDirty(); // UI only: keep prompt text, editor DOM, seeds and node size.
+        });
+        prefixCollapse.classList.add("h3c-collapse", "h3c-prefix-collapse");
+        function refreshPrefixCollapsed() {
+            const collapsed = planLayout(node).sharedPromptCollapsed === true;
+            prefixBody.hidden = collapsed;
+            prefixSection.classList.toggle("h3c-collapsed", collapsed);
+            prefixCollapse.textContent = collapsed ? "▸" : "▾";
+            prefixCollapse.title = collapsed ? "Expand global prompt" : "Collapse global prompt";
+            prefixCollapse.setAttribute("aria-label", prefixCollapse.title);
+            prefixCollapse.setAttribute("aria-expanded", String(!collapsed));
+        }
+        prefixHead.append(
+            prefixCollapse,
+            element("span", "h3c-label", "Shared prompt — automatically prepended to every scene"),
         );
+        prefixBody.append(prefix, promptTools(prefix, null));
+        prefixSection.append(prefixHead, prefixBody);
+        refreshPrefixCollapsed();
 
         const toolbar = element("div", "h3c-toolbar");
         const add = button("+ Add scene", "Append a new scene", () => {

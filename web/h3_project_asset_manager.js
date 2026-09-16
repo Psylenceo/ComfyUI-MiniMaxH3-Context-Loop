@@ -1,4 +1,5 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {
     coupledOutputDimensions,
@@ -8,12 +9,12 @@ import {
     dimensionsForMegapixels,
     formatMegapixels,
     imageMegapixels,
-} from "./h3_project_asset_editor_core.mjs?v=0.6.9";
+} from "./h3_project_asset_editor_core.mjs?v=0.6.10";
 import {
     publishProjectAssetCatalogChanged,
     serializedProjectAssetCatalog,
     serializedProjectAssetIdentity,
-} from "./h3_project_asset_sync_core.mjs?v=0.6.9";
+} from "./h3_project_asset_sync_core.mjs?v=0.6.10";
 
 const NODE_NAME = "MiniMaxH3ProjectAssetManager";
 const SEMANTIC_SETTING_WIDGETS = [
@@ -406,6 +407,7 @@ function mount(node) {
     const root = el("div", "h3pa-root");
     const sourceCol = el("div", "h3pa-source-col");
     const stageCol = el("div", "h3pa-stage-col");
+    bindNodeWheel(root, node, app);
     const top = el("div", "h3pa-row");
     const runNameInput = el("input", "h3pa-project");
     runNameInput.placeholder = "Run name";

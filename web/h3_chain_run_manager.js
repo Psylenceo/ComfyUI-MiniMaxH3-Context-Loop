@@ -1,4 +1,5 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {
     ASSET_ROLES,
@@ -7,15 +8,15 @@ import {
     assetInputNumber,
     collectAssetBindings,
     nodeType,
-} from "./h3_run_assets_core.mjs?v=0.6.9";
+} from "./h3_run_assets_core.mjs?v=0.6.10";
 import {
     runArchiveOptionLabel,
     runManagerIdentity,
-} from "./h3_run_manager_core.mjs?v=0.6.9";
+} from "./h3_run_manager_core.mjs?v=0.6.10";
 import {
     refreshRestoredPlanEditors,
     restoreConnectedPolicyInputs,
-} from "./h3_plan_restore_core.mjs?v=0.6.9";
+} from "./h3_plan_restore_core.mjs?v=0.6.10";
 
 const NODE_NAME = "MiniMaxH3ChainRunManager";
 const PLAN_NAME = "MiniMaxH3ChainPlan";
@@ -237,7 +238,7 @@ function mount(node) {
     for (const eventName of [
         "pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick",
     ]) root.addEventListener(eventName, (event) => event.stopPropagation());
-    root.addEventListener("wheel", (event) => event.stopPropagation());
+    bindNodeWheel(root, node, app);
 
     for (const name of ASSET_WIDGETS) collapseWidget(widgetByName(node, name));
     const state = {
