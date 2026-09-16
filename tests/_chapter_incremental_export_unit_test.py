@@ -2,6 +2,7 @@
 """Real PNG/WAV writes with tiny CPU VAEs: partial chapters and safe append."""
 
 import copy
+import importlib
 import json
 import os
 from pathlib import Path
@@ -41,8 +42,11 @@ class IncrementalExportTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        folder_paths.output_directory = self.temp.name
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name) / "source"
+        folder_paths.output_directory = str(self.root)
+        mode = os.environ.get("H3_TEST_LAYOUT", "legacy")
+        if mode == "organized":
+            chain.create_project(self.root / "h3_chains/chapter_append")
         self.video = VideoVAE()
         self.audio = AudioVAE()
         self.node = chain.MiniMaxH3ChainExportPNG()
@@ -50,6 +54,7 @@ class IncrementalExportTests(unittest.TestCase):
         for index in range(1, 11):
             checkpoint = self.root / "h3_chains" / "chapter_append" / "checkpoints" / (
                 "clip_%04d.safetensors" % index)
+            checkpoint = Path(chain._absolute_output_path(str(checkpoint)))
             checkpoint.parent.mkdir(parents=True, exist_ok=True)
             save_file({"video": torch.full((1, 24, 4, 1, 1), float(index)),
                        "audio": torch.zeros((1, 32, 2, 22))}, checkpoint)
@@ -77,6 +82,12 @@ class IncrementalExportTests(unittest.TestCase):
         }
         self.partial = self.chapter(8)
         self.complete = self.chapter(10)
+        if mode == "converted":
+            converter = importlib.import_module(chain.__package__ + ".chain_layout_conversion")
+            destination = Path(self.temp.name) / "copy"
+            converter.convert_copy(self.root / "h3_chains/chapter_append", destination)
+            self.root = destination
+            folder_paths.output_directory = str(self.root)
 
     def manifest(self, end):
         return {
@@ -102,6 +113,24 @@ class IncrementalExportTests(unittest.TestCase):
     def png_state(self, directory):
         return {path.name: (path.stat().st_mtime_ns, path.read_bytes())
                 for path in directory.glob("frame_*.png")}
+
+    def test_conversion_reuses_an_already_exported_sequence(self):
+        if os.environ.get("H3_TEST_LAYOUT", "legacy") != "legacy":
+            self.skipTest("Conversion starts from a legacy source.")
+        directory, _, _ = self.export()
+        before = self.png_state(directory)
+        audio = (directory / "audio.wav").read_bytes()
+        calls = (self.video.calls, self.audio.calls)
+        converter = importlib.import_module(chain.__package__ + ".chain_layout_conversion")
+        destination = Path(self.temp.name) / "export-copy"
+        converter.convert_copy(self.root / "h3_chains/chapter_append", destination)
+        self.root = destination
+        folder_paths.output_directory = str(destination)
+        copied, _, _ = self.export()
+        self.assertNotEqual(copied, directory)
+        self.assertEqual(self.png_state(copied), before)
+        self.assertEqual((copied / "audio.wav").read_bytes(), audio)
+        self.assertEqual((self.video.calls, self.audio.calls), calls)
 
     def test_repeat_is_no_decode_and_preserves_png_and_wav(self):
         output, record, result = self.export()
@@ -313,7 +342,9 @@ class IncrementalExportTests(unittest.TestCase):
         result = chain.MiniMaxH3ChainAssemble().assemble(
             chapter, audio_source="none", filename="partial_chapter", audio_bitrate=192)
         output = Path(result["result"][0])
-        self.assertIn("chapters/02_two/final/", output.as_posix())
+        expected = ("chapters/02_two/final/" if os.environ.get("H3_TEST_LAYOUT", "legacy") == "legacy"
+                    else "exports/videos/original__02_two/generation/")
+        self.assertIn(expected, output.as_posix())
         with chain.av.open(str(output)) as movie:
             self.assertEqual(sum(1 for _ in movie.decode(video=0)), 52)
 

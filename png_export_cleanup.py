@@ -26,7 +26,8 @@ def locked_exports(manager, run):
     # output folders or infer ownership merely from their folder names.
     run_dir = manager._path("h3_chains/" + run)
     for pattern in ("upscaled/*/frames/*/export.json",
-                    "chapters/*/upscaled/*/frames/*/export.json"):
+                    "chapters/*/upscaled/*/frames/*/export.json",
+                    "exports/frames/*/pass-*/*/export.json"):
         for path in run_dir.glob(pattern):
             directories.add(manager._path(manager._address(path)).parent)
     with ExitStack() as stack:

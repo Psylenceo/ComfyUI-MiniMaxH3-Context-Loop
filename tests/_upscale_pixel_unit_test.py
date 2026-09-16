@@ -673,7 +673,7 @@ def main():
             assert conditioned[2:4] == (96, 64)
             saved_chapter = saver.save(scoped_state, hq)["result"][0]
             assert saved_chapter["index"] == index
-            assert f"chapters/02_two/upscaled/pixel/segments/clip_{index:04d}." in saved_chapter["segment"]
+            assert f"processing/original__02_two/pixel/clips/clip_{index:04d}." in saved_chapter["segment"]
             assert saved_chapter["delivered_frames"] == chapter_source["segments"][index - 8]["delivered_frames"]
             if index == 10:
                 chapter_final = end.end(flow, scoped_state, hq, saved_chapter)[0]
@@ -702,7 +702,7 @@ def main():
         assembled_chapter = chain.MiniMaxH3ChainAssemble().assemble(
             chapter_final, "plan", "chapter_test_final", 128, False, "")
         final_path = assembled_chapter["result"][0]
-        assert "chapters/02_two/upscaled/pixel/final/" in final_path
+        assert "exports/videos/original__02_two/pass-pixel/" in final_path
         streams = json.loads(subprocess.check_output([
             "ffprobe", "-v", "error", "-show_streams", "-of", "json", final_path]))["streams"]
         video = next(s for s in streams if s["codec_type"] == "video")

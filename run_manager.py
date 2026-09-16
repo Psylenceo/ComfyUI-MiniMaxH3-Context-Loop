@@ -10,8 +10,10 @@ from typing import Any
 
 try:
     from .asset_store import RunAssetStore
+    from .chain_layout import state_root, output_path
 except ImportError:  # Standalone unit tests import this module without a package.
     from asset_store import RunAssetStore
+    from chain_layout import state_root, output_path
 
 try:
     from .checkpoint_manager import checkpoint_run_lock
@@ -458,7 +460,7 @@ class RunArchiveManager:
         if not isinstance(archives, dict):
             raise ValueError(
                 "Active checkpoint recovery references are invalid.")
-        snapshot_root = os.path.realpath(os.path.join(
+        snapshot_root = output_path(self.output_root, os.path.join(
             self.chains_root, run, "recovery_archives", revision))
         paths = {}
         for key, archive_filename in ARCHIVE_FILENAMES.items():
@@ -468,9 +470,7 @@ class RunArchiveManager:
             if not isinstance(value, str) or not value:
                 raise ValueError(
                     "Active checkpoint recovery %s path is invalid." % key)
-            candidate = os.path.realpath(
-                value if os.path.isabs(value)
-                else os.path.join(self.output_root, value))
+            candidate = output_path(self.output_root, value)
             expected = os.path.realpath(os.path.join(
                 snapshot_root, archive_filename))
             if candidate != expected or not os.path.isfile(candidate):
@@ -505,7 +505,7 @@ class RunArchiveManager:
             run_name = _safe_name(entry.name)
             if not run_name or run_name != entry.name:
                 continue
-            directory = entry.path
+            directory = state_root(entry.path)
             recovery_error = None
             try:
                 archive_map, immutable = self._archive_paths(

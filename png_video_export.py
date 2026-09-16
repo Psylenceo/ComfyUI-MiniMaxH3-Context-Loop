@@ -83,6 +83,8 @@ def _safe_path(root, value):
         raise ValueError("PNG output folder cannot contain '..'.")
     if not path.is_absolute():
         path = root / path
+    from .chain_layout import resolve_path
+    path = Path(resolve_path(path))
     if path == root or not path.is_relative_to(root):
         raise ValueError("Choose a PNG subfolder inside the ComfyUI output directory.")
     current = root
@@ -352,7 +354,7 @@ def export_video(chain, video, state, export_name, output_folder, first_frame_nu
         raise ValueError("Invalid scene frame counts or first frame number for PNG export.")
     path = _source_path(video)
     root = Path(chain._output_root()).resolve()
-    default = Path(upscale._state_profile_paths(state, index)["root"]) / "frames" / chain._safe_name(export_name, "png_sequence")
+    default = Path(chain.layout_path(Path(upscale._state_profile_paths(state, index)["root"]) / "frames" / chain._safe_name(export_name, "png_sequence")))
     directory = _safe_path(root, str(output_folder).strip() or default)
     config = {"run_name": state["run_name"], "profile": state["profile"],
               "profile_config": state["profile_config"], "first_frame_number": int(first_frame_number),

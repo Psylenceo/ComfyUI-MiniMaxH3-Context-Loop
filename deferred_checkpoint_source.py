@@ -55,7 +55,7 @@ def derope_source_manifest(manifest, selection, chain, upscale):
     root = Path(chain._output_root()).resolve()
     run = Path(chain._run_dir(manifest))
     try:
-        profile = (root / artifact_address(selection.get("profile_path"))).resolve()
+        profile = Path(chain._absolute_output_path(artifact_address(selection.get("profile_path"))))
     except ValueError as exc:
         raise ValueError("DeRoPE source profile is outside the selected run.") from exc
     # Exactly run/upscaled/profile or run/chapters/chapter/upscaled/profile.
@@ -67,8 +67,9 @@ def derope_source_manifest(manifest, selection, chain, upscale):
     def confined(address):
         if not isinstance(address, str) or not address:
             raise ValueError("DeRoPE source has a missing artifact address.")
-        path = (root / artifact_address(address)).resolve()
-        if not path.is_relative_to(profile):
+        from .chain_layout import profile_contains
+        path = Path(chain._absolute_output_path(artifact_address(address)))
+        if not profile_contains(profile, path):
             raise ValueError("DeRoPE source artifact escapes its profile.")
         return path
 
@@ -87,8 +88,8 @@ def derope_source_manifest(manifest, selection, chain, upscale):
         saved_lineage = processing_lineage(witness.get("segments") or [])
     else:
         raise ValueError("Invalid saved DeRoPE branch format.")
-    saved_lineage = validate_processing_lineage(saved_lineage)
-    if saved_lineage != validate_processing_lineage(branch["lineage"]):
+    saved_lineage = validate_processing_lineage(saved_lineage, root)
+    if saved_lineage != validate_processing_lineage(branch["lineage"], root):
         raise ValueError("Saved DeRoPE branch changed. Select that processing branch again.")
     by_scene = {int(item["scene"]): item for item in saved_lineage}
     output = chain._json_document(manifest)

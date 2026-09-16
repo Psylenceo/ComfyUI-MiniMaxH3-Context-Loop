@@ -11,6 +11,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+try:
+    from .chain_layout import create_project, state_root
+except ImportError:
+    from chain_layout import create_project, state_root
+
 
 # The canvas keeps a small number of direct loader sockets. Semantic Anchor
 # Bundle contributes many loader bindings through one dedicated Run Manager
@@ -123,7 +128,7 @@ class RunAssetStore:
         path = os.path.realpath(os.path.join(self.chains_root, run))
         if not _inside(self.output_root, path):
             raise ValueError("H3 asset run path escapes the output directory.")
-        return path, run
+        return state_root(path), run
 
     def _manifest_path(self, run_name: Any) -> tuple[str, str, str]:
         directory, run = self._run_dir(run_name)
@@ -267,7 +272,9 @@ class RunAssetStore:
 
     def save(self, run_name: Any, bindings: Any,
              policies: dict[str, Any] | None = None) -> dict[str, Any]:
-        manifest_path, run_dir, run = self._manifest_path(run_name)
+        run = _strict_run_name(run_name)
+        create_project(os.path.join(self.chains_root, run))
+        manifest_path, run_dir, run = self._manifest_path(run)
         if not isinstance(bindings, list):
             raise ValueError("H3 asset bindings must be a JSON list.")
         if len(bindings) > MAX_ASSET_BINDINGS:

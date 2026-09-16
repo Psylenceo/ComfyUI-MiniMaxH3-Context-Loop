@@ -81,15 +81,15 @@ def _profile_paths(run_name: str, profile: str, index: int,
     stem = "clip_%04d" % int(index)
     return {
         "root": root,
-        "segment": os.path.join(root, "segments", stem + ".mp4"),
+        "segment": chain.layout_path(os.path.join(root, "segments", stem + ".mp4")),
         "checkpoint": os.path.join(root, "checkpoints", stem + ".safetensors"),
         "metadata": os.path.join(root, "checkpoints", stem + ".json"),
         "prompt": os.path.join(root, "prompts", stem + ".txt"),
-        "audio": os.path.join(root, "audio", stem + ".wav"),
+        "audio": chain.layout_path(os.path.join(root, "audio", stem + ".wav")),
         "manifest": os.path.join(root, "upscale_manifest.json"),
         "partial": os.path.join(
             root, "partial", "through_clip_%04d.manifest.json" % int(index)),
-        "final": os.path.join(root, "final"),
+        "final": chain.layout_path(os.path.join(root, "final")),
     }
 
 

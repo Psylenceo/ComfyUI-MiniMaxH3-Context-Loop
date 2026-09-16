@@ -24,7 +24,7 @@ def saved_reference_context(chain, source, manifest):
     """Use the generation take, including when the selected source is DeRoPE."""
     source = (source.get("processing_source") or {}).get("original", source)
     run = chain._strict_run_name(manifest.get("run_name"))
-    root = Path(chain._output_root()) / "h3_chains" / run
+    root = Path(chain._project_run_dir({"run_name": run}))
     metadata = {}
     address = source.get("revision_metadata")
     if address:
@@ -164,11 +164,12 @@ def _settings(chain, root, source, lineage, metadata, overrides=None):
 
 def _asset_index(chain, root, run):
     """Index only this project's archives/input copies, not other projects."""
-    roots = [root / "project_assets", root / "references",
+    project = root.parent if root.name == ".h3" else root
+    roots = [Path(chain.layout_path(root / "project_assets")), root / "references",
              Path(chain._input_root()) / "h3_projects" / run]
     records = []
     for base in roots:
-        _inside(root if base.is_relative_to(root) else Path(chain._input_root()), base)
+        _inside(project if base.is_relative_to(project) else Path(chain._input_root()), base)
         if not base.is_dir():
             continue
         for name in ("catalog.json", "manifest.json"):

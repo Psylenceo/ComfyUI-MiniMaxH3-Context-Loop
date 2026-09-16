@@ -12,11 +12,13 @@ import tempfile
 import uuid
 
 if __package__:
+    from .chain_layout import create_project, state_root
     from .branch_scope import branch_id, working_directory, branch_scope
     from .checkpoint_manager import checkpoint_run_lock, CheckpointGraphManager
     from .branch_authoring_recovery import recover_authoring
     from .processing_persistence import atomic_json, sync_directory
 else:
+    from chain_layout import create_project, state_root
     from branch_scope import branch_id, working_directory, branch_scope
     from checkpoint_manager import checkpoint_run_lock, CheckpointGraphManager
     from branch_authoring_recovery import recover_authoring
@@ -30,7 +32,7 @@ class WorkingBranches:
         self.output = Path(output_root).resolve()
         self.run = str(run)
         self.root = (self.output / "h3_chains" / run).resolve()
-        self.folder = self.root / "branches"
+        self.folder = Path(state_root(self.root)) / "branches"
         if not self.root.is_relative_to(self.output):
             raise ValueError("H3 project escapes the output directory.")
 
@@ -168,6 +170,8 @@ class WorkingBranches:
         operation_id = self._operation(operation_id)
         request_hash = self._digest([authoring, str(expected_revision or "")])
         with checkpoint_run_lock(str(self.output), self.run):
+            create_project(self.root)
+            self.folder = Path(state_root(self.root)) / "branches"
             record = self.load(selected)
             receipt = record.get("last_save_operation", {})
             if operation_id and receipt.get("id") == operation_id:
@@ -222,6 +226,8 @@ class WorkingBranches:
         operation_id = self._operation(operation_id)
         request_hash = self._digest([source, name, authoring, through_scene])
         with checkpoint_run_lock(str(self.output), self.run):
+            create_project(self.root)
+            self.folder = Path(state_root(self.root)) / "branches"
             recovered = self.retry_create(source, name, authoring, through_scene, operation_id)
             if recovered is not None:
                 return recovered

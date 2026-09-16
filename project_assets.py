@@ -18,15 +18,17 @@ import shutil
 import subprocess
 import threading
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from fractions import Fraction
 from functools import wraps
 from typing import Any
 
 if __package__:
+    from .chain_layout import create_project, resolve_path, install_marker
     from .audio_track_contract import audio_track_bindings
 else:  # Standalone catalog tools and storage tests.
+    from chain_layout import create_project, resolve_path, install_marker
     from audio_track_contract import audio_track_bindings
 
 try:
@@ -90,10 +92,21 @@ def _project_mutation(method):
     @wraps(method)
     def locked(self, project, *args, **kwargs):
         directory, _name = self._project_dir(project)
+        writing = method.__name__ != "load" or kwargs.get("create", False)
+        # Initialize before acquiring the catalog lock. Match the existing
+        # checkpoint -> catalog lock order; a read never takes the write lock.
+        if __package__:
+            from .checkpoint_manager import checkpoint_run_lock
+        else:
+            from checkpoint_manager import checkpoint_run_lock
+        guard = checkpoint_run_lock(self.output_root, _name) if writing else nullcontext()
         # Share nightly's existing lock and retain its cross-process CAS
         # checks, instead of adding a second, independent locking system.
-        with _catalog_lock(os.path.join(directory, "catalog.json")):
-            return method(self, project, *args, **kwargs)
+        with guard:
+            if writing:
+                create_project(os.path.join(self.chains_root, _name))
+            with _catalog_lock(os.path.join(directory, "catalog.json")):
+                return method(self, project, *args, **kwargs)
     return locked
 
 
@@ -491,8 +504,8 @@ class ProjectAssetStore:
 
     def _backup_dir(self, project: Any) -> tuple[str, str]:
         name = _safe_project(project)
-        path = os.path.realpath(os.path.join(
-            self.chains_root, name, "project_assets"))
+        path = os.path.realpath(resolve_path(os.path.join(
+            self.chains_root, name, "project_assets")))
         if not _inside(self.output_root, path):
             raise ValueError("Project backup path escapes the ComfyUI output directory.")
         return path, name
@@ -744,6 +757,8 @@ class ProjectAssetStore:
             created_project = True
             os.mkdir(target_run_directory)
             created_run = True
+            install_marker(target_run_directory)
+            target_backup, _name = self._backup_dir(target_name)
             os.makedirs(target_backup)
             for group in ("images", "videos", "audio", "previews", ".uploads"):
                 os.makedirs(os.path.join(target_directory, group))
@@ -1582,7 +1597,7 @@ class ProjectAssetStore:
             for run in runs:
                 if not run.is_dir(follow_symlinks=False):
                     continue
-                path = os.path.join(run.path, "project_assets", "catalog.json")
+                path = resolve_path(os.path.join(run.path, "project_assets", "catalog.json"))
                 if not os.path.isfile(path):
                     continue
                 try:

@@ -10,7 +10,7 @@ from PIL import Image
 from project_assets import PROJECT_ASSET_FORMAT, ProjectAssetStore
 
 
-def main():
+def main(legacy=False):
     with tempfile.TemporaryDirectory() as temporary:
         root = pathlib.Path(temporary)
         input_root = root / "input"
@@ -33,6 +33,9 @@ def main():
             handle.writeframes(b"\x00\x00" * 2400)
 
         store = ProjectAssetStore(str(input_root), str(output_root))
+        backup_folder = "project_assets" if legacy else "assets"
+        if legacy:
+            (output_root / "h3_chains/episode_1").mkdir(parents=True)
         first = store.import_file(
             "episode_1", picture, role="picture", tag="hero")
         second = store.import_file(
@@ -47,14 +50,14 @@ def main():
         first_project_copy = pathlib.Path(store.asset(
             "episode_1", first["asset"]["id"])[1])
         first_backup_copy = (
-            output_root / "h3_chains" / "episode_1" / "project_assets" /
+            output_root / "h3_chains" / "episode_1" / backup_folder /
             first["asset"]["relative_path"])
         with Image.open(thumbnail) as image:
             assert image.width <= 320 and image.height <= 180
         assert (output_root / "h3_chains" / "episode_1" /
-                "project_assets" / "catalog.json").is_file()
+                backup_folder / "catalog.json").is_file()
         assert (output_root / "h3_chains" / "episode_1" /
-                "project_assets" / first["asset"]["relative_path"]).is_file()
+                backup_folder / first["asset"]["relative_path"]).is_file()
         listed = store.input_media()
         assert {item["path"] for item in listed} == {
             "loose/Hero Face.png", "loose/chapter_2/hallway.png",
@@ -89,8 +92,7 @@ def main():
         assert lyrics["catalog"]["revision"] == revision_before_lyrics
         assert store.load("episode_1")["assets"][1]["lyrics"] == (
             "First line\nSecond line")
-        backup_catalog = output_root / "h3_chains" / "episode_1" / (
-            "project_assets/catalog.json")
+        backup_catalog = output_root / "h3_chains" / "episode_1" / backup_folder / "catalog.json"
         assert "First line\\nSecond line" in backup_catalog.read_text(
             encoding="utf-8")
         try:
@@ -161,7 +163,7 @@ def main():
         copied_project_media = pathlib.Path(store.asset(
             "episode_1_asset_copy", first["asset"]["id"])[1])
         copied_backup_media = output_root / "h3_chains" / (
-            "episode_1_asset_copy/project_assets") / (
+            "episode_1_asset_copy/assets") / (
             first["asset"]["relative_path"])
         assert copied_project_media.is_file()
         assert copied_backup_media.is_file()
@@ -169,7 +171,7 @@ def main():
         copied_run_items = {
             item.name for item in (output_root / "h3_chains" /
                                    "episode_1_asset_copy").iterdir()}
-        assert copied_run_items == {"project_assets"}
+        assert copied_run_items == {"assets", ".h3"}
         assert list((input_root / "h3_projects" / "episode_1_asset_copy" /
                      "previews").iterdir()) == []
         assert list((input_root / "h3_projects" / "episode_1_asset_copy" /
@@ -276,3 +278,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    main(legacy=True)
