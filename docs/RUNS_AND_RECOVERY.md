@@ -73,6 +73,15 @@ brand-new top-level prompt after a safe-queue/cleanup check. Disabling the
 setting or cancelling invalidates waiting work at every async checkpoint; it
 never later submits a stale continuation.
 
+During automatic requeue, Loop Start advances `start_clip` and, for a bounded
+selection, `scene_range` to the next scene. After the last requested scene and
+its downstream outputs finish successfully, the browser restores the original
+start/range that it changed for this sequence (normally `1` and blank).
+**Approve & Stop**, errors, and interruptions keep the current resume controls,
+including when Stop is chosen on the last scene. Manually edited controls,
+another workflow/branch, or a reloaded graph are not overwritten; the original
+selection is tracked only in the browser session, not in the Plan or project.
+
 Handoffs are keyed by the committed predecessor revision, checkpoint identity,
 workflow fingerprint and requested range. Old pending/terminal records remain
 manual-recovery history and are never silently adopted. A validation rejection

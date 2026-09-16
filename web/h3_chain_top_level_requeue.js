@@ -14,7 +14,9 @@ import {
     handleTopLevelRequeueSuccessScheduling,
     loopEndMatchesObservedCurrent,
     topLevelRequeueCompletionMatches,
-} from "./h3_chain_top_level_requeue_core.mjs?v=0.6.10";
+    topLevelRequeueFinishedMatches,
+    createRequeueSelectionTracker,
+} from "./h3_chain_top_level_requeue_core.mjs?v=0.6.10-requeue-reset";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.6.10";
 import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome, releaseHandoffChecked} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.6.10";
 
@@ -61,6 +63,7 @@ let requeueEpoch = 0; // invalidates sleeps/polls when opt-in is withdrawn
 const sceneRecords = new Map();   // prompt_id -> observed H3 scene record
 const requeueQueue = [];
 const hintedRuns = new Set();     // run_names already shown a pending hint
+const requeueSelections = createRequeueSelectionTracker();
 
 function nodeType(node) {
     return node?.comfyClass ?? node?.type ?? null;
@@ -220,6 +223,7 @@ function onExecuted(detail) {
             record.shotId = scene.shotId;
             record.workflowFingerprint = String(scene.workflowFingerprint || "");
             record.displayNode = String(detail.display_node);
+            record.startNode = findUpstreamNode(node, START_TYPE);
         }
     } else if (type === END_TYPE && loopEndMatchesObservedCurrent({
         record, loopEndNode: node, resolveDisplayNode: findNodeByDisplayId,
@@ -231,6 +235,12 @@ function onExecuted(detail) {
             record.loopEndExecuted = true;
             record.executionMode = "top_level_requeue";
             record.handoffId = String(payload.handoff_id);
+        }
+        const finished = detail?.output?.h3_chain_top_level_complete;
+        if (topLevelRequeueFinishedMatches(record, Array.isArray(finished) ? finished[0] : null)) {
+            record.loopCompleted = true;
+            record.loopEndExecuted = true;
+            record.executionMode = "top_level_requeue";
         }
     }
 }
@@ -266,6 +276,19 @@ export function onExecutionSuccess(detail) {
     }
     if (!record) return;
     sceneRecords.delete(promptId);
+    if (record.loopCompleted) {
+        // Wait for terminal success: downstream assembly/export can still
+        // fail after Loop End. Never reset a different workflow or branch.
+        try {
+            const {startNode} = requireVisibleWorkflow(record);
+            if (startNode === record.startNode) requeueSelections.restore(startNode, record);
+        } catch (_) { /* The running workflow is no longer the visible one. */ }
+        requeueSelections.discard(record.startNode);
+        return;
+    }
+    // Approve & Stop is a successful prompt with a blocked Loop End.
+    // Leave the resume controls untouched and end this selection session.
+    if (!record.loopEndExecuted) requeueSelections.discard(record.startNode);
     handleTopLevelRequeueSuccessScheduling({record, scheduleRequeue: enqueueRequeue});
 }
 
@@ -279,6 +302,7 @@ function onTerminalFailure(kind, detail) {
     // schedule a next scene (scheduling requires execution_success), and an
     // unrelated failure must not cancel an already-valid continuation.
     const promptId = String(detail?.prompt_id ?? "");
+    requeueSelections.discard(sceneRecords.get(promptId)?.startNode);
     sceneRecords.delete(promptId);
     const wait = continuationTracker?.failed(promptId);
     if (wait) {
@@ -389,6 +413,7 @@ async function postHandoffTransition(runName, handoffId, status, acceptedPromptI
 async function processRequeue(record, epoch) {
     const startedAt = Date.now();
     let deliveryMayHaveOccurred = false;
+    let resumeNode = null;
     try {
         requireCurrentOperation(epoch);
         if (!record.runName) {
@@ -408,12 +433,31 @@ async function processRequeue(record, epoch) {
             listHandoffs: async runName => { const response = await api.fetchApi(`${HANDOFF_API_BASE}/handoffs?run_name=${encodeURIComponent(runName)}`); if (!response.ok) throw new Error(`The handoff list is unavailable (HTTP ${response.status}).`); return response.json(); },
             matchHandoff: matchingNextSceneHandoff,
             claimHandoff: async (runName, handoff) => { const response = await api.fetchApi(`${HANDOFF_API_BASE}/handoffs/claim`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({run_name:runName,handoff_id:handoff.handoff_id,source_prompt_id:record.promptId})}); if (response.status === 409) throw new Error("The handoff was already claimed; nothing was queued."); if (!response.ok) throw new Error(`Claiming the handoff failed (HTTP ${response.status}).`); },
-            prepareResume: async (_runName, handoff, context) => { const resume = resumeHint(handoff); const startWidget = widgetByName(context.startNode, "start_clip"); const rangeWidget = widgetByName(context.startNode, "scene_range"); if (!resume || !startWidget) throw new Error("The handoff has no resume hint or Loop Start widget."); startWidget.value = resume.startClip; startWidget.callback?.(resume.startClip); if (rangeWidget) { rangeWidget.value = resume.sceneRange; rangeWidget.callback?.(resume.sceneRange); } context.startNode.graph?.setDirtyCanvas?.(true, true); showTransient(`Queueing scene ${resume.startClip} as a new top-level prompt…`); },
+            prepareResume: async (_runName, handoff, context) => {
+                const resume = resumeHint(handoff);
+                const startWidget = widgetByName(context.startNode, "start_clip");
+                const rangeWidget = widgetByName(context.startNode, "scene_range");
+                if (!resume || !startWidget) throw new Error("The handoff has no resume hint or Loop Start widget.");
+                resumeNode = context.startNode;
+                requeueSelections.remember(resumeNode, record, resume);
+                startWidget.value = resume.startClip;
+                startWidget.callback?.(resume.startClip);
+                if (rangeWidget) {
+                    rangeWidget.value = resume.sceneRange;
+                    rangeWidget.callback?.(resume.sceneRange);
+                }
+                context.startNode.graph?.setDirtyCanvas?.(true, true);
+                showTransient(`Queueing scene ${resume.startClip} as a new top-level prompt…`);
+            },
             submit: () => queuePromptWithIdentity(() => requireCurrentOperation(epoch)),
             release: (handoff, releasedRun) => releaseHandoffChecked({api, apiBase:HANDOFF_API_BASE, runName:releasedRun, handoffId:handoff.handoff_id, reason:"Automatic requeue was cancelled."}),
         });
         if (!lifecycle) { clearNotifications(); return; }
-        if (lifecycle.kind === "cancelled") { clearNotifications(); return; }
+        if (lifecycle.kind === "cancelled") {
+            requeueSelections.discard(resumeNode);
+            clearNotifications();
+            return;
+        }
         const {runName, handoff, context, submission: lifecycleSubmission, submissionError} = lifecycle;
         const startNode = context.startNode;
         const resume = resumeHint(handoff);
@@ -442,6 +486,7 @@ async function processRequeue(record, epoch) {
             throw error;
         }
     } catch (error) {
+        requeueSelections.discard(resumeNode);
         showError(deliveryMayHaveOccurred
             ? `Top-level requeue delivery may have occurred: ${error?.message || error} `
                 + "The claimed handoff was not released because doing so could duplicate "
