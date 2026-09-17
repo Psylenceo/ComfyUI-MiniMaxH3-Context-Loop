@@ -682,11 +682,19 @@ function mount(node) {
         const match = FAMILY_TAG_RE.exec(String(asset.tag ?? ""));
         return match ? Number(match[2]) : 0;
     }
+    // A tag match alone isn't enough to call two assets versions of the same
+    // thing — @hero (an image) and @hero-v1 (an audio reference) sharing a
+    // base tag is a coincidence, not a relationship. Group (and look up
+    // groups) by base tag *and* media kind together so a family can never
+    // mix images/video/audio.
+    function familyGroupKey(asset) {
+        return `${familyKey(asset)} ${String(asset.kind ?? "")}`;
+    }
     function assetFamilies(assets) {
         const byKey = new Map();
         for (const asset of assets) {
             if (asset._unresolved || !asset.tag) continue;
-            const key = familyKey(asset);
+            const key = familyGroupKey(asset);
             if (!byKey.has(key)) byKey.set(key, []);
             byKey.get(key).push(asset);
         }
@@ -2022,11 +2030,15 @@ function mount(node) {
     // two sibling crops of the same source that also happen to form a
     // version family stay nested under that shared source, instead of being
     // pulled up to the top of the tree).
-    function familyAttachPoint(members) {
+    function familyAttachPoint(members, byId) {
         const memberIds = new Set(members.map((member) => member.id));
         const base = members[0];
         const parentId = String(base.parent_asset_id ?? "");
-        return (!parentId || memberIds.has(parentId)) ? "" : parentId;
+        // A stale/out-of-scope parent (deleted, or filtered out of the
+        // current tab/role view) is not a usable attach point — fall back to
+        // the root rather than leaving the stack with nowhere to render.
+        if (!parentId || memberIds.has(parentId) || !byId.has(parentId)) return "";
+        return parentId;
     }
     function renderCarousel() {
         carousel.replaceChildren();
@@ -2034,8 +2046,13 @@ function mount(node) {
         if (!assets.some((asset) => asset.id === state.selected)) {
             state.selected = assets[0]?.id ?? "";
         }
-        const byParent = lineageChildren(state.catalog.assets ?? []);
-        const byId = new Map((state.catalog.assets ?? []).map((item) => [String(item.id), item]));
+        // Built from the tab-filtered list, not the whole catalog: a child
+        // whose parent doesn't match the active role/kind filter (or isn't
+        // otherwise visible right now) must stand on its own rather than
+        // vanish because its parent is off-screen. The full-catalog view of
+        // this same relationship still drives the bottom detail row.
+        const byParent = lineageChildren(assets);
+        const byId = new Map(assets.map((item) => [String(item.id), item]));
         const isLineageRoot = (asset) => {
             const parentId = String(asset.parent_asset_id ?? "");
             if (!parentId) return true;
@@ -2073,7 +2090,7 @@ function mount(node) {
         for (const [key, members] of families) {
             if (members.length <= 1) continue;
             for (const member of members) hoisted.add(member.id);
-            const attach = familyAttachPoint(members);
+            const attach = familyAttachPoint(members, byId);
             if (!stacksByAttach.has(attach)) stacksByAttach.set(attach, new Map());
             stacksByAttach.get(attach).set(key, members);
         }
@@ -2086,7 +2103,7 @@ function mount(node) {
                 // Either rendered here (family attaches at the root) or it
                 // belongs under some other asset and surfaces there instead
                 // via collectChildItems — either way it's not a plain item.
-                const key = familyKey(asset);
+                const key = familyGroupKey(asset);
                 if (rootFamilies.has(key) && !renderedFamilies.has(key)) {
                     renderedFamilies.add(key);
                     carousel.append(familyStack(rootFamilies.get(key), byParent, hoisted, stacksByAttach));
@@ -2163,7 +2180,7 @@ function mount(node) {
         // sub-tree of edits, not the whole family's unrelated branches.
         const editList = lineageFlatten(selected, byParent);
         const families = assetFamilies(state.catalog.assets ?? []);
-        const versionList = families.get(familyKey(selected)) ?? [selected];
+        const versionList = families.get(familyGroupKey(selected)) ?? [selected];
         const seen = new Set();
         const ordered = [];
         for (const asset of [...versionList, ...editList]) {
