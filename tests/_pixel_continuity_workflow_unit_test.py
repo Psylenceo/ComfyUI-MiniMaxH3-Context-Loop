@@ -25,7 +25,21 @@ finish = 'MiniMaxH3PixelContinuityFinish'
 conditioning = 'CATH3UpscaleVideoConditioning'
 refine = 'UltimateSDUpscaleNoUpscaleGuiderVideo'
 assert nodes['MiniMaxH3ChainCheckpointManager']['widgets_values'] == ['']
-assert origin(protect,'video') == ('CATDLSS5EnhanceVideo','video')
+capture = 'MiniMaxH3PixelBoundaryCapture'
+options = 'MiniMaxH3PixelBoundarySettings'
+export = 'MiniMaxH3PixelBoundaryExport'
+assert origin(protect,'video') == (capture,'video')
+assert origin(capture,'video') == ('CATDLSS5EnhanceVideo','video')
+assert origin(capture,'state') == (current,'state')
+assert origin(capture,'options') == (options,'options')
+assert nodes[options]['widgets_values'][:4] == [False,17,0.2,3]
+assert origin('MiniMaxH3ChainUpscaleAdapter','recipe_json') == (options,'recipe_json')
+assert origin(export,'video_path') == ('MiniMaxH3ChainAssemble','video_path')
+assert origin(export,'manifest') == ('CATH3UpscaleVideoLoopEnd','manifest')
+assert origin(export,'options') == (options,'options')
+assert origin(export,'model') == ('LoraLoaderModelOnly','MODEL')
+assert origin(export,'prompt_override') == ('MiniMaxH3UpscaleReferencePromptOverride','prompt_override')
+assert origin(export,'tagged_references') == ('MiniMaxH3UpscaleReferencePromptOverride','references')
 assert origin(protect,'state') == (current,'state')
 assert origin(conditioning,'video') == (protect,'video')
 assert origin(refine,'video') == (conditioning,'video')

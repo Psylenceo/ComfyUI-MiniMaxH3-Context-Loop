@@ -27,6 +27,69 @@ remain an assembly operation. No source generation needs to be repeated.
 Unmarked scenes return the existing video unchanged: no mask allocation, media
 decode or tail processing in Prepare. Existing workflows are unchanged.
 
+## Optional boundary-refinement switch
+
+In that same example, **Pixel Continuity • Boundary Experiment → enabled** is
+**OFF by default**. OFF performs no capture/export work and preserves the
+existing recipe unchanged. ON is an experiment, not a replacement for tail
+protection. Enable it **before processing a new upscale profile**.
+
+The workflow keeps only small pre-USDU/DLSS fragments in that child profile's
+`boundary_sources/` directory. Once normal assembly finishes, **Experimental
+Boundary Export** jointly refines a short window across each marked join:
+
+- 22 fixed HQ frames before the editable center;
+- 17 pre-USDU frames from each side of the join (34 editable frames);
+- 17 fixed HQ frames after the center.
+
+Only those middle 34 frames are pasted into a separate `_boundary_*.mkv`.
+Use the Boundary Export node's `video_path`, not Assemble's baseline path.
+All other decoded RGB16 frames stay exact, and the assembled audio is
+stream-copied. Neither the original assembly nor any HQ checkpoint is rewritten.
+There is no crossfade, interpolation or frame-count change.
+
+Controls: `frames_per_side` = 17/34/51 (H3 grid), `denoise` = 0.20, `steps` = 3.
+Fixed sampler settings are er_sde/beta, 512×288 tiles, padding 64, disk canvas.
+Choose a fast local SSD for `canvas_directory`; blank uses ComfyUI temp.
+Only the default 17-frame configuration has GPU validation. Larger windows
+increase sampling memory. The final lossless MKV can be much larger than MP4.
+
+Changing the switch or its refinement settings changes the Adapter recipe.
+Use a new profile or reprocess rather than resume incompatible saved results.
+An old completed profile has no pre-USDU fragments; the affected clips need
+pixel upscaling again with the switch ON, not source generation again.
+External model/DLSS/USDU changes still require a new profile or recipe update.
+
+Hard cuts and unmarked boundaries are untouched. Editorial gaps, nonadjacent
+reordering, trims removing the generated join, insufficient context, and
+overlapping windows are skipped and counted in the status. Remaining joins
+use their final editorial positions, including chapter-local offsets. The
+baseline is decoded forward once for all windows, not restarted per join.
+
+The pass rebuilds the incoming scene's prompt and available references with
+the workflow's shared model/LoRA input. Whole-scene keyframes are excluded from
+this shorter window; it does **not** replay per-scene LoRA routes. Keep normal
+assembly blending/tone/stabilization off when comparing this experiment.
+
+### Boundary experiment results
+
+On the copied dog continuation, refining an already-HQ center at denoise
+0.10/0.20 did not improve the join metric. Using pre-USDU frames in the center
+at 0.20 reduced its mean absolute RGB difference from 0.035590 to 0.033435
+(about 6%). However, the two replacement-edge differences increased about
+6% and 7.5%. These motion-sensitive numbers are **not** a quality score;
+inspect all three boundaries, not only the original join.
+
+The actual switch/capture/export nodes were also exercised on local ComfyUI:
+OFF completed without evaluating the model loaders; ON completed a 73-frame
+GPU pass using the copied DLSS clips and a separate test profile. The result
+retained 209 delivered frames, exact RGB16 pixels outside frames [107,141),
+and bit-identical decoded PCM audio. A second GPU export reused the persisted
+samples without rerunning capture or DLSS and passed the same checks.
+CPU tests additionally cover disk cache binding,
+resume identity, no-op paths, trims/gaps/reorder, multi-join forward decoding,
+exact replacement and cancellation without changing the baseline.
+
 ## Local experiment, 2026-09-17
 
 Only private copies of the previous dog research were used. No production

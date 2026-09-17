@@ -40,6 +40,7 @@ def load_schemas():
             ('chain_nodes', 'CHAIN_NODE_CLASS_MAPPINGS'),
             ('upscale_nodes', 'UPSCALE_NODE_CLASS_MAPPINGS'),
             ('pixel_continuity', 'NODE_CLASS_MAPPINGS'),
+            ('pixel_boundary', 'NODE_CLASS_MAPPINGS'),
             ('masking_nodes', 'NODE_CLASS_MAPPINGS'),
             ('masked_bridge', 'NODE_CLASS_MAPPINGS'),
             ('source_av_target', 'NODE_CLASS_MAPPINGS')):
