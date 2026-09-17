@@ -36,7 +36,7 @@ function text(tag, value) {
 function mount(node) {
     if (node._h3SelfLiftHunt || typeof node.addDOMWidget !== "function") return;
     const root = document.createElement("div");
-    root.style.cssText = "height:100%;overflow:auto;background:#202126;color:#eee;padding:10px;box-sizing:border-box;font:13px sans-serif;";
+    root.style.cssText = "width:100%;height:100%;min-height:0;max-height:100%;overflow:auto;background:#202126;color:#eee;padding:10px;box-sizing:border-box;font:13px sans-serif;";
     const toolbar = document.createElement("div");
     toolbar.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;";
     const select = document.createElement("select");
@@ -127,8 +127,13 @@ function mount(node) {
     reload.onclick = refresh;
     for (const event of ["pointerdown", "mousedown", "keydown"]) root.addEventListener(event, e => e.stopPropagation());
     bindNodeWheel(root, node, app);
-    const widget = node.addDOMWidget("h3_selflift_review", "h3-selflift-review", root, {serialize:false});
-    widget.computeSize = width => [width, 440];
+    // A fixed computeSize leaves unused space below the panel when the node
+    // grows. Let ComfyUI allocate all remaining height, with scrolling only
+    // when the take cards exceed the user's chosen viewport.
+    const widget = node.addDOMWidget("h3_selflift_review", "h3-selflift-review", root, {
+        serialize:false, getMinHeight:() => 440,
+    });
+    widget.serialize = false;
     node._h3SelfLiftHunt = panel;
     panels.add(panel);
     if (!timer) timer = setInterval(() => { if ([...panels].some(visible)) refresh(); }, 3000);
