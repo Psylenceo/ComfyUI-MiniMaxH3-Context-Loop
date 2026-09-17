@@ -5,6 +5,7 @@ import fs from "node:fs";
 import {
     activeSceneIndexAfterRefresh,
     adjacentPlanCompanions,
+    beginTrackingShotFields,
     connectedPlanStudios,
     connectedPromptEditors,
     markShotFieldEdited,
@@ -119,6 +120,35 @@ assert.equal(rebaseScenePrompt({shots:[{id:"gone",prompt:[]}]}, livePlan, 0), -1
     assert.equal(rebaseScenePrompt(local, live, 0), 0);
     assert.equal(live.shots[0].prompt, "untracked H3");
     assert.equal(live.shots[0].basic_prompt, "untracked basic");
+}
+{
+    // beginTrackingShotFields is the opposite default a companion RECEIVER
+    // needs: it has not edited anything itself, so an untouched field must
+    // adopt the live value rather than keep clobbering it with whatever the
+    // receiver's own stale local copy happens to hold.
+    const receiverShot = {id:"one", prompt:"stale local H3", basic_prompt:"stale local basic"};
+    beginTrackingShotFields(receiverShot);
+    const local = {shots:[receiverShot]};
+    const live = {shots:[{id:"one", prompt:"live H3", basic_prompt:"live basic"}]};
+    assert.equal(rebaseScenePrompt(local, live, 0), 0);
+    assert.equal(live.shots[0].prompt, "live H3",
+        "an untracked-but-tracking-began shot must adopt the live prompt");
+    assert.equal(live.shots[0].basic_prompt, "live basic",
+        "an untracked-but-tracking-began shot must adopt the live basic_prompt");
+}
+{
+    // beginTrackingShotFields must never clear a field already genuinely
+    // touched (a receiver can have its own in-progress, unflushed edit).
+    const midEditShot = {id:"one", prompt:"my in-progress H3 edit", basic_prompt:"stale local basic"};
+    markShotFieldEdited(midEditShot, "prompt");
+    beginTrackingShotFields(midEditShot);
+    const local = {shots:[midEditShot]};
+    const live = {shots:[{id:"one", prompt:"live H3", basic_prompt:"live basic"}]};
+    assert.equal(rebaseScenePrompt(local, live, 0), 0);
+    assert.equal(live.shots[0].prompt, "my in-progress H3 edit",
+        "a field already marked edited must survive beginTrackingShotFields");
+    assert.equal(live.shots[0].basic_prompt, "live basic",
+        "a field never touched must still adopt the live value");
 }
 
 assert.equal(planHasNonPromptChanges(

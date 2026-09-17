@@ -129,7 +129,7 @@ assert.match(source, /activeSceneIndexAfterRefresh/);
 assert.match(source, /ownsPromptHistoryTarget/);
 assert.match(source, /stopImmediatePropagation\(\)/);
 assert.match(source, /recordPromptReplacement/);
-assert.match(source, /promptUndoForScene\(shotId, text, \{external:true\}\)/);
+assert.match(source, /promptUndoForScene\(shotId, mergedText, \{external:true\}\)/);
 assert.match(source, /tokenizeRichPrompt/);
 assert.match(source, /h3rp-token-picture/);
 assert.match(source, /h3rp-token-audio/);
@@ -242,11 +242,22 @@ assert.match(optimizePromptSource,
 // Applying an optimizer result (Direct API, MCP, or a previously pending
 // result) must refresh the reference tray/highlighting against the new
 // text before redrawing, or a newly active tag stays shown "inactive"
-// until an unrelated manual edit happens to trigger a refresh.
-assert.match(source, /function refreshTaggedReferencesForShot\(shot, text\)/,
-    "a shared helper must refresh reference records for the shot's new " +
-    "text (plus its basic_prompt) so all optimizer-apply sites stay " +
-    "consistent");
+// until an unrelated manual edit happens to trigger a refresh. This refresh
+// must NOT include basic_prompt: it reflects the compiled H3 prompt that
+// generation actually uses, so a draft-only tag omitted from the rewrite
+// must show inactive, and a tag's <Picture N> numbering must match the
+// resulting H3 text alone - unlike optimizePrompt()'s own reference scan
+// above, which deliberately does include basic_prompt for the separate
+// purpose of preparing the outgoing request.
+assert.match(source, /function refreshTaggedReferencesForShot\(text\)/,
+    "a shared helper must refresh reference records for the resulting H3 " +
+    "text so all optimizer-apply sites stay consistent");
+assert.match(source,
+    /prompt:\[sharedPrompt\(state\.plan\)\.text\.trim\(\), String\(text \?\? ""\)\.trim\(\)\]\s*\n\s*\.filter\(Boolean\)\.join\("\\n\\n"\),\s*\n\s*\},\s*\n\s*\);\s*\n\s*state\.records = refreshed\.records;/,
+    "the post-apply reference refresh must scan only the shared prompt " +
+    "plus the resulting H3 text, not basic_prompt - otherwise a tag only " +
+    "in the basic draft (and omitted from the optimized result) keeps " +
+    "showing active/mismapped even though generation will not see it");
 for (const fnName of [
     "handleOptimizerFrame", "applyPendingOptimizerResult", "applyOptimizerResponse",
 ]) {

@@ -52,6 +52,7 @@ const {
     publishCompanionScene,
     rebaseScenePrompt,
     markShotFieldEdited,
+    beginTrackingShotFields,
 } = promptCompanionSync;
 const activeSceneIndexAfterRefresh =
     typeof promptCompanionSync.activeSceneIndexAfterRefresh === "function"
@@ -3115,6 +3116,7 @@ function mount(node) {
         if (planNode !== state.planNode || !state.plan?.shots?.[index]) return false;
         const liveValue = String(state.planWidget?.value ?? "");
         let livePlanParsed = false;
+        let targetIndex = index;
         try {
             const livePlan = parsePlanJson(liveValue);
             livePlanParsed = true;
@@ -3122,36 +3124,56 @@ function mount(node) {
                 loadPlan(true);
                 return true;
             }
+            // Merge every live field onto the local shot (prompt,
+            // basic_prompt, ...), preserving only a field this editor has
+            // itself edited but not yet flushed (tracked via
+            // markShotFieldEdited). Patching only `prompt` here would still
+            // mark the live text "already synced" via state.lastValue below
+            // while leaving an unrelated local field (e.g. a stale basic
+            // draft) untouched - the next save would then silently
+            // republish that stale value over whatever changed elsewhere.
+            // A shot with no tracking at all is treated by rebaseScenePrompt
+            // as "assume both fields may have been locally edited" (correct
+            // for an editor about to write its own change). This receiver
+            // has not edited anything itself, so force empty-but-present
+            // tracking first: an untouched field then correctly adopts the
+            // live value, while a field genuinely mid-edit here (already
+            // marked via markShotFieldEdited) still wins.
+            beginTrackingShotFields(state.plan.shots[index]);
+            const rebased = rebaseScenePrompt(state.plan, livePlan, index);
+            if (rebased >= 0) targetIndex = rebased;
         } catch (_error) {
             // Leave lastValue untouched so normal polling reports invalid JSON.
         }
-        state.plan.shots[index].prompt = promptTextToLines(text);
-        const shotId = String(
-            state.plan.shots[index].id
-            || `clip_${String(index + 1).padStart(4, "0")}`,
-        );
-        const promptUndo = promptUndoForScene(shotId, text, {external:true});
-        if (index === state.active) state.promptUndo = promptUndo;
-        if (index === state.active) {
+        const shot = state.plan.shots[targetIndex];
+        if (!shot) return false;
+        const mergedText = promptValueToText(shot.prompt);
+        const shotId = String(shot.id || `clip_${String(targetIndex + 1).padStart(4, "0")}`);
+        const promptUndo = promptUndoForScene(shotId, mergedText, {external:true});
+        if (targetIndex === state.active) state.promptUndo = promptUndo;
+        if (targetIndex === state.active) {
             const textarea = root.querySelector(".h3sp-textarea");
-            if (textarea && textarea.value !== text) {
+            if (textarea && textarea.value !== mergedText) {
                 const focused = document.activeElement === textarea;
                 const start = textarea.selectionStart;
                 const end = textarea.selectionEnd;
                 const richFocused = document.activeElement === state.richEditor;
                 const richCaret = richFocused ? selectionTextOffset(state.richEditor) : null;
-                textarea.value = text;
+                textarea.value = mergedText;
                 if (focused) textarea.setSelectionRange(
-                    Math.min(start, text.length), Math.min(end, text.length));
+                    Math.min(start, mergedText.length), Math.min(end, mergedText.length));
                 renderRichEditorText(
-                    text,
-                    richCaret == null ? null : Math.min(richCaret, text.length),
+                    mergedText,
+                    richCaret == null ? null : Math.min(richCaret, mergedText.length),
                 );
-                scheduleHistoryDraft(
-                    String(state.plan.shots[index].id || `clip_${String(index + 1).padStart(4, "0")}`),
-                    text);
+                scheduleHistoryDraft(shotId, mergedText);
                 refreshAssistant();
                 state.schema?.refresh();
+            }
+            const basicPromptTextarea = root.querySelector(".h3sp-basic-prompt");
+            const mergedBasicPrompt = String(shot.basic_prompt ?? "");
+            if (basicPromptTextarea && basicPromptTextarea.value !== mergedBasicPrompt) {
+                basicPromptTextarea.value = mergedBasicPrompt;
             }
         }
         if (livePlanParsed) state.lastValue = liveValue;
@@ -3159,13 +3181,44 @@ function mount(node) {
     };
     node._h3PromptCompanionSetBasicPrompt = (planNode, index, text) => {
         if (planNode !== state.planNode || !state.plan?.shots?.[index]) return false;
-        state.plan.shots[index].basic_prompt = text;
-        if (index === state.active) {
+        const liveValue = String(state.planWidget?.value ?? "");
+        let livePlanParsed = false;
+        let targetIndex = index;
+        try {
+            const livePlan = parsePlanJson(liveValue);
+            livePlanParsed = true;
+            if (planHasNonPromptChanges(state.plan, livePlan)) {
+                loadPlan(true);
+                return true;
+            }
+            // Same field-level merge as _h3PromptCompanionSetScenePrompt:
+            // preserve any locally edited-but-unflushed field, adopt
+            // everything else (including the pushed basic_prompt) from the
+            // live Plan, so this editor's own in-progress H3 edit is never
+            // silently discarded by an unrelated basic-draft push.
+            // A shot with no tracking at all is treated by rebaseScenePrompt
+            // as "assume both fields may have been locally edited" (correct
+            // for an editor about to write its own change). This receiver
+            // has not edited anything itself, so force empty-but-present
+            // tracking first: an untouched field then correctly adopts the
+            // live value, while a field genuinely mid-edit here (already
+            // marked via markShotFieldEdited) still wins.
+            beginTrackingShotFields(state.plan.shots[index]);
+            const rebased = rebaseScenePrompt(state.plan, livePlan, index);
+            if (rebased >= 0) targetIndex = rebased;
+        } catch (_error) {
+            // Leave lastValue untouched so normal polling reports invalid JSON.
+        }
+        const shot = state.plan.shots[targetIndex];
+        if (!shot) return false;
+        if (targetIndex === state.active) {
             const basicPromptTextarea = root.querySelector(".h3sp-basic-prompt");
-            if (basicPromptTextarea && basicPromptTextarea.value !== text) {
-                basicPromptTextarea.value = text;
+            const mergedBasicPrompt = String(shot.basic_prompt ?? "");
+            if (basicPromptTextarea && basicPromptTextarea.value !== mergedBasicPrompt) {
+                basicPromptTextarea.value = mergedBasicPrompt;
             }
         }
+        if (livePlanParsed) state.lastValue = liveValue;
         return true;
     };
     node._h3ScenePromptEditorRefresh = () => loadPlan(true);
