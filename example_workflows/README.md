@@ -52,6 +52,7 @@ assume a custom model subfolder.
 | A few global Ref2VA pictures | [Ref2V Basic](<Ref2V Basic - MiniMax H3 0.6.json>) |
 | Prompt-selected `@tag` references | [Ref2V Tagged](<Ref2V Tagged - MiniMax H3 0.6.json>) |
 | Tagged references with full project authoring | [Ref2V Studio](<Ref2V Studio - MiniMax H3 0.6.json>) |
+| Experimental low-to-high generation, project On/Off switch | [Ref2V Studio SelfLift](<Ref2V Studio SelfLift - EXPERIMENTAL - MiniMax H3 0.6.json>) — [guide](<guides/Ref2V Studio SelfLift - EXPERIMENTAL - MiniMax H3 0.6.md>) |
 | Project references plus exact source audio | [Ref2V Studio Source Audio](<Ref2V Studio Source Audio - MiniMax H3 0.6.json>) |
 | Video inpainting | [Masked Video Inpaint](<Masked Video Inpaint - MiniMax H3 0.6.json>) |
 | Ref2VA-guided video inpainting | [Ref2V Masked Video Inpaint](<Ref2V Masked Video Inpaint - MiniMax H3 0.6.json>) |

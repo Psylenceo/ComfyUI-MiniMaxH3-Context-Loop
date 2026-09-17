@@ -4,6 +4,20 @@ For a user-facing map from features to upstream sources and local
 implementation files, see [Feature traceability](docs/FEATURE_TRACEABILITY.md).
 This file remains the authoritative attribution, revision, and license record.
 
+## SelfLift / MiniMax H3 TimelineDirector
+
+The experimental private `selflift_runtime/` is adapted from
+[Songssx/ComfyUI-MiniMaxH3-TimelineDirector](https://github.com/Songssx/ComfyUI-MiniMaxH3-TimelineDirector)
+at revision `03915aae320d186f1498d12a847689af0902785d`, GPL-3.0.
+That runtime derives from [facok/comfyui-SelfLift](https://github.com/facok/comfyui-SelfLift)
+and uses the H3 latent-upscaler architecture associated with
+[LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler).
+
+The project switch, Chain checkpoint/candidate integration and workflow are
+local additions. No upstream installed pack is modified. Source details and
+adaptations are recorded in [the runtime notice](selflift_runtime/NOTICE.md).
+Model checkpoints remain separately installed assets, not bundled code.
+
 ## ComfyUI-H3-Prompt-IDE
 
 The nightly prompt-editor completion, marker-interaction, tokenizer diagnostic

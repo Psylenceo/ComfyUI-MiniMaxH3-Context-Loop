@@ -32,6 +32,7 @@ WORKFLOWS = {
     "Ref2V Masked Video Inpaint - MiniMax H3 0.6.json",
     "Ref2V Sequential Motion - EXPERIMENTAL - MiniMax H3 0.6.json",
     "Ref2V Studio - MiniMax H3 0.6.json",
+    "Ref2V Studio SelfLift - EXPERIMENTAL - MiniMax H3 0.6.json",
     "Ref2V Studio Source Audio - MiniMax H3 0.6.json",
     "Ref2V Tagged - MiniMax H3 0.6.json",
     "Ref2V Tagged Source Audio - MiniMax H3 0.6.json",
@@ -234,6 +235,7 @@ def validate_modern_authoring(workflow: dict, path: Path) -> None:
         "Ref2V Basic - MiniMax H3 0.6.json",
         "Ref2V Tagged - MiniMax H3 0.6.json",
         "Ref2V Studio - MiniMax H3 0.6.json",
+        "Ref2V Studio SelfLift - EXPERIMENTAL - MiniMax H3 0.6.json",
         "Ref2V Studio Source Audio - MiniMax H3 0.6.json",
         "Ref2V Tagged Source Audio - MiniMax H3 0.6.json",
     }
@@ -272,7 +274,12 @@ def validate_studio(workflow: dict, path: Path) -> None:
     assert origin(workflow, studio, "project_assets") == carousel
     assert origin(workflow, studio, "tagged_references") == carousel
     assert origin(workflow, manager, "plan") == studio
-    assert origin(workflow, loop_start, "plan") == studio
+    if nodes(workflow, "MiniMaxH3SelfLiftProject"):
+        switch = one(workflow, "MiniMaxH3SelfLiftProject")
+        assert origin(workflow, switch, "plan") == studio
+        assert origin(workflow, loop_start, "plan") == switch
+    else:
+        assert origin(workflow, loop_start, "plan") == studio
     for external in nodes(workflow, "MiniMaxH3ChainExternalVideo"):
         assert origin(workflow, external, "plan") == studio
     assert manager["size"][0] >= 1200 and manager["size"][1] >= 900
@@ -436,7 +443,7 @@ def main() -> None:
                 if values and values[0] in CANONICAL_H3_MODELS:
                     assert "/" not in values[0] and "\\" not in values[0]
             if node["type"] == "KSamplerSelect":
-                expected = "euler" if lms else "gradient_estimation" if derope_fast else "er_sde" if pixel else "res_multistep"
+                expected = "euler" if lms or nodes(workflow, "MiniMaxH3SelfLiftProject") else "gradient_estimation" if derope_fast else "er_sde" if pixel else "res_multistep"
                 assert node["widgets_values"] == [expected]
             elif node["type"] == "BasicScheduler":
                 assert node["widgets_values"][:2] == (["simple", 8] if lms else ["beta", 3] if pixel else ["simple", 20])

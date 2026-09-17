@@ -9558,10 +9558,14 @@ def _editorial_trim_latent(
             "Editorial trim scene %s cannot slice audio latent shape %s to "
             "%d steps." % (segment.get("id", "scene"),
                             tuple(audio.shape), audio_steps))
+    from .selflift_state import LOW_CARRY, metadata as selflift_metadata
+    extra = selflift_metadata(latent, clone=True)
+    if extra:
+        extra[LOW_CARRY] = _tensor_cpu_clone(extra[LOW_CARRY][:, :, :video_steps])
     return {"samples": [
         _tensor_cpu_clone(video[tuple(video_index)]),
         _tensor_cpu_clone(audio[..., :audio_steps]),
-    ]}
+    ], **extra}
 
 
 def _editorial_context_tail(
@@ -10486,11 +10490,14 @@ def _apply_guide_tone_carry(
 
 
 def _compact_latent(latent: dict[str, Any]) -> dict[str, Any]:
+    from .selflift_state import metadata as selflift_metadata
+
     parts = _streams_from_latent(latent)
     if len(parts) < 2:
         raise ValueError("H3 Chain requires a sampled MiniMax AV latent.")
     return {"samples": [_tensor_cpu_clone(parts[0]),
-                        _tensor_cpu_clone(parts[1])]}
+                        _tensor_cpu_clone(parts[1])],
+            **selflift_metadata(latent, clone=True)}
 
 
 def _plan_uses_latent_color_carry(plan: dict[str, Any]) -> bool:
@@ -10713,7 +10720,7 @@ def _public_segment(value: dict[str, Any]) -> dict[str, Any]:
         "audio_context_length", "context_spatial_proxy",
         "source_reference", "generated_continuity", "source_audio_target",
         "lip_sync_source", "lip_sync_source_asset",
-        "prompt_seed_mode", "prompt_seed", "lora_route",
+        "prompt_seed_mode", "prompt_seed", "lora_route", "selflift_sampling",
         "guide_tone_carry",
         "guide_tone_input_applied",
         "latent_color_stats",
@@ -10893,6 +10900,8 @@ def _audio_context_state(state: dict[str, Any]) -> dict[str, Any]:
     selected = dict(state)
     selected.update({
         "previous_latent": {
+            **{key: value for key, value in previous_latent.items()
+               if key in ("selflift_low_resolution_carry", "selflift_signature")},
             "samples": [streams[0], selected_audio],
             "_h3_audio_context_frames": int(selected_span),
         },
@@ -11019,12 +11028,13 @@ def _visual_context_state(
         if "_editorial_out_frames" in segment:
             frames = _editorial_context_tail(
                 frames, segment, _plan_context_storage_length(plan))
-            trimmed = _editorial_trim_latent({
-                "samples": [video, tensors.get("audio")],
-            }, segment)
+            from .selflift_state import checkpoint_latent, checkpoint_payload
+            trimmed = _editorial_trim_latent(
+                checkpoint_latent({**tensors, "video": video}), segment)
             video, trimmed_audio = _streams_from_latent(trimmed)[:2]
             tensors = dict(tensors)
             tensors["audio"] = trimmed_audio
+            tensors.update(checkpoint_payload(trimmed))
         loaded = (position, segment, tensors, frames, video)
         loaded_sources[int(scene_index)] = loaded
         return loaded
@@ -11095,6 +11105,8 @@ def _visual_context_state(
 
     block_runtime: list[dict[str, Any]] = []
     video_crops = []
+    low_crops = []
+    low_signatures = []
     rgb_crops = []
     latent_geometry = None
     prefix_frames = 0
@@ -11138,6 +11150,18 @@ def _visual_context_state(
                         source_segment, source_frames, source_start,
                         int(block["frames"]), source_delivered_frames))
         video_crops.append(video_crop)
+        # Optional native low-resolution context uses precisely the same
+        # frame/latent window. Old or mixed-grid sources simply use HQ context.
+        from .selflift_state import LOW_CARRY, SIGNATURE, checkpoint_latent
+        if LOW_CARRY in tensors:
+            low = checkpoint_latent(tensors)
+            low_video = low[LOW_CARRY]
+            if low_video.ndim == 5 and low_video.shape[2] == source_video.shape[2]:
+                low_crops.append(low_video if legacy_whole_source else native_latent_window(
+                    source_segment, low_video, source_start, int(block["frames"]),
+                    prefix_frames, source_raw_frames, source_delivered_frames,
+                    "scene %d low-resolution context" % index))
+                low_signatures.append(low[SIGNATURE])
         rgb_crops.append(rgb_crop)
         block_runtime.append({
             "source": source_index,
@@ -11152,6 +11176,13 @@ def _visual_context_state(
 
     selected_video = (video_crops[0] if len(video_crops) == 1
                       else torch.cat(tuple(video_crops), dim=2))
+    low_context = {}
+    if (len(low_crops) == len(video_crops) and low_crops
+            and len(set(low_signatures)) == 1
+            and len({tuple(crop.shape[:2]) + tuple(crop.shape[3:])
+                     for crop in low_crops}) == 1):
+        low_context = {LOW_CARRY: low_crops[0] if len(low_crops) == 1 else
+                       torch.cat(tuple(low_crops), dim=2), SIGNATURE: low_signatures[0]}
     total_steps = max(
         1, 2 + 5 * ((int(context_length) - 5) // 17))
     if (not legacy_whole_source
@@ -11209,6 +11240,7 @@ def _visual_context_state(
         "previous_frames": selected_frames,
         "previous_latent": {
             "samples": [selected_video, selected_audio],
+            **low_context,
             **({"_h3_audio_context_frames": int(
                 state["previous_latent"]["_h3_audio_context_frames"])}
                if isinstance(state.get("previous_latent"), dict)
@@ -11566,9 +11598,9 @@ def _load_resume_state(
         context_frames = _editorial_context_tail(
             tensors["context_frames"], previous_segment,
             _plan_context_storage_length(plan))
-        previous_latent = _editorial_trim_latent({
-            "samples": [tensors["video"], tensors["audio"]],
-        }, previous_segment)
+        from .selflift_state import checkpoint_latent
+        previous_latent = _editorial_trim_latent(
+            checkpoint_latent(tensors), previous_segment)
         previous_delivered = _editorial_segment_delivered_frames(
             previous_segment)
         if (getattr(context_frames, "ndim", 0) != 4
@@ -20346,6 +20378,13 @@ class MiniMaxH3ChainContext:
                                if any("weaken_mask" in block for block in
                                       shot.get("visual_context_blocks", [])) else None),
             )
+            from .selflift_state import with_previous_context
+            # Those modes deliberately transform the HQ prefix. Downsample
+            # that result instead of replacing it with an unmodified low carry.
+            if (continuation_mode != "tapered_av"
+                    and context_spatial_proxy == "off"
+                    and latent_color_carry is None):
+                out_latent = with_previous_context(out_latent, previous_latent, trim)
             if explicit_future_anchor is not None:
                 from .nodes import _append_explicit_future_end_anchor
 
@@ -20792,6 +20831,8 @@ class MiniMaxH3ChainSegmentSave:
             "video": parts[0],
             "audio": parts[1],
         }
+        from .selflift_state import checkpoint_payload
+        tensors.update(checkpoint_payload(compact))
         if denoised_latent is not None:
             denoised = _compact_latent(denoised_latent)["samples"]
             tensors.update({
@@ -21038,6 +21079,8 @@ class MiniMaxH3ChainSegmentSave:
                 "checkpoint_sha256": _file_sha256(published_checkpoint),
                 "prompt_file_sha256": _file_sha256(published_prompt),
             }
+            if "selflift_low_resolution_carry" in compact:
+                segment["selflift_sampling"] = dict(plan.get("selflift_sampling") or {})
             if alternate_take is not None:
                 segment.update({
                     "take_kind": "editorial_alternate",
@@ -21953,14 +21996,13 @@ def _select_review_candidate(
         # interrupted before the following scene reaches Segment Save.
         _promote_checkpoint_run_archives(selected_plan, metadata)
     accepted = dict(_public_segment(selected))
+    from .selflift_state import checkpoint_latent
     accepted["_h3_review_decision"] = {
         "action": "candidate_selected",
         "revision": revision,
         "plan": selected_plan,
         "context_frames": tensors["context_frames"],
-        "sampled_latent": {
-            "samples": [tensors["video"], tensors["audio"]],
-        },
+        "sampled_latent": checkpoint_latent(tensors),
     }
     selected_state = dict(state)
     selected_state["plan"] = selected_plan

@@ -18,7 +18,8 @@ NAMESPACE = uuid.UUID('aedf0e28-4e77-4ec8-98d8-7662561e4cf4')
 TITLE_HEIGHT, GAP = 30, 70
 AUTHOR = {'MiniMaxH3ChainPlanModern', 'MiniMaxH3GenerationProfile', 'MiniMaxH3ChainPlanStudio',
           'MiniMaxH3ProjectAssetManager', 'MiniMaxH3ChainScenePromptEditor',
-          'MiniMaxH3ChainRichScenePromptEditor', 'MiniMaxH3ChainCheckpointManager'}
+          'MiniMaxH3ChainRichScenePromptEditor', 'MiniMaxH3ChainCheckpointManager',
+          'MiniMaxH3SelfLiftProject'}
 SIZES = {
     'MiniMaxH3ChainPlanModern': (1000,900), 'MiniMaxH3ChainPlanStudio': (1080,940),
     'MiniMaxH3ProjectAssetManager': (1080,880), 'MiniMaxH3ChainCheckpointManager': (1200,900),
@@ -35,6 +36,8 @@ SIZES = {
     'MiniMaxH3ChainUpscalePixelConditioning': (600,520),
     'MiniMaxH3ChainUpscalePixelCurrent': (500,300),
     'MiniMaxH3ChainLMSGuide': (540,420),
+    'MiniMaxH3SelfLiftProject': (460,220),
+    'MiniMaxH3ChainSelfLiftSampler': (480,330),
     'UltimateSDUpscaleNoUpscaleGuider': (500,720),
 }
 LABELS = {
@@ -50,6 +53,8 @@ LABELS = {
     'MiniMaxH3ReferenceToVideo':'Reference Conditioning', 'UNETLoader':'H3 Diffusion Model',
     'CLIPLoader':'H3 Text Encoder', 'RandomNoise':'Scene Seed', 'SamplerCustomAdvanced':'Sample Video + Audio',
     'BasicScheduler':'Sampling Schedule', 'KSamplerSelect':'Sampler',
+    'MiniMaxH3SelfLiftProject':'SelfLift Project • Experimental',
+    'MiniMaxH3ChainSelfLiftSampler':'SelfLift AV Sampling • Experimental',
     'MinimaxH3LatentUpscaler3D':'LBH 3D Latent Upscaler', 'SeedVR2VideoPathUpscaler':'SeedVR2 Video Path Upscaler',
     'MMH3TemporalSplitParamsV10':'MMH3 Temporal Split Params',
     'MMH3SpatialSplitParamsV10':'MMH3 Spatial Split Params',
@@ -166,7 +171,7 @@ def layout(nodes,links):
         stack(col,x,180)
         types={n['type'] for n in col}; heading='PREPARE SCENE'
         if index==0:heading='MODELS & INPUTS'
-        if types & {'SamplerCustomAdvanced', 'MMH3SplitUpscale'}:heading='SAMPLE & DECODE'
+        if types & {'SamplerCustomAdvanced', 'MMH3SplitUpscale', 'MiniMaxH3ChainSelfLiftSampler'}:heading='SAMPLE & DECODE'
         if types & {'MiniMaxH3ChainSegmentSave','MiniMaxH3ChainUpscaleSegmentSave'}:heading='SAVE & REVIEW'
         if 'MiniMaxH3ChainReview' in types:heading='REVIEW & CONTINUE'
         if types & {'MiniMaxH3ChainAssemble','SaveVideo'}:heading='DELIVER'
