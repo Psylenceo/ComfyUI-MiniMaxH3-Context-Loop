@@ -75,8 +75,8 @@ def selected_state(state, seed):
 
 def approve(store, key, ordinal):
     def change(record):
-        if record.get("phase") in ("low", "preview", "high") and key in _ACTIVE:
-            raise ValueError("Wait for this sampling stage to finish before choosing a take.")
+        if record.get("phase") == "high" and key in _ACTIVE:
+            raise ValueError("The selected take is already being upscaled; wait for it to finish.")
         take = next((v for v in record["candidates"] if v["ordinal"] == ordinal), None)
         if take is None or not take.get("preview"):
             raise ValueError("Choose a completed preview.")
@@ -108,6 +108,7 @@ class MiniMaxH3SelfLiftSeedHunt:
     CATEGORY = "sampling/minimax/context_loop"
     DESCRIPTION = ("Experimental SelfLift seed hunt: saves each low-resolution pass before tiny-VAE preview. "
         "Choose a take to run only its remaining high-resolution steps. Saved takes survive OOM/restart. "
+        "Choose early to finish saving the current candidate, skip the rest and upscale your selection. "
         "Keep seed fixed to resume. Wire selected_state to Segment Save and Review Gate/Loop End. "
         "Requires KJNodes' TAEH3 decoder; previews are silent and approximate, not final-quality renders.")
 
@@ -210,12 +211,20 @@ class MiniMaxH3SelfLiftSeedHunt:
                 await _work(check_preview, tiny_vae)
                 for ordinal in range(1, int(candidate_count) + 1):
                     throw_exception_if_processing_interrupted()
+                    # Check approval and claim the next candidate under the same
+                    # lock. A choice made after this claim waits for this candidate
+                    # to be saved; a choice made before it starts no further work.
+                    def begin_candidate(r):
+                        if r.get("selected") is None:
+                            r.update(phase="low", current=ordinal, error=None)
+                    record = await _work(store.update, key, begin_candidate)
+                    if record.get("selected") is not None:
+                        break
+                    notify()
                     take_seed = (int(seed) + ordinal - 1) % (1 << 64)
                     checkpoint = "take_%04d.safetensors" % ordinal
                     path = folder / checkpoint
                     if not path.is_file():
-                        await _work(update, phase="low", current=ordinal, error=None)
-                        notify()
                         middle = await _work(run, take_seed, stop_after_low=True)
                         # Durable BEFORE preview, lifter, or any high-resolution work.
                         await _work(save_bundle, path, middle)
@@ -232,8 +241,10 @@ class MiniMaxH3SelfLiftSeedHunt:
                             "preview": preview.relative_to(store.root).as_posix()}
                     def append(r):
                         r["candidates"] = [v for v in r["candidates"] if v["ordinal"] != ordinal] + [take]
-                    await _work(store.update, key, append)
+                    record = await _work(store.update, key, append)
                     notify()
+                    if record.get("selected") is not None:
+                        break
                 await _work(update, phase="waiting", current=None)
                 notify()
             while True:
@@ -242,7 +253,7 @@ class MiniMaxH3SelfLiftSeedHunt:
                 if record.get("selected") is not None:
                     # Claim the choice under the same lock as approval so a
                     # second client cannot change it between read and sampling.
-                    record = await _work(update, phase="high", error=None)
+                    record = await _work(update, phase="high", current=None, error=None)
                     break
                 await asyncio.sleep(.5)
             selected = next(v for v in record["candidates"] if v["ordinal"] == record["selected"])

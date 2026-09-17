@@ -50,7 +50,7 @@ function mount(node) {
     cards.style.cssText = "display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;";
     toolbar.append(select, reload);
     root.append(toolbar, status, recover, cards);
-    root.append(text("p", "Tiny-VAE motion preview · silent · approximate detail. After OOM/restart, keep batch name/seed/settings fixed and queue this workflow again. Only the chosen take is upscaled."));
+    root.append(text("p", "Tiny-VAE motion preview · silent · approximate detail. Choose a take anytime: the current candidate finishes and saves, then the rest are skipped. After OOM/restart, keep batch name/seed/settings fixed and queue this workflow again. Only the chosen take is upscaled."));
     let optionsKey = "";
     let cardsKey = "";
     const panel = { root, node, status, render() {
@@ -73,7 +73,11 @@ function mount(node) {
         recover.hidden = false;
         recover.href = api.apiURL(`/h3/selflift/workflow?id=${encodeURIComponent(key)}`);
         const phase = batch.active ? batch.phase : (batch.phase === "finished" ? "finished" : "saved — queue matching workflow to resume");
+        const hunting = batch.active && ["low", "preview"].includes(batch.phase);
         status.textContent = `${batch.low_steps} low + ${batch.high_steps} high steps · ${phase}${batch.current ? ` · take ${batch.current}` : ""}${batch.selected ? ` · chosen take ${batch.selected}` : ""}${batch.error ? ` · ${batch.error}` : ""}`;
+        if (hunting && batch.selected) {
+            status.textContent += ` · Finishing and saving take ${batch.current}; then upscale take ${batch.selected} and skip remaining candidates.`;
+        }
         // Never rebuild video elements on ordinary polls: playback survives polling.
         const signature = JSON.stringify([key, batch.candidates.map(c => [c.ordinal, c.preview])]);
         if (signature !== cardsKey) {
@@ -111,9 +115,11 @@ function mount(node) {
                 cards.append(card);
             }
         }
-        const busy = batch.active && ["low", "preview", "high"].includes(batch.phase);
+        const busy = batch.active && batch.phase === "high";
         for (const button of cards.querySelectorAll("button")) {
             button.disabled = busy;
+            button.textContent = hunting ? `Use take ${button.dataset.ordinal} now` : `Use take ${button.dataset.ordinal} — finish upscale`;
+            button.title = hunting ? "Finish and save the current candidate, skip the rest, then upscale this take." : "Upscale this saved take.";
             button.style.outline = Number(button.dataset.ordinal) === batch.selected ? "2px solid #76bd8a" : "";
         }
     }};

@@ -22,6 +22,20 @@ workflows and the ordinary Review Gate are unchanged.
    The example already does this. Keep the final Review Gate's candidate count
    at **1**; it reviews the finished result, not another set of expensive hunts.
 
+## Choosing before the batch finishes
+
+As soon as a completed preview appears, click **Use take N now**. No need to
+stop or requeue: the candidate currently generating finishes its low pass and
+preview, both are saved, then all remaining candidates are skipped and your
+chosen take is upscaled. If no candidate is in progress, it proceeds directly.
+The panel shows the pending choice while the current candidate finishes.
+You can change the choice until its high-resolution pass starts; selection is
+locked during that pass.
+
+The early choice is saved immediately. If the current candidate fails or the
+server restarts before the upscale, queue the same workflow/settings again:
+it goes straight to the selected saved take, without generating the rest.
+
 ## OOM, restart, and refresh
 
 Every completed low pass is saved **before** tiny decode or learned upscale.

@@ -4,6 +4,7 @@ import importlib
 import json
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -134,6 +135,116 @@ class HuntTests(unittest.IsolatedAsyncioTestCase):
         CALLS.clear()
         await self.run_node(1)
         self.assertEqual([v["shape"][-2:] for v in CALLS], [(8, 12)])
+
+    async def test_early_choice_during_low_or_preview_saves_current_and_skips_rest(self):
+        for stage in ("low", "preview"):
+            with self.subTest(stage=stage):
+                CALLS.clear()
+                entered, release = threading.Event(), threading.Event()
+                original = runtime.progressive_sample
+
+                def wait_for_choice():
+                    entered.set()
+                    if not release.wait(5):
+                        raise AssertionError("Early selection did not release the worker")
+
+                def sampling(*args, **kwargs):
+                    if stage == "low" and kwargs.get("stop_after_low") and args[7] == 43:
+                        wait_for_choice()
+                    return original(*args, **kwargs)
+
+                def decoding(*args):
+                    if stage == "preview" and self.store.list()[0]["current"] == 2:
+                        wait_for_choice()
+                    self.fake_preview(*args)
+
+                with patch.object(runtime, "progressive_sample", side_effect=sampling), \
+                     patch.object(preview, "save_preview", side_effect=decoding):
+                    task = asyncio.create_task(self.run_node(4, batch_name="early_" + stage))
+                    try:
+                        async with asyncio.timeout(5):
+                            while not entered.is_set() and not task.done():
+                                await asyncio.sleep(.01)
+                        self.assertTrue(entered.is_set())
+                        saved = self.store.list()[0]
+                        self.assertEqual(saved["phase"], stage)
+                        self.assertEqual([v["ordinal"] for v in saved["candidates"]], [1])
+                        with self.assertRaisesRegex(ValueError, "completed preview"):
+                            hunt.approve(self.store, saved["id"], 2)
+                        hunt.approve(self.store, saved["id"], 1)
+                        # Choice is durable even while the sampling worker is busy.
+                        self.assertEqual(HuntStore(self.root).read(saved["id"])["selected"], 1)
+                        self.assertFalse(task.done())
+                    finally:
+                        release.set()
+                        result = await asyncio.wait_for(task, 5)
+
+                saved = self.store.list()[0]
+                self.assertEqual(saved["phase"], "finished")
+                self.assertEqual([v["ordinal"] for v in saved["candidates"]], [1, 2])
+                for take in saved["candidates"]:
+                    self.assertTrue((self.store.locate(saved["id"]) / take["checkpoint"]).is_file())
+                    self.assertTrue((self.root / take["preview"]).is_file())
+                self.assertFalse((self.store.locate(saved["id"]) / "take_0003.safetensors").exists())
+                self.assertEqual([v["shape"][-2:] for v in CALLS], [(4, 6), (4, 6), (8, 12)])
+                self.assertIn("take 1; seed 42", result["result"][1])
+
+    async def test_choice_at_next_candidate_boundary_starts_no_extra_low_pass(self):
+        original = HuntStore.update
+        claims = 0
+        def select_before_next_claim(store, key, transform):
+            nonlocal claims
+            if transform.__name__ == "begin_candidate":
+                claims += 1
+                if claims == 2:
+                    hunt.approve(store, key, 1)
+            return original(store, key, transform)
+        with patch.object(HuntStore, "update", select_before_next_claim):
+            await asyncio.wait_for(self.run_node(4), 5)
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(4, 6), (8, 12)])
+        self.assertEqual(len(self.store.list()[0]["candidates"]), 1)
+
+    async def test_early_choice_survives_current_candidate_oom_and_requeue(self):
+        for stage in ("low", "preview"):
+            with self.subTest(stage=stage):
+                original = runtime.progressive_sample
+                def choose_then_fail():
+                    saved = self.store.list()[0]
+                    hunt.approve(self.store, saved["id"], 1)
+                    raise RuntimeError("simulated current candidate OOM")
+                def sampling(*args, **kwargs):
+                    if stage == "low" and kwargs.get("stop_after_low") and args[7] == 43:
+                        choose_then_fail()
+                    return original(*args, **kwargs)
+                def decoding(*args):
+                    if stage == "preview" and self.store.list()[0]["current"] == 2:
+                        choose_then_fail()
+                    self.fake_preview(*args)
+                name = "early_oom_" + stage
+                with patch.object(runtime, "progressive_sample", side_effect=sampling), \
+                     patch.object(preview, "save_preview", side_effect=decoding):
+                    with self.assertRaisesRegex(RuntimeError, "current candidate OOM"):
+                        await self.run_node(4, batch_name=name)
+                saved = HuntStore(self.root).list()[0]
+                self.assertEqual((saved["phase"], saved["selected"]), ("paused", 1))
+                self.assertNotIn(saved["id"], hunt._ACTIVE)
+                CALLS.clear()
+                await self.run_node(4, batch_name=name)
+                self.assertEqual([v["shape"][-2:] for v in CALLS], [(8, 12)])
+                self.assertEqual(len(self.store.list()[0]["candidates"]), 1)
+
+    async def test_cannot_change_selection_once_high_pass_has_started(self):
+        original = runtime.progressive_sample
+        def sampling(*args, **kwargs):
+            if kwargs.get("handoff") is not None:
+                saved = self.store.list()[0]
+                self.assertEqual(saved["phase"], "high")
+                with self.assertRaisesRegex(ValueError, "already being upscaled"):
+                    hunt.approve(self.store, saved["id"], 2)
+                self.assertEqual(self.store.read(saved["id"])["selected"], 1)
+            return original(*args, **kwargs)
+        with patch.object(runtime, "progressive_sample", side_effect=sampling):
+            await self.select_when_ready(asyncio.create_task(self.run_node(2)))
 
     async def test_bundle_roundtrip_and_interrupted_atomic_save(self):
         path = self.root / "middle.safetensors"
