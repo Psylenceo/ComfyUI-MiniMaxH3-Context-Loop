@@ -348,10 +348,20 @@ function setWidgetValue(node, name, value) {
 }
 
 function collapseWidget(widget) {
-    widget._h3OriginalType ??= widget.type;
-    widget._h3OriginalComputeSize ??= widget.computeSize;
-    widget._h3OriginalDraw ??= widget.draw;
+    // Snapshot once, including undefined methods: repeated refreshes must not
+    // mistake our collapsed geometry for the original converted-input layout.
+    widget._h3PlanWidgetOriginal ??= {
+        type: widget.type,
+        computeSize: widget.computeSize,
+        draw: widget.draw,
+        optionsHidden: widget.options?.hidden,
+    };
     widget.hidden = true;
+    // The Vue/Nodes 2.0 renderer reads options.hidden, not widget.hidden.
+    // Keep both renderers in sync, otherwise invisible backing controls still
+    // occupy a textarea-sized block and empty rows above the rich editor.
+    widget.options ??= {};
+    widget.options.hidden = true;
     widget.type = "hidden";
     widget.computeSize = () => [0, -4];
     // Modern and legacy canvas paths do not agree on whether a hidden widget
@@ -388,11 +398,15 @@ function collapseModernBackingWidgets(node) {
         if (widget && node.inputs?.some((input) => input.widget?.name === name)) {
             // A converted widget owns a real socket. Hiding it also hides or
             // mispositions that socket in the frontend (notably fingerprints).
+            const original = widget._h3PlanWidgetOriginal;
             if (widget.type === "hidden") {
-                widget.type = widget._h3OriginalType ?? "converted-widget";
-                widget.computeSize = widget._h3OriginalComputeSize;
-                widget.draw = widget._h3OriginalDraw;
+                widget.type = original?.type ?? "converted-widget";
+                widget.computeSize = original?.computeSize;
+                widget.draw = original?.draw;
             }
+            // Core may already have changed type during conversion; still
+            // release the Vue visibility flag that our editor owns.
+            if (original && widget.options) widget.options.hidden = original.optionsHidden;
             widget.hidden = false;
             continue;
         }
@@ -404,6 +418,7 @@ function setProjectAssetManagedWidget(widget, managed) {
     if (!widget) return;
     widget._h3ProjectAssetOriginal ??= {
         hidden: widget.hidden,
+        optionsHidden: widget.options?.hidden,
         type: widget.type,
         computeSize: widget.computeSize,
         draw: widget.draw,
@@ -414,12 +429,15 @@ function setProjectAssetManagedWidget(widget, managed) {
     const original = widget._h3ProjectAssetOriginal;
     if (managed) {
         widget.hidden = true;
+        widget.options ??= {};
+        widget.options.hidden = true;
         widget.type = "hidden";
         widget.computeSize = () => [0, -4];
         widget.draw = () => {};
         widget.disabled = true;
     } else {
         widget.hidden = original.hidden;
+        if (widget.options) widget.options.hidden = original.optionsHidden;
         widget.type = original.type;
         widget.computeSize = original.computeSize;
         widget.draw = original.draw;
