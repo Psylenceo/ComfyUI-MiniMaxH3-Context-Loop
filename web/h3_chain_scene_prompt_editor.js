@@ -1,4 +1,5 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {
     MAX_SHOTS,
@@ -8,7 +9,7 @@ import {
     promptTextToLines,
     promptValueToText,
     sharedPrompt,
-} from "./h3_chain_plan_core.mjs?v=0.6.9";
+} from "./h3_chain_plan_core.mjs?v=0.6.10";
 import {
     PROMPT_ASSIST_DEFAULT_INSTRUCTIONS,
     PROMPT_ASSIST_MODES,
@@ -17,14 +18,14 @@ import {
     makePromptAssistRequest,
     promptSceneKey,
     promptSourceRevision,
-} from "./h3_prompt_assistant_core.mjs?v=0.6.9";
-import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.6.9";
+} from "./h3_prompt_assistant_core.mjs?v=0.6.10";
+import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.6.10";
 import {
     promptRevisionHelp,
     promptRevisionLabel,
     promptRevisionNavigation,
     promptRevisionTree,
-} from "./h3_prompt_history_core.mjs?v=0.6.9";
+} from "./h3_prompt_history_core.mjs?v=0.6.10";
 import {
     availableReferenceRecords,
     convertTaggedPictureReference,
@@ -32,21 +33,21 @@ import {
     replacePromptReferenceOccurrence,
     taggedPictureReferenceMode,
     taggedPictureReferenceToken,
-} from "./h3_reference_preview_core.mjs?v=0.6.9";
+} from "./h3_reference_preview_core.mjs?v=0.6.10";
 import {
     PromptUndoHistory,
     promptUndoDirection,
     tokenizeRichPrompt,
-} from "./h3_rich_prompt_editor_core.mjs?v=0.6.9";
-import {createPromptCompletionController} from "./h3_prompt_completion_core.mjs?v=0.6.9";
-import {bindPromptMarkerInteractions} from "./h3_prompt_marker_ui.mjs?v=0.6.9";
-import {isWorkflowSaveShortcut, promptEditorRichText} from "./h3_prompt_editor_settings_core.mjs?v=0.6.9";
+} from "./h3_rich_prompt_editor_core.mjs?v=0.6.10";
+import {createPromptCompletionController} from "./h3_prompt_completion_core.mjs?v=0.6.10";
+import {bindPromptMarkerInteractions} from "./h3_prompt_marker_ui.mjs?v=0.6.10";
+import {isWorkflowSaveShortcut, promptEditorRichText} from "./h3_prompt_editor_settings_core.mjs?v=0.6.10";
 import {promptEditorPreferences} from "./h3_prompt_editor_settings.js";
-import {createH3PromptSchemaController} from "./h3_prompt_schema_ui.mjs?v=0.6.9";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.9";
+import {createH3PromptSchemaController} from "./h3_prompt_schema_ui.mjs?v=0.6.10";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.10";
 import {
     PROJECT_ASSET_CATALOG_CHANGED_EVENT,
-} from "./h3_project_asset_sync_core.mjs?v=0.6.9";
+} from "./h3_project_asset_sync_core.mjs?v=0.6.10";
 
 const {
     publishCompanionScene,
@@ -748,7 +749,7 @@ function mount(node) {
             event.stopPropagation();
         });
     }
-    root.addEventListener("wheel", (event) => event.stopPropagation());
+    bindNodeWheel(root, node, app);
 
     const state = {
         plan: null,

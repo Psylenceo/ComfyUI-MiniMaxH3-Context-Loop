@@ -107,7 +107,36 @@ Model upscale queues only the Carousel and its lazy model-loader dependency. It
 does not launch the downstream H3 generation loop.
 
 Every variant records its parent and transform so the original remains
-available.
+available. The carousel's source-tree column nests a variant under its source
+with an expand/collapse toggle, so the original stays the visible card and its
+edits are one click away rather than mixed into the flat list.
+
+### Re-captured takes and `-vN` tags
+
+Saving another Review Gate capture under a tag that's already in use is
+treated as an updated take of the same subject rather than a plain naming
+collision: `@char_bob` becomes `@char_bob-v1`, then `@char_bob-v2`, and so on.
+The carousel recognizes that `-vN` suffix and collapses same-tag takes of the
+same media kind into a single card showing the latest take, with every take
+still visible together in the detail panel below.
+
+This is a naming convention, not a stored relationship — there is no
+migration, and none is attempted:
+
+- A project with older captures already using the earlier bare-digit scheme
+  (`@char_bob`, `@char_bob1`, `@char_bob2`) keeps them exactly as they are.
+  They are **not** renamed or automatically grouped, because a tag alone
+  can't reliably prove those are actually takes of the same subject rather
+  than a coincidence.
+- A fresh capture reusing that same base tag today only groups with another
+  asset that already uses the exact `@char_bob-vN` pattern — it will not pull
+  in the older bare-digit takes. If you want an older catalog's takes grouped
+  under the new scheme, rename them yourself (Prompt tag field) to add the
+  `-vN` suffix; nothing renames them for you.
+- Two assets never group into the same family unless they're also the same
+  media kind (image/video/audio) — an image tagged `@hero` and an unrelated
+  audio reference that happens to be tagged `@hero-v1` are kept as two
+  separate, ordinary cards.
 
 ## Organize the library
 

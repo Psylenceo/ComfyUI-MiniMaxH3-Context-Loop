@@ -1,4 +1,5 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {
     coupledOutputDimensions,
@@ -8,12 +9,21 @@ import {
     dimensionsForMegapixels,
     formatMegapixels,
     imageMegapixels,
-} from "./h3_project_asset_editor_core.mjs?v=0.6.9";
+} from "./h3_project_asset_editor_core.mjs?v=0.6.10";
 import {
     publishProjectAssetCatalogChanged,
     serializedProjectAssetCatalog,
     serializedProjectAssetIdentity,
-} from "./h3_project_asset_sync_core.mjs?v=0.6.9";
+} from "./h3_project_asset_sync_core.mjs?v=0.6.10";
+import {
+    lineageChildren,
+    lineageFlatten,
+    familyKey,
+    familyGroupKey,
+    assetFamilies,
+    collectChildItems,
+    computeCarouselPlacement,
+} from "./h3_project_asset_carousel_core.mjs?v=0.6.10";
 
 const NODE_NAME = "MiniMaxH3ProjectAssetManager";
 const SEMANTIC_SETTING_WIDGETS = [
@@ -204,19 +214,40 @@ function injectStyles() {
           --h3pa-success:color-mix(in srgb,var(--h3pa-text) 65%,#219653);
           color:var(--h3pa-text)}
         .h3pa-root{box-sizing:border-box;height:100%;min-height:520px;padding:12px;
-          display:flex;flex-direction:column;gap:10px;overflow:hidden;color:var(--h3pa-text);
+          display:grid;grid-template-columns:minmax(220px,280px) minmax(0,1fr);
+          grid-template-areas:"top top" "status status" "tabs tabs" "source stage" "source expanded";
+          grid-template-rows:auto auto auto minmax(0,1fr) auto;gap:10px;overflow:hidden;color:var(--h3pa-text);
           background:var(--h3pa-bg);font:12px/1.35 system-ui}
         .h3pa-root *{box-sizing:border-box}.h3pa-row{display:flex;gap:7px;align-items:center;min-width:0}
+        .h3pa-root>.h3pa-row{grid-area:top}.h3pa-root>.h3pa-status{grid-area:status}.h3pa-root>.h3pa-tabs{grid-area:tabs}
+        .h3pa-source-col{grid-area:source;display:flex;flex-direction:column;gap:8px;min-height:0;overflow:hidden}
+        .h3pa-source-col .h3pa-carousel{flex-direction:column;align-items:stretch;overflow-x:hidden;overflow-y:auto}
+        .h3pa-source-col .h3pa-folder-card,.h3pa-source-col .h3pa-folder-group,
+        .h3pa-source-col .h3pa-tree-node,.h3pa-source-col .h3pa-tree-children{width:100%;flex:0 0 auto}
+        .h3pa-source-col .h3pa-card{width:168px;height:126px;flex:0 0 auto}
+        .h3pa-source-col .h3pa-card img,.h3pa-source-col .h3pa-card .fallback{height:92px}
+        .h3pa-source-col .h3pa-folder-group{flex-direction:column}
+        .h3pa-source-col .h3pa-tree-children{padding-left:12px;margin-left:0}
+        .h3pa-stage-col{grid-area:stage;display:flex;flex-direction:column;gap:8px;min-height:0;overflow:hidden}
         .h3pa-row input,.h3pa-row select,.h3pa-editor input,.h3pa-editor select,.h3pa-editor textarea{
           min-width:0;padding:6px 8px;border:1px solid var(--h3pa-border);border-radius:6px;
           background:var(--h3pa-panel);color:var(--h3pa-text)}.h3pa-project-picker{display:flex;flex:1;min-width:160px}.h3pa-project{flex:1;font-weight:650;border-radius:6px 0 0 6px!important}.h3pa-project-menu{flex:0 0 38px;width:38px;padding:6px 4px!important;border-left:0!important;border-radius:0 6px 6px 0!important;cursor:pointer}
+        @media(max-width:800px){.h3pa-root{grid-template-columns:1fr;grid-template-areas:"top" "status" "tabs" "stage" "source" "expanded"}}
         .h3pa-button{padding:6px 9px;border:1px solid var(--h3pa-border);border-radius:6px;
           background:var(--h3pa-panel);color:var(--h3pa-text);cursor:pointer}.h3pa-button:hover{border-color:var(--h3pa-accent)}
         .h3pa-status{min-height:18px;color:var(--h3pa-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .h3pa-help{display:block;color:var(--h3pa-muted);white-space:normal;line-height:1.35}
         .h3pa-tabs{display:flex;gap:5px;overflow-x:auto;align-items:center;flex:0 0 auto}.h3pa-tab.active{background:var(--h3pa-selected);border-color:var(--h3pa-accent)}
         .h3pa-folder-tools{display:flex;gap:5px;align-items:center;margin-left:auto;padding-left:7px;border-left:1px solid var(--h3pa-border);flex:0 0 auto}.h3pa-folder-tools select{max-width:190px;min-width:110px;padding:6px 8px;border:1px solid var(--h3pa-border);border-radius:6px;background:var(--h3pa-panel);color:var(--h3pa-text)}
-        .h3pa-stage{flex:1 1 auto;min-height:230px;display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:10px;overflow:hidden}
+        .h3pa-stage{flex:1 1 auto;min-height:230px;display:grid;grid-template-columns:minmax(230px,1fr) minmax(230px,260px);gap:10px;overflow:hidden}
+        .h3pa-tree-children{display:flex;flex-direction:column;gap:4px;padding-left:16px;border-left:1px solid color-mix(in srgb,var(--h3pa-border) 60%,transparent);margin-left:8px}
+        .h3pa-tree-node{display:flex;flex-direction:column;gap:4px}
+        .h3pa-tree-toggle{align-self:flex-start;padding:2px 6px!important;border-radius:5px;background:var(--h3pa-soft);color:var(--h3pa-muted);font-size:10px;cursor:pointer;border:1px solid var(--h3pa-border)}
+        .h3pa-family-caption{display:block;margin-top:4px;color:var(--h3pa-muted);font-size:10px}
+        .h3pa-lineage-display{grid-area:expanded;display:flex;flex-direction:column;gap:6px;min-height:0}
+        .h3pa-lineage-display-head{color:var(--h3pa-muted);font-size:11px}
+        .h3pa-lineage-cards{display:flex;gap:8px;overflow-x:auto;padding:4px 1px 7px;min-height:150px}
+        .h3pa-lineage-card{flex:0 0 168px;height:126px}.h3pa-lineage-card img{height:92px}.h3pa-lineage-card .fallback{height:92px}
         .h3pa-preview{position:relative;display:grid;place-items:center;min-width:0;min-height:220px;
           overflow:hidden;border:1px solid var(--h3pa-border);border-radius:9px;background:#090b10;color:#eee}
         .h3pa-preview>img,.h3pa-preview>video{position:absolute;inset:0;display:block;width:100%;height:100%;
@@ -383,6 +414,9 @@ function mount(node) {
     [runNameWidget, catalogWidget, operationWidget].forEach(collapseWidget);
 
     const root = el("div", "h3pa-root");
+    bindNodeWheel(root, node, app);
+    const sourceCol = el("div", "h3pa-source-col");
+    const stageCol = el("div", "h3pa-stage-col");
     const top = el("div", "h3pa-row");
     const runNameInput = el("input", "h3pa-project");
     runNameInput.placeholder = "Run name";
@@ -450,11 +484,33 @@ function mount(node) {
     stage.append(preview, editor);
     const carousel = el("div", "h3pa-carousel");
     carousel.title = "Drop one or more image, video, or audio files here to create project assets immediately.";
-    root.append(top, status, tabs, stage, carousel);
+    const lineageDisplay = el("div", "h3pa-lineage-display");
+    const lineageDisplayHead = el("div", "h3pa-lineage-display-head", "Select a source asset to see it and its edits here.");
+    const lineageCards = el("div", "h3pa-lineage-cards");
+    lineageDisplay.append(lineageDisplayHead, lineageCards);
+    sourceCol.append(carousel);
+    stageCol.append(stage);
+    root.append(top, status, tabs, sourceCol, stageCol, lineageDisplay);
     const dom = node.addDOMWidget("project_asset_carousel", "div", root, {
         serialize: false, hideOnZoom: false, getMinHeight: () => 560,
     });
     dom.serialize = false;
+    // ComfyUI's DOM widget only ever reports minWidth:0 from its default
+    // computeLayoutSize, so a node built around one has no horizontal resize
+    // floor unless a widget overrides computeLayoutSize itself to report one
+    // (LGraphNode.computeSize adds a widget's minWidth into the node's own
+    // minimum). Mirror the CSS floors above: .h3pa-source-col's minmax(220px,...)
+    // plus .h3pa-stage's two minmax(230px,...) columns (230 is also
+    // .h3pa-stage's own min-height — the floor the preview/editor row can be
+    // resized to vertically, reused here as the shared horizontal floor for
+    // both columns), plus the root's gaps and padding.
+    const H3PA_SOURCE_MIN_WIDTH = 220;
+    const H3PA_PANEL_MIN_WIDTH = 230;
+    const H3PA_ROOT_GAP = 10;
+    const H3PA_ROOT_PADDING = 12;
+    const H3PA_MIN_NODE_WIDTH = (H3PA_ROOT_PADDING * 2) + H3PA_SOURCE_MIN_WIDTH
+        + H3PA_ROOT_GAP + (H3PA_PANEL_MIN_WIDTH * 2) + H3PA_ROOT_GAP;
+    dom.computeLayoutSize = () => ({minHeight: 560, minWidth: H3PA_MIN_NODE_WIDTH});
     node.setSize?.([Math.max(node.size?.[0] ?? 680, 760), Math.max(node.size?.[1] ?? 650, 700)]);
 
     const savedCatalog = serializedProjectAssetCatalog(
@@ -468,6 +524,7 @@ function mount(node) {
         expandedFolders: new Set(Array.isArray(
             node.properties?.h3_project_asset_expanded_folders,
         ) ? node.properties.h3_project_asset_expanded_folders.map(String) : []),
+        expandedLineage: new Set(),
         previewMode: previewSelect.value === "full" ? "full" : "light",
     };
     const project = () => String(runNameInput.value || "").trim();
@@ -589,6 +646,12 @@ function mount(node) {
     }
     function filteredAssets() {
         return allItems().filter((asset) => matchesTab(asset, state.filter));
+    }
+    function setLineageExpanded(assetId, expanded) {
+        const id = String(assetId ?? "");
+        if (!id) return;
+        if (expanded) state.expandedLineage.add(id);
+        else state.expandedLineage.delete(id);
     }
     function renderTabs() {
         tabs.replaceChildren();
@@ -1823,66 +1886,98 @@ function mount(node) {
         });
         return card;
     }
+    function renderChildItem(item, byParent, folderMember, hoisted, stacksByAttach) {
+        return item.type === "family"
+            ? familyStack(item.members, byParent, hoisted, stacksByAttach)
+            : renderTreeNode(item.asset, byParent, folderMember, hoisted, stacksByAttach);
+    }
+    function renderTreeNode(asset, byParent, folderMember = false, hoisted = new Set(), stacksByAttach = new Map()) {
+        const wrapper = el("div", "h3pa-tree-node");
+        wrapper.append(assetCard(asset, folderMember));
+        const items = collectChildItems([asset], byParent, hoisted, stacksByAttach);
+        if (items.length) {
+            const expanded = state.expandedLineage.has(String(asset.id));
+            const toggle = button(
+                `${expanded ? "▾" : "▸"} ${items.length} edit${items.length === 1 ? "" : "s"}`,
+                () => { setLineageExpanded(asset.id, !expanded); render(); },
+                "Show crops and edits made from this asset",
+            );
+            toggle.classList.add("h3pa-tree-toggle");
+            wrapper.append(toggle);
+            if (expanded) {
+                const nested = el("div", "h3pa-tree-children");
+                for (const item of items) {
+                    nested.append(renderChildItem(item, byParent, folderMember, hoisted, stacksByAttach));
+                }
+                wrapper.append(nested);
+            }
+        }
+        return wrapper;
+    }
+    function familyStack(members, byParent, hoisted, stacksByAttach) {
+        const latest = members[members.length - 1];
+        const wrapper = el("div", "h3pa-tree-node h3pa-family-stack");
+        wrapper.append(assetCard(latest));
+        // Crops/edits (and further nested families) can hang off any version
+        // in the family, not just the latest one shown here — union them all
+        // so the toggle surfaces everything in the family, not only whatever
+        // happens to have been cropped from the newest version.
+        const items = collectChildItems(members, byParent, hoisted, stacksByAttach);
+        if (items.length) {
+            const toggleKey = String(latest.id);
+            const expanded = state.expandedLineage.has(toggleKey);
+            const toggle = button(
+                `${expanded ? "▾" : "▸"} ${items.length} edit${items.length === 1 ? "" : "s"}`,
+                () => { setLineageExpanded(toggleKey, !expanded); render(); },
+                "Show crops and edits made from any version in this family",
+            );
+            toggle.classList.add("h3pa-tree-toggle");
+            wrapper.append(toggle);
+            if (expanded) {
+                const nested = el("div", "h3pa-tree-children");
+                for (const item of items) {
+                    nested.append(renderChildItem(item, byParent, false, hoisted, stacksByAttach));
+                }
+                wrapper.append(nested);
+            }
+        }
+        wrapper.append(el(
+            "span", "h3pa-family-caption",
+            `${familyKey(latest)} · latest of ${members.length} version${members.length === 1 ? "" : "s"}`,
+        ));
+        return wrapper;
+    }
     function renderCarousel() {
         carousel.replaceChildren();
         const assets = filteredAssets();
         if (!assets.some((asset) => asset.id === state.selected)) {
             state.selected = assets[0]?.id ?? "";
         }
-        const folders = state.catalog.folders ?? [];
-        const folderById = new Map(folders.map(
-            (folder) => [String(folder.id), folder],
-        ));
-        const allMembers = new Map(folders.map(
-            (folder) => [String(folder.id), []],
-        ));
-        for (const asset of state.catalog.assets ?? []) {
-            const members = allMembers.get(String(asset.folder_id ?? ""));
-            if (members) members.push(asset);
-        }
-        const visibleMembers = new Map(folders.map(
-            (folder) => [String(folder.id), []],
-        ));
-        for (const asset of assets) {
-            const members = visibleMembers.get(String(asset.folder_id ?? ""));
-            if (members && !asset._unresolved) members.push(asset);
-        }
-        const renderedFolders = new Set();
-        let renderedItems = 0;
-        for (const asset of assets) {
-            const folder = !asset._unresolved
-                ? folderById.get(String(asset.folder_id ?? "")) : null;
-            if (!folder) {
-                carousel.append(assetCard(asset));
-                renderedItems += 1;
+        const plan = computeCarouselPlacement(
+            assets, state.catalog.assets ?? [], state.catalog.folders ?? [], state.filter,
+        );
+        for (const slot of plan.slots) {
+            if (slot.type === "family") {
+                carousel.append(familyStack(slot.members, plan.byParent, plan.hoisted, plan.stacksByAttach));
                 continue;
             }
-            const folderId = String(folder.id);
-            if (renderedFolders.has(folderId)) continue;
-            renderedFolders.add(folderId);
-            const members = visibleMembers.get(folderId) ?? [];
+            if (slot.type === "asset") {
+                carousel.append(renderTreeNode(slot.asset, plan.byParent, false, plan.hoisted, plan.stacksByAttach));
+                continue;
+            }
+            const folderId = String(slot.folder.id);
             const group = el("div", "h3pa-folder-group");
             const expanded = state.expandedFolders.has(folderId);
             group.classList.toggle("expanded", expanded);
-            group.append(folderCard(
-                folder, members, (allMembers.get(folderId) ?? []).length,
-            ));
+            group.append(folderCard(slot.folder, slot.members, slot.totalCount));
             if (expanded) {
-                for (const member of members) group.append(assetCard(member, true));
+                for (const member of slot.members) {
+                    group.append(renderTreeNode(member, plan.byParent, true, plan.hoisted, plan.stacksByAttach));
+                }
             }
             carousel.append(group);
-            renderedItems += 1;
         }
-        if (state.filter === "all") {
-            for (const folder of folders) {
-                if (renderedFolders.has(String(folder.id))) continue;
-                const group = el("div", "h3pa-folder-group");
-                group.append(folderCard(folder, [], 0));
-                carousel.append(group);
-                renderedItems += 1;
-            }
-        }
-        if (!renderedItems) {
+        if (!plan.slots.length) {
             carousel.append(el(
                 "div", "h3pa-carousel-empty",
                 "Drop image, video, or audio files here, or use Upload / Import.",
@@ -1904,6 +1999,45 @@ function mount(node) {
         renderTabs(); renderFolders(); renderCarousel();
         const selected = allItems().find((asset) => asset.id === state.selected);
         renderPreview(selected); renderEditor(selected);
+        renderLineageDisplay(selected);
+    }
+    function renderLineageDisplay(selected) {
+        lineageCards.replaceChildren();
+        if (!selected || selected._unresolved) {
+            lineageDisplayHead.textContent = "Select a source asset to see it and its edits here.";
+            return;
+        }
+        const byParent = lineageChildren(state.catalog.assets ?? []);
+        // Flatten from the selected asset itself (not its ultimate ancestor)
+        // so selecting a middle node in a crop chain shows only its own
+        // sub-tree of edits, not the whole family's unrelated branches.
+        const editList = lineageFlatten(selected, byParent);
+        const families = assetFamilies(state.catalog.assets ?? []);
+        const versionList = families.get(familyGroupKey(selected)) ?? [selected];
+        const seen = new Set();
+        const ordered = [];
+        for (const asset of [...versionList, ...editList]) {
+            if (seen.has(asset.id)) continue;
+            seen.add(asset.id);
+            ordered.push(asset);
+        }
+        const editCount = editList.length - 1;
+        const versionCount = versionList.length - 1;
+        if (editCount > 0 && versionCount > 0) {
+            lineageDisplayHead.textContent = `${promptTag(selected)} · ${versionCount} version${versionCount === 1 ? "" : "s"}, ${editCount} edit${editCount === 1 ? "" : "s"}`;
+        } else if (versionCount > 0) {
+            lineageDisplayHead.textContent = `${familyKey(selected)} and ${versionCount} version${versionCount === 1 ? "" : "s"}`;
+        } else if (editCount > 0) {
+            lineageDisplayHead.textContent = `${promptTag(selected)} and ${editCount} derived edit${editCount === 1 ? "" : "s"}`;
+        } else {
+            lineageDisplayHead.textContent = `${promptTag(selected)} has no crops or edits yet`;
+        }
+        for (const asset of ordered) {
+            const card = assetCard(asset);
+            card.classList.add("h3pa-lineage-card");
+            card.draggable = false;
+            lineageCards.append(card);
+        }
     }
     function restoreConfiguredProjectIdentity() {
         const configuredProject = serializedProjectAssetIdentity(

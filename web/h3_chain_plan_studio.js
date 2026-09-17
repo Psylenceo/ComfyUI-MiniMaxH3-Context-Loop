@@ -1,6 +1,7 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
-import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.6.9";
+import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.6.10";
 import {
     CONTINUATION_MODES,
     FPS,
@@ -54,18 +55,18 @@ import {
     visualContextDefaultPartition,
     visualContextMaximumBlocks,
     visualContextPartitionFromBoundaries,
-} from "./h3_chain_plan_core.mjs?v=0.6.9";
+} from "./h3_chain_plan_core.mjs?v=0.6.10";
 import {
     promptRevisionHelp,
     promptRevisionLabel,
     promptRevisionNavigation,
-} from "./h3_prompt_history_core.mjs?v=0.6.9";
+} from "./h3_prompt_history_core.mjs?v=0.6.10";
 import {
     availableReferenceRecords,
     convertTaggedPictureReference,
     taggedPictureReferenceMode,
     taggedPictureReferenceToken,
-} from "./h3_reference_preview_core.mjs?v=0.6.9";
+} from "./h3_reference_preview_core.mjs?v=0.6.10";
 import {
     applySceneAudioOverride,
     applySceneLipSync,
@@ -76,16 +77,16 @@ import {
     sceneAudioPolicy,
     sceneTransitionPreset,
     transitionPresetLabel,
-} from "./h3_policy_core.mjs?v=0.6.9";
+} from "./h3_policy_core.mjs?v=0.6.10";
 import {
     resolveAudioContextLength,
     resolveAudioPolicy,
     resolveTransitionPolicy,
-} from "./h3_socket_presentation_core.mjs?v=0.6.9";
+} from "./h3_socket_presentation_core.mjs?v=0.6.10";
 import {
     availableLoRARoutes,
     loraRouteLabel,
-} from "./h3_lora_scheduler_core.mjs?v=0.6.9";
+} from "./h3_lora_scheduler_core.mjs?v=0.6.10";
 import {
     h3StudioGridMarkers,
     locateStudioTimelineSegment,
@@ -116,8 +117,8 @@ import {
     studioRulerTicks,
     studioWaveformIntervalSamples,
     timedLyricAtSecond,
-} from "./h3_chain_plan_studio_core.mjs?v=0.6.9";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.9";
+} from "./h3_chain_plan_studio_core.mjs?v=0.6.10";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.10";
 
 const {
     connectedPromptEditors,
@@ -644,7 +645,7 @@ function mount(node) {
     for (const name of ["pointerdown","pointerup","mousedown","mouseup","click","dblclick"]) {
         root.addEventListener(name, (event) => event.stopPropagation());
     }
-    root.addEventListener("wheel", (event) => event.stopPropagation());
+    bindNodeWheel(root, node, app);
 
     const state = {
         plan:null, planNode:null, planOwner:null, planWidget:null,
@@ -1533,7 +1534,9 @@ function mount(node) {
                 || Boolean(state.checkpointSignature) || Boolean(state.checkpointError);
             state.checkpoints = new Map(); state.checkpointSignature = "";
             state.checkpointError = "";
-            if (changed) { refreshTimelineCheckpoints(); renderStatus(); }
+            if (changed || (state.trimRefreshPending && !state.timelineDragging)) {
+                refreshTimelineCheckpoints(); refreshSceneTrimControls(); renderStatus();
+            }
             return;
         }
         let editorialChanged = false;
@@ -1541,7 +1544,7 @@ function mount(node) {
             const query = new URLSearchParams({
                 run_name:currentRun, include_graph:"false",
             });
-            const response = await api.fetchApi(`/minimax_h3_context_loop/checkpoints?${query.toString()}`);
+            const response = await api.fetchApi(`/minimax_h3_context_loop/checkpoints?${query.toString()}`, {cache:"no-store"});
             const payload = await response.json();
             if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
             if (state.disposed || token !== state.checkpointToken || currentRun !== runName()) return;
@@ -1554,8 +1557,10 @@ function mount(node) {
             const recoveredFromError = Boolean(state.checkpointError);
             state.checkpointError = "";
             if (signature === state.checkpointSignature) {
+                if (state.trimRefreshPending && !state.timelineDragging) refreshTimelineCheckpoints();
                 if (editorialChanged) {
                     renderStatus(); renderTimeline();
+                    refreshSceneTrimControls();
                     if (["player", "subtitles"].includes(state.view)) renderPanel();
                 }
                 if (recoveredFromError) renderStatus();
@@ -1571,6 +1576,7 @@ function mount(node) {
         }
         if (editorialChanged) renderTimeline();
         else refreshTimelineCheckpoints();
+        refreshSceneTrimControls();
         renderStatus();
         if (state.view === "context") renderPanel();
         if (editorialChanged && ["player", "subtitles"].includes(state.view)) {
@@ -2115,12 +2121,53 @@ function mount(node) {
         }
     }
 
+    function syncTimelineTrimControls(card, index, checkpoint) {
+        const ready = Boolean(checkpoint?.ready);
+        const current = card.querySelector(".h3studio-resize-handle");
+        if (current && current.classList.contains("h3studio-latent-trim") === ready) return;
+        // Keep pointer capture until release; the next existing poll retries.
+        if (state.timelineDragging) {
+            state.trimRefreshPending = true;
+            return;
+        }
+        const handle = element("span", "h3studio-resize-handle");
+        if (ready) {
+            handle.classList.add("h3studio-latent-trim");
+            enableSceneLatentTrimDrag(card, handle, index);
+        } else {
+            enableSceneDurationDrag(card, handle, index);
+        }
+        if (current) current.replaceWith(handle);
+        else card.append(handle);
+    }
+
+    function refreshSceneTrimControls(
+        usedEnd = state.panelHost?.querySelector(".h3studio-used-end"),
+        resetUsedEnd = state.panelHost?.querySelector(".h3studio-reset-used-end"),
+    ) {
+        if (!usedEnd || !resetUsedEnd) return;
+        const row = timing().shots[state.active];
+        const checkpoint = matchingStudioCheckpoint(state.checkpoints, state.active, row);
+        const locked = sceneLocked(state.active);
+        usedEnd.disabled = !checkpoint?.ready || locked;
+        usedEnd.title = locked
+            ? "Scene locked · unlock it before changing the used endpoint"
+            : checkpoint?.ready
+                ? "Non-destructive editorial endpoint. Only boundaries shared by the sampled H3 video latent and delivered 40 Hz audio grid are offered. The full checkpoint remains available, while assembly and the next scene use this endpoint."
+                : "Generate this scene first; latent-safe endpoint editing uses its saved checkpoint.";
+        const trim = trimForScene(state.active);
+        const full = Number(row?.deliveredFrames) || 0;
+        resetUsedEnd.disabled = usedEnd.disabled
+            || ((Number(trim?.out_frame) || full) === full);
+    }
+
     function updateTimelineCheckpointCard(card, index, result = timing()) {
         if (!card) return;
         const row = result.shots[index];
         const checkpoint = matchingStudioCheckpoint(
             state.checkpoints, index, row,
         );
+        syncTimelineTrimControls(card, index, checkpoint);
         card.classList.toggle("h3studio-rendered", Boolean(checkpoint?.ready));
         card.classList.toggle(
             "h3studio-alternate-selected",
@@ -2152,6 +2199,7 @@ function mount(node) {
 
     function refreshTimelineCheckpoints() {
         if (!state.timelineHost || !state.plan) return;
+        if (!state.timelineDragging) state.trimRefreshPending = false;
         const result = timing();
         for (const card of state.timelineHost.querySelectorAll(
             ".h3studio-card[data-scene-index]",
@@ -2365,14 +2413,12 @@ function mount(node) {
         handle.addEventListener("pointerdown", (event) => {
             if (event.button !== 0 || sceneLocked(index) || !options.length) return;
             event.preventDefault(); event.stopPropagation();
-            const model = timelineModel();
-            const contentWidth = Math.max(
-                1, Number(state.timelineContent?.dataset.timelineWidth)
-                    || state.timelineContent?.clientWidth || 1,
-            );
-            const secondsPerPixel = model.totalSeconds / contentWidth;
             const originX = event.clientX;
-            const originWidth = card.getBoundingClientRect().width;
+            // Pointer coordinates include canvas zoom; CSS widths do not.
+            const screenWidth = Math.max(1, card.getBoundingClientRect().width);
+            const originalWidth = card.style.getPropertyValue("--h3-scene-width");
+            const layoutWidth = parseFloat(originalWidth) || card.offsetWidth;
+            const framesPerPixel = currentOut / screenWidth;
             let targetOut = currentOut;
             let moved = false;
             state.timelineDragging = true;
@@ -2383,11 +2429,11 @@ function mount(node) {
                 if (!moved) return;
                 targetOut = studioNearestLatentSafeOutFrame(
                     row.rawFrames, fullFrames,
-                    currentOut + deltaX * secondsPerPixel * FPS,
+                    currentOut + deltaX * framesPerPixel,
                 );
                 card.style.setProperty(
                     "--h3-scene-width",
-                    `${targetOut / FPS / secondsPerPixel}px`,
+                    `${layoutWidth * targetOut / currentOut}px`,
                 );
                 handle.title = `${targetOut}/${fullFrames} frames used · ${(targetOut / FPS).toFixed(3)}s · full sampled checkpoint retained`;
             };
@@ -2398,8 +2444,8 @@ function mount(node) {
                 handle.releasePointerCapture?.(upEvent.pointerId);
                 state.timelineDragging = false;
                 handle.title = defaultTitle;
-                card.style.setProperty("--h3-scene-width", `${originWidth}px`);
-                if (moved && targetOut !== currentOut) {
+                card.style.setProperty("--h3-scene-width", originalWidth);
+                if (upEvent.type !== "pointercancel" && moved && targetOut !== currentOut) {
                     setSceneTrim(index, targetOut);
                 }
             };
@@ -2488,20 +2534,11 @@ function mount(node) {
             lockIcon.setAttribute("aria-hidden", "true");
             lockHandle.append(lockIcon);
             lockHandle.addEventListener("pointerdown", (event) => event.stopPropagation());
-            const resizeHandle = element("span", "h3studio-resize-handle");
-            if (checkpoint?.ready) {
-                resizeHandle.classList.add("h3studio-latent-trim");
-                enableSceneLatentTrimDrag(card, resizeHandle, index);
-            } else {
-                resizeHandle.title = locked
-                    ? "Scene locked · unlock it before changing its length"
-                    : "Resize generated length · snaps to H3's 17n+5 frame grid";
-                enableSceneDurationDrag(card, resizeHandle, index);
-            }
             card.append(
-                copy, dragHandle, lockHandle, resizeHandle,
+                copy, dragHandle, lockHandle,
                 element("span", "h3studio-render-dot"),
             );
+            syncTimelineTrimControls(card, index, checkpoint);
             host.append(card);
         }
         appendTimelineGap(host, trailingGapSegment(), true);
@@ -3281,7 +3318,7 @@ function mount(node) {
         );
         const sceneStartWrap = element("span", "h3studio-length");
         sceneStartWrap.append(sceneStart, resetStart);
-        const usedEnd = element("select");
+        const usedEnd = element("select", "h3studio-used-end");
         for (const frame of studioLatentSafeOutFrames(
             row.rawFrames, row.deliveredFrames,
         )) {
@@ -3295,10 +3332,6 @@ function mount(node) {
             usedEnd.append(option);
         }
         usedEnd.value = String(usedFrames);
-        usedEnd.disabled = !checkpoint?.ready || timelineLocked;
-        usedEnd.title = checkpoint?.ready
-            ? "Non-destructive editorial endpoint. Only boundaries shared by the sampled H3 video latent and delivered 40 Hz audio grid are offered. The full checkpoint remains available, while assembly and the next scene use this endpoint."
-            : "Generate this scene first; latent-safe endpoint editing uses its saved checkpoint.";
         usedEnd.addEventListener("change", () => {
             setSceneTrim(state.active, Number(usedEnd.value));
         });
@@ -3306,8 +3339,8 @@ function mount(node) {
             "Full", "Use the complete generated checkpoint",
             () => setSceneTrim(state.active, row.deliveredFrames),
         );
-        resetUsedEnd.disabled = !checkpoint?.ready || timelineLocked
-            || usedFrames === Number(row.deliveredFrames);
+        resetUsedEnd.classList.add("h3studio-reset-used-end");
+        refreshSceneTrimControls(usedEnd, resetUsedEnd);
         const usedEndWrap = element("span", "h3studio-length");
         usedEndWrap.append(usedEnd, resetUsedEnd);
         const sceneLockControl = button(

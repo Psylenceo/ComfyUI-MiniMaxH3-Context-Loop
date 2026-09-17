@@ -3,7 +3,22 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
-## Unreleased
+## v0.6.10 — Checkpoint recovery and Plan editing fixes
+
+- Fix #72's expanded visual-context recovery on resume. Preserve the exact
+  saved prefix when selecting a larger context window from an existing scene,
+  without rewriting its checkpoint or regenerating earlier scenes.
+- Fix #65's deferred Carousel reference recovery and add a saved upscale
+  loader for workflows that reuse the recorded reference setup.
+- Add persistent scene collapse controls to the base Plan editors (#69).
+- Preserve valid saved scene reattribution when context sources are unchanged.
+  Speed up checkpoint assignment and add previewed obsolete-path cleanup that
+  keeps reattached clips and shared artifacts.
+- Correct Plan Studio trim dragging on a zoomed canvas. Refresh trim handles
+  and the used-end controls when checkpoints arrive, without rebuilding the
+  prompt editor or losing its unsaved text, selection, or scroll position.
+  The remaining disabled-trim report in #68 is still under investigation.
+- Refresh browser helper cache tokens for the patch release.
 
 - Add #66's opt-in Assemble checkpoint cleanup (off by default). After a
   completed export and requested copies are safely saved, delete only its

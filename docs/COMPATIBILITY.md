@@ -111,6 +111,21 @@ anchors to the already constructed continuation guides.
 Keep Spectrum and other step-skipping systems disabled for baseline continuity
 tests. KJ preview bridging is scoped to the active loop.
 
+## Mouse wheel over embedded editors
+
+On the legacy canvas, hovering an unselected H3 panel passes wheel input to
+ComfyUI's canvas navigation, using its zoom/pan settings. Select the node or
+focus a control inside it to scroll the panel instead. Hand mode still gives
+the wheel to the canvas, even if an editor had focus.
+
+Studio's Ctrl/Cmd-wheel timeline zoom and Shift-wheel horizontal scroll remain
+available while its node is selected or focused. This is UI-only: no workflow,
+Plan, or project data is changed by routing wheel input.
+
+The Vue/Nodes 2.0 renderer retains ComfyUI's own ancestor wheel-capture policy.
+Focused H3 controls advertise native wheel capture there, but canvas gestures
+handled first by the host renderer retain priority.
+
 ## Legacy widget widths
 
 While any Context Loop node is present on a legacy LiteGraph canvas, the pack

@@ -81,9 +81,9 @@ async function browserChecks() {
                     this.id = graph._nodes.length + 1; this.type = this.comfyClass = type;
                     this.graph = graph; this.inputs = []; this.size = [920, 860];
                     this.properties = saved?.properties ?? {execution_marker:"keep", h3_chain_plan_layout:{
-                        promptHeights:{"scene:one":224}, advanced:true, settingsOpen:false}};
+                        promptHeights:{"scene:one":224, shared:144}, advanced:true, settingsOpen:false}};
                     this.widgets = Object.entries({
-                        plan_json:saved?.plan ?? JSON.stringify({shots:[
+                        plan_json:saved?.plan ?? JSON.stringify({prompt_prefix:["Shared identity.", "", "Keep @reference."], shots:[
                             {id:"one", prompt:["First scene.", "Keep this text."], length:22, seed:"18446744073709551615"},
                             {id:"two", prompt:["Second scene."], length:22, seed:"42"},
                             {id:"three", prompt:["Third scene."], length:22, seed:"43"},
@@ -114,6 +114,30 @@ async function browserChecks() {
             const authored = plan(), statePlan = JSON.stringify(node._h3ChainEditor.plan);
             const oldSize = JSON.stringify(node.size), oldRequests = requests;
             const first = cards()[0], textarea = first.querySelector(".h3c-prompt");
+            const prefix = node.root.querySelector(".h3c-prefix");
+            const prefixBody = () => node.root.querySelector(".h3c-prefix-body");
+            const prefixToggle = () => node.root.querySelector(".h3c-prefix-collapse");
+            check(prefixToggle() && !prefixBody().hidden, type + ": global prompt starts expanded");
+            check(prefixToggle().textContent === "▾" && prefixToggle().getAttribute("aria-expanded") === "true",
+                "Global prompt starts with an accessible expanded triangle");
+            prefixToggle().click();
+            check(prefixBody().hidden && prefixBody().getBoundingClientRect().height === 0,
+                "Global prompt and its tools collapse");
+            check(prefixToggle().textContent === "▸" && prefixToggle().getAttribute("aria-expanded") === "false"
+                && prefixToggle().getAttribute("aria-label") === "Expand global prompt", "Accessible collapsed global prompt");
+            check(layout().sharedPromptCollapsed === true && collapsed().length === 0,
+                "Global collapse is saved separately from scenes");
+            check(node.root.querySelector(".h3c-prefix-head").getBoundingClientRect().height > 0,
+                "Global prompt heading stays visible");
+            prefixToggle().click();
+            check(!prefixBody().hidden && node.root.querySelector(".h3c-prefix") === prefix,
+                "Expanding preserves the same editor");
+            check(prefix.value === "Shared identity.\n\nKeep @reference.", "Global prompt text remains intact");
+            prefixToggle().click();
+            await wait(40);
+            check(layout().promptHeights.shared === 144, "Hiding the prompt does not overwrite its saved height");
+            check(graph._nodes.filter(other => other !== node && other.root?.isConnected).every(other =>
+                other.root.querySelector(".h3c-prefix-body").hidden === false), "Global collapse is local to this node");
             first.querySelector(".h3c-collapse").click();
             check(collapsed().length === 1 && collapsed()[0] === first, "Only chosen scene collapses");
             check(first.querySelector(".h3c-card-body").getBoundingClientRect().height === 0, "Collapsed body is hidden");
@@ -122,6 +146,7 @@ async function browserChecks() {
             check(layout().collapsedScenes.one === true, "State lives in workflow properties");
             click("Collapse all"); check(collapsed().length === 3, "Collapse all");
             click("Expand all"); check(collapsed().length === 0, "Expand all");
+            check(prefixBody().hidden, "Scene bulk controls leave the global prompt state alone");
             check(graph._nodes.filter(other => other !== node && other.root?.isConnected).every(other =>
                 [...other.root.querySelectorAll(".h3c-card-body")].every(body => body.hidden)), "Bulk action is local to this Plan node");
             check(cards()[0] === first && cards()[0].querySelector(".h3c-prompt") === textarea, "No editor rebuild on toggles");
@@ -135,12 +160,20 @@ async function browserChecks() {
             node = new Node(saved); node.onNodeCreated(); node.onConfigure();
             await waitFor(() => node.root?.querySelectorAll(".h3c-card").length === 3);
             check(collapsed().length === 1 && collapsed()[0].querySelector(".h3c-id").value === "one", "Collapsed state survives workflow reload");
+            check(prefixBody().hidden && prefixToggle().getAttribute("aria-expanded") === "false",
+                "Global prompt collapse survives workflow reload");
+            prefixToggle().click();
+            check(node.root.querySelector(".h3c-prefix").value === prefix.value
+                && node.root.querySelector(".h3c-prefix").style.height === "144px",
+                "Global prompt contents and height survive reload");
+            prefixToggle().click();
             check(plan() === authored, "Reload preserves generation JSON");
             // Rename and reorder keep the state attached to the same scene.
             input(cards()[0].querySelector(".h3c-id"), "renamed");
             check(layout().collapsedScenes.renamed === true && !layout().collapsedScenes.one, "Rename transfers collapse state");
             click("↓", cards()[0]);
             check(collapsed().length === 1 && collapsed()[0] === cards()[1], "Reorder follows scene ID, not row number");
+            check(prefixBody().hidden, "Global prompt stays collapsed after editor rerender");
             click("Duplicate", cards()[1]);
             check(cards().length === 4 && !cards()[2].querySelector(".h3c-card-body").hidden, "New duplicate starts expanded");
             check(cards()[2].querySelector(".h3c-prompt").value.includes("Keep this text."), "Duplicate keeps prompt");
@@ -149,10 +182,17 @@ async function browserChecks() {
             click("Collapse all");
             check(collapsed().length === 3, "Bulk controls still work after edits");
             // Existing-node configure must use the newly restored properties too.
-            node.properties = {...node.properties, h3_chain_plan_layout:{...layout(), collapsedScenes:{}}};
+            node.properties = {...node.properties, h3_chain_plan_layout:{...layout(), collapsedScenes:{}, sharedPromptCollapsed:false}};
             node.onConfigure();
             await waitFor(() => collapsed().length === 0);
             check(collapsed().length === 0, "Configure restores expanded state without stale UI");
+            check(!prefixBody().hidden && prefixToggle().getAttribute("aria-expanded") === "true",
+                "Configure restores global prompt state without stale UI");
+            input(node.root.querySelector(".h3c-prefix"), "Edited global prompt.");
+            const edited = plan();
+            prefixToggle().click(); prefixToggle().click();
+            check(plan() === edited && node.root.querySelector(".h3c-prefix").value === "Edited global prompt.",
+                "Collapse never reverts an edited global prompt");
             click("Collapse all");
             node.root.scrollTop = 0;
         }

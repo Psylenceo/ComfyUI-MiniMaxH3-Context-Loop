@@ -40,9 +40,11 @@ class CaptureTests(unittest.TestCase):
     def test_capture_pixels_and_numbered_takes(self):
         first = self.capture()
         second = self.capture()
-        third = self.capture(tag="hero1")
+        # Request the exact tag the previous auto-versioned capture just
+        # took, to exercise a collision against a "-vN" tag specifically.
+        third = self.capture(tag="hero-v1")
         self.assertEqual([x["asset"]["tag"] for x in (first, second, third)],
-                         ["hero", "hero1", "hero2"])
+                         ["hero", "hero-v1", "hero-v2"])
         path = self.store.asset("episode", first["asset"]["id"])[1]
         with Image.open(path) as image:
             self.assertEqual(image.size, (64, 48))
@@ -135,12 +137,12 @@ class CaptureTests(unittest.TestCase):
                 results = list(pool.map(lambda _: self.capture(), range(12)))
         self.assertEqual(len(self.store.load("episode")["assets"]), 13)
         self.assertEqual({r["asset"]["tag"] for r in results},
-                         {"hero%d" % n for n in range(1, 13)})
+                         {"hero-v%d" % n for n in range(1, 13)})
 
     def test_capture_tag_does_not_collide_with_disabled_asset(self):
         first = self.capture()
         self.store.update("episode", first["asset"]["id"], {"enabled": False})
-        self.assertEqual(self.capture()["asset"]["tag"], "hero1")
+        self.assertEqual(self.capture()["asset"]["tag"], "hero-v1")
 
     def test_tag_lookup_does_not_create_projects(self):
         class Request:
