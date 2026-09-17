@@ -4,6 +4,12 @@ Newest first. This file keeps release history out of the onboarding README.
 
 ## Unreleased — Deferred checkpoint upscaling
 
+- Nightly: experimental SelfLift support for the connected RES4LYF ClownSampler
+  **Radau IA 2s** with eta=0. Complete the low pass before lifting, evaluate its
+  clean boundary once, and preserve the actual audio state. Use separate,
+  resumable Radau takes while retaining existing Euler behavior and saved hunts.
+  No ComfyUI/RES4LYF patches or user-workflow changes.
+
 - Nightly: paint a fixed **Weaken context** mask on individual Plan Studio
   picture blocks in Masked AV, Feathered AV and Audio Feather AV. Adjust release
   strength, brush size/softness, erase or reset; masks persist in Plans, saved

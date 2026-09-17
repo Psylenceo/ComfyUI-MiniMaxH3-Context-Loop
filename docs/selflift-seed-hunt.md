@@ -4,8 +4,9 @@ Use **MiniMax H3 SelfLift Seed Hunt** in place of the Chain SelfLift Sampler,
 or open the dedicated **Ref2V Studio SelfLift Seed Hunt** example. Existing
 workflows and the ordinary Review Gate are unchanged.
 
-1. Enable SelfLift Project and select its learned H3 upscaler. Keep Euler and
-   the same total/high-step split used by ordinary SelfLift.
+1. Enable SelfLift Project and select its learned H3 upscaler. Use Euler
+   (the default) or the experimental Radau setup below, with the same
+   total/high-step split used by ordinary SelfLift.
 2. Install current KJNodes and select `taeh3.safetensors` from `models/vae_approx`.
    The decoder is the same one used by Model Preview Override KJ. The
    [Kijai H3 TAE weights](https://huggingface.co/Kijai/MiniMax-H3-TAE/blob/main/vae_approx/taeh3.safetensors)
@@ -23,6 +24,33 @@ workflows and the ordinary Review Gate are unchanged.
    and Loop End. This records the chosen seed and carries it to later scenes.
    The example already does this. Keep the final Review Gate's candidate count
    at **1**; it reviews the finished result, not another set of expensive hunts.
+
+## Experimental Radau IA 2s
+
+Connect RES4LYF **ClownSampler** to the existing `sampler` input on either
+Chain SelfLift Sampler or Seed Hunt. Select **fully_implicit/radau_ia_2s**
+(not IIA 3s), set **eta = 0**, and keep your BongMath setting. A connected
+ClownSampler Selector takes precedence over the sampler's stored dropdown.
+Keep the existing sigma scheduler, including Beta. The example workflows
+still default to Euler; no new project switch, model or upstream patch is needed.
+
+This first adapter supports the plain ClownSampler setup without separate
+RES4LYF guides, schedule overrides, sampler swaps or free-text extra options.
+H3's own AV masks, locked audio, tagged references and continuation remain on
+the Chain's native paths. The connected Radau sampler is used for both stages.
+
+Radau finishes its low-resolution interval, then one additional low-resolution
+model evaluation creates the clean prediction for lifting and tiny preview.
+Audio keeps its actual noisy boundary state; it is not advanced again with
+Euler. The high pass starts a fresh solver at that same noise level, using the
+existing full-resolution context anchors. Model-call cost is therefore not
+the displayed step count and will be higher than Euler's; quality is experimental.
+
+Radau takes have a distinct handoff format and sampler-settings fingerprint.
+Resume with the same sampler/options. Old Euler takes retain their format and
+identity; switching samplers creates a separate hunt, never converts old takes.
+As with Euler, recovery restarts an unfinished high pass from its saved boundary,
+not from an internal Radau substage.
 
 ## Choosing before the batch finishes
 

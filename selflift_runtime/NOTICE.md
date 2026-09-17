@@ -15,5 +15,8 @@ Local changes: private/lazy loading, no public upstream node registrations,
 no TST or spatial tiling, Chain-owned stage-aware Drift-Control integration,
 native AV/painted-context carry, checkpoint persistence, avoiding a second
 blend of native fractional masks, masked pixel-anchor edge-case repair, and
-a dedicated project-switch workflow. Neither ComfyUI
-core nor installed upstream node packs are modified.
+a dedicated project-switch workflow. The private Radau IA 2s adapter calls
+the user's connected RES4LYF sampler without patching it. It captures the
+completed low-resolution state, evaluates a fresh boundary prediction, and
+uses a separately versioned durable handoff; Euler retains its original path.
+Neither ComfyUI core nor installed upstream node packs are modified.

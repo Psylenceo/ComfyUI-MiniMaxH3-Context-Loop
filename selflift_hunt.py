@@ -166,6 +166,7 @@ class MiniMaxH3SelfLiftSeedHunt:
     FUNCTION = "sample"
     CATEGORY = "sampling/minimax/context_loop"
     DESCRIPTION = ("Experimental SelfLift seed hunt: saves each low-resolution pass before tiny-VAE preview. "
+        "Supports Euler or experimental RES4LYF Radau IA 2s (eta=0). "
         "Choose a take to run only its remaining high-resolution steps. Saved takes survive OOM/restart. "
         "Choose early to finish saving the current candidate, skip the rest and upscale your selection. "
         "Keep seed fixed to resume. Wire selected_state to Segment Save and Review Gate/Loop End. "
@@ -207,7 +208,7 @@ class MiniMaxH3SelfLiftSeedHunt:
         if not 1 <= int(candidate_count) <= 100:
             raise ValueError("SelfLift candidate count must be 1..100.")
         from .selflift_runtime.nodes import progressive_sample, _validate_sampling
-        _validate_sampling(model.get_model_object("model_sampling"), sampler)
+        sampler_contract = _validate_sampling(model.get_model_object("model_sampling"), sampler)
         store = HuntStore(folder_paths.get_output_directory())
         scene = int(state["index"])
         shot = plan["shots"][scene - 1]
@@ -219,6 +220,9 @@ class MiniMaxH3SelfLiftSeedHunt:
                         for s in state.get("segments", [])],
             "recipe": recipe, "seed": str(int(seed)), "cfg": float(cfg),
             "sigmas": sigmas.detach().cpu().tolist(), "batch_name": str(batch_name)}
+        if sampler_contract is not None:
+            # Euler identities remain byte-for-byte compatible with old hunts.
+            contract["sampler_contract"] = sampler_contract
         key = digest(contract)
         with _ACTIVE_LOCK:
             if key in _ACTIVE or key in _CLEANING:
@@ -333,9 +337,12 @@ class MiniMaxH3SelfLiftSeedHunt:
                     "selected": selected["ordinal"], "scene": scene}
             await _work(update, phase="finished")
             notify()
+            status = "SelfLift take %d; seed %s; %d low + %d high steps" % (
+                selected["ordinal"], selected["seed"], total-high, high)
+            if sampler_contract is not None:
+                status += "; experimental Radau IA 2s (+1 low-resolution boundary evaluation)"
             return {"ui": {"h3_selflift_hunt": [key]}, "result": (output,
-                "SelfLift take %d; seed %s; %d low + %d high steps" %
-                (selected["ordinal"], selected["seed"], total-high, high), chosen_state)}
+                status, chosen_state)}
         except BaseException as exc:
             try:
                 await _work(store.update, key, lambda r: r.update(phase="paused", error=str(exc)[:500]))

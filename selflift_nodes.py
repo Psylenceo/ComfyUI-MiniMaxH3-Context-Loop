@@ -101,7 +101,8 @@ class MiniMaxH3ChainSelfLiftSampler:
     CATEGORY = "sampling/minimax/context_loop"
     DESCRIPTION = ("Dedicated experimental Chain sampler, controlled by SelfLift Project. "
                    "Supports native AV masks, source-audio locks, tagged references and guides. "
-                   "SelfLift ON requires Euler and a learned H3 latent upscaler; no TST or spatial tiling.")
+                   "SelfLift ON supports Euler or experimental RES4LYF Radau IA 2s (eta=0), "
+                   "with a learned H3 latent upscaler; no TST or spatial tiling.")
 
     def sample(self, state, model, positive, vae, latent, sampler, sigmas, seed, cfg=1.0, negative=None):
         import comfy.sample
@@ -157,6 +158,9 @@ class MiniMaxH3ChainSelfLiftSampler:
         output[SIGNATURE] = settings_signature(settings)
         status = "SelfLift: %d low-resolution + %d full-resolution steps; native AV masks" % (
             total_steps - high_steps, high_steps)
+        from .selflift_runtime.radau import is_radau
+        if is_radau(sampler):
+            status += "; experimental Radau IA 2s (+1 low-resolution boundary evaluation)"
         _LOG.info(status)
         return output, status
 

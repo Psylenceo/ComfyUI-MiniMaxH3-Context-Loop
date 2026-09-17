@@ -6,7 +6,7 @@ Consistency Lift (arXiv:2609.02036), re-noise it at the transition sigma, and
 finish the schedule at full resolution.
 
 The Chain sampler uses nested H3 AV latents: audio has no spatial dimensions
-and continues through the reused Euler boundary step. This is experimental,
+and continues through the reused Euler boundary step or completed Radau step. This is experimental,
 beyond the paper's image-model evaluation. No upstream nodes are registered.
 """
 
@@ -108,10 +108,16 @@ def _splice_previous_low_tail(low_video, previous_low_carry, prefix_steps):
 def _validate_sampling(model_sampling, sampler):
     if not isinstance(model_sampling, comfy.model_sampling.CONST):
         raise ValueError("SelfLift requires a rectified-flow model")
-    if not isinstance(sampler, comfy.samplers.KSAMPLER) or sampler.sampler_function is not comfy.k_diffusion.sampling.sample_euler:
-        raise ValueError("SelfLift requires the standard Euler sampler")
-    if sampler.extra_options.get("s_churn", 0.0) != 0.0:
-        raise ValueError("SelfLift requires Euler with s_churn=0")
+    if isinstance(sampler, comfy.samplers.KSAMPLER):
+        if sampler.sampler_function is comfy.k_diffusion.sampling.sample_euler:
+            if sampler.extra_options.get("s_churn", 0.0) != 0.0:
+                raise ValueError("SelfLift requires Euler with s_churn=0")
+            return None  # Keep the original Euler handoff and saved-hunt identity.
+        from .radau import is_radau, contract
+        if is_radau(sampler):
+            return contract(sampler)
+    raise ValueError("SelfLift requires the standard Euler sampler or experimental "
+                     "RES4LYF ClownSampler Radau IA 2s (eta=0).")
 
 
 def _validate_schedule(sigmas, transition_step):
@@ -353,7 +359,10 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
         raise ValueError("H3 Chain SelfLift does not enable spatial tiling")
 
     model_sampling = model.get_model_object("model_sampling")
-    _validate_sampling(model_sampling, sampler)
+    sampler_contract = _validate_sampling(model_sampling, sampler)
+    radau_mode = sampler_contract is not None
+    if radau_mode:
+        from . import radau
 
     streams, nested = _streams(comfy.sample.fix_empty_latent_channels(
         model, latent_image["samples"], latent_image.get("downscale_ratio_spacial", None),
@@ -370,11 +379,11 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
     w = max(2, round(W * lowres_scale / 2) * 2)
     low_shape = (b, c, t, h, w) if video else (b, c, h, w)
     logging.debug("[H3 Chain SelfLift two-stage] low_latent=%s target_latent=%s spatial_lift=(%.4f, %.4f) "
-                 "low_nfe=%d high_nfe=%d sigma_prediction=%.8g sigma_resume=%.8g "
+                 "low_steps=%d high_steps=%d sigma_prediction=%.8g sigma_resume=%.8g "
                  "rho=%.4f weights=(%.4f, %.4f) direct_lift=%s pixel_anchor=%s cfg=%.4f mask=%s hires_model=%s",
                  low_shape, tuple(streams[0].shape), H / h, W / w,
                  transition_step, sigmas.numel() - 1 - transition_step,
-                 sigmas[transition_step - 1].item(), sigmas[transition_step].item(),
+                 sigmas[transition_step if radau_mode else transition_step - 1].item(), sigmas[transition_step].item(),
                  rho, w_min, w_max,
                  "skipped" if rho == 1.0 and w_min == 1.0 else "external" if latent_lifter is not None else latent_upsample,
                  rho > 0.0 and w_max > 0.0, cfg,
@@ -510,8 +519,8 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
         step = low_evaluations
         low_evaluations += 1
         if low_evaluations > transition_step:
-            raise RuntimeError("SelfLift: too many low-resolution callbacks for the Euler schedule")
-        if step == transition_step - 1:
+            raise RuntimeError("SelfLift: too many low-resolution progress callbacks for the stage schedule")
+        if not radau_mode and step == transition_step - 1:
             transition["state"] = x
             transition["x0"] = x0
         # Preview decoders expect the target grid.  Decode a temporary lifted
@@ -548,23 +557,33 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
     latent_format = model.get_model_object("latent_format")
     if handoff is None:
         log_memory("low_resolution start", low_model.load_device)
+        low_sampler = radau.stage_sampler(sampler, boundary=transition) if radau_mode else sampler
         comfy.samplers.sample(low_model, noise_low, positive_low, negative_low, cfg, low_model.load_device,
-                              sampler, sigmas[:transition_step + 1], low_model.model_options,
+                              low_sampler, sigmas[:transition_step + 1], low_model.model_options,
                               latent_image=low_latent, denoise_mask=low_noise_mask,
                               callback=callback_low,
                               disable_pbar=disable_pbar, seed=seed)
-        if low_evaluations != transition_step:
+        if not radau_mode and low_evaluations != transition_step:
             raise RuntimeError(f"SelfLift: expected {transition_step} low-resolution callbacks, received {low_evaluations}; check sampler wrappers")
         low_timer.finish()
         log_memory("low_resolution end", model.load_device)
-        low_streams, nested = _streams(transition.pop("state"))
-        x0_streams, _ = _streams(transition.pop("x0"))
-        auxiliary_next = [_euler_step(state.to(device), denoised.to(device), sigma_k, sigma_next)
-                          for state, denoised in zip(low_streams[1:], x0_streams[1:])]
+        if radau_mode:
+            shapes = [tuple(s.shape) for s in _streams(low_latent)[0]]
+            low_streams = radau.streams(transition.pop("state"), shapes, nested)
+            x0_streams = radau.streams(transition.pop("x0"), shapes, nested)
+            # Audio already completed this interval. Never advance it again.
+            auxiliary_next = [s.to(device) for s in low_streams[1:]]
+        else:
+            low_streams, nested = _streams(transition.pop("state"))
+            x0_streams, _ = _streams(transition.pop("x0"))
+            auxiliary_next = [_euler_step(state.to(device), denoised.to(device), sigma_k, sigma_next)
+                              for state, denoised in zip(low_streams[1:], x0_streams[1:])]
         z0_low_vae = latent_format.process_out(x0_streams[0].float()).to(device)
         del low_streams, x0_streams
     else:
-        if (handoff.get("format") != "h3_selflift_middle_v1"
+        expected_format = radau.FORMAT if radau_mode else "h3_selflift_middle_v1"
+        if (handoff.get("format") != expected_format
+                or (radau_mode and handoff.get("sampler_contract") != sampler_contract)
                 or handoff.get("seed") != seed or handoff.get("cfg") != cfg
                 or handoff.get("transition_step") != transition_step
                 or handoff.get("target_shape") != list(video_anchor.shape)
@@ -577,13 +596,17 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
             raise ValueError("SelfLift middle pass has incompatible video/audio shapes.")
     del low_latent, noise_low, positive_low, negative_low
     # This boundary is BEFORE loading the learned lifter or decoding a preview.
-    # The auxiliary stream is the noisy audio Euler state, not final audio/x0.
+    # The auxiliary stream is noisy audio at sigma_next, not final audio/x0.
     if stop_after_low:
-        return {"format": "h3_selflift_middle_v1", "seed": int(seed), "cfg": float(cfg),
+        middle = {"format": radau.FORMAT if radau_mode else "h3_selflift_middle_v1",
+                "seed": int(seed), "cfg": float(cfg),
                 "transition_step": int(transition_step), "target_shape": list(video_anchor.shape),
                 "sigmas": sigmas.detach().cpu().clone(),
                 "video_prediction": z0_low_vae.detach().cpu().contiguous().clone(),
                 "auxiliary_next": [value.detach().cpu().contiguous().clone() for value in auxiliary_next]}
+        if radau_mode:
+            middle["sampler_contract"] = sampler_contract
+        return middle
     transition_timer = _StageTimer("transition", model.load_device, (H, W), resolution_scale)
     transition_timer.mark("prepare_endpoint")
     log_memory("transition endpoint_ready", model.load_device)
@@ -657,12 +680,18 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
     transition_timer.mark("correction_and_debug")
     log_memory("transition correction_ready", model.load_device)
 
-    # Re-noise the corrected video/image endpoint at the sigma of the reused model
-    # evaluation, then complete that Euler interval without another denoiser call.
+    # Re-noise the corrected video at its prediction sigma. Euler then finishes
+    # its reused interval; Radau's prediction is already at the completed boundary.
     video_noise = comfy.sample.prepare_noise(z0_high, (seed + 1) % (1 << 64),
                                              latent_image.get("batch_index", None)).to(z0_high)
-    video_state = model_sampling.noise_scaling(sigma_k, video_noise, z0_high)
-    next_streams = [_euler_step(video_state, z0_high, sigma_k, sigma_next)] + auxiliary_next
+    if radau_mode:
+        # A clean prediction at the completed boundary: re-noise directly
+        # there, without rebuilding an Euler interval that Radau already ran.
+        video_state = model_sampling.noise_scaling(sigma_next, video_noise, z0_high)
+        next_streams = [video_state] + auxiliary_next
+    else:
+        video_state = model_sampling.noise_scaling(sigma_k, video_noise, z0_high)
+        next_streams = [_euler_step(video_state, z0_high, sigma_k, sigma_next)] + auxiliary_next
     del z0_high, video_noise, video_state, auxiliary_next
     if native_av_mask:
         # Maintain a second, full-resolution continuation chain alongside the
@@ -720,7 +749,7 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
         step = high_evaluations
         high_evaluations += 1
         if high_evaluations > total_steps - transition_step:
-            raise RuntimeError("SelfLift: too many high-resolution callbacks for the Euler schedule")
+            raise RuntimeError("SelfLift: too many high-resolution progress callbacks for the stage schedule")
         result = callback(step + transition_step, x0, x, total_steps)
         high_timer.mark(f"step {step + 1}/{total_steps - transition_step}" + (" (includes setup)" if step == 0 else ""))
         return result
@@ -734,12 +763,13 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
     if highres_tiling:
         logging.debug("[H3 Chain SelfLift two-stage] automatic high-resolution tiling enabled")
     out = comfy.samplers.sample(high_model, resume_noise, positive, negative, cfg, model.load_device,
-                                sampler, sigmas[transition_step:], high_model.model_options,
+                                radau.stage_sampler(sampler) if radau_mode else sampler,
+                                sigmas[transition_step:], high_model.model_options,
                                 latent_image=resume_latent, denoise_mask=high_noise_mask,
                                 callback=callback_high,
                                 disable_pbar=disable_pbar, seed=seed)
     del resume_latent, resume_noise
-    if high_evaluations != total_steps - transition_step:
+    if not radau_mode and high_evaluations != total_steps - transition_step:
         raise RuntimeError(f"SelfLift: expected {total_steps - transition_step} high-resolution callbacks, received {high_evaluations}; check sampler wrappers")
 
     if m_full is not None and not drift_continuation:

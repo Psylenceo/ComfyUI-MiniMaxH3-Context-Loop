@@ -64,8 +64,9 @@ class HuntTests(unittest.IsolatedAsyncioTestCase):
     async def run_node(self, candidates=2, **kwargs):
         kwargs.setdefault("prompt", {})
         kwargs.setdefault("extra_pnginfo", {"workflow": {"nodes": []}})
+        sampler = kwargs.pop("sampler", Euler())
         return await hunt.MiniMaxH3SelfLiftSeedHunt().sample(
-            self.state, Model(), self.positive, object(), self.latent, Euler(), self.sigmas,
+            self.state, Model(), self.positive, object(), self.latent, sampler, self.sigmas,
             42, candidate_count=candidates, **kwargs)
 
     async def select_when_ready(self, task, ordinal=1):
