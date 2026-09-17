@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import * as planCore from "../web/h3_chain_plan_core.mjs";
+import {remapStudioEditorialSceneId} from "../web/h3_chain_plan_studio_core.mjs";
 import {applyAssetBinding} from "../web/h3_run_assets_core.mjs";
 
 const runSource = fs.readFileSync(new URL("../web/h3_chain_run_manager.js", import.meta.url), "utf8");
@@ -88,7 +89,7 @@ function editorialFixture() {
     const state = {plan:{shots:[{id:"one", prompt:[], length:345}], chapters:[]},
         editorial:{}, checkpoints:new Map()};
     const context = vm.createContext({
-        ...planCore, state, structuredClone, node:{properties:{}}, alternateTakeWidget:null,
+        ...planCore, remapStudioEditorialSceneId, state, structuredClone, node:{properties:{}}, alternateTakeWidget:null,
         branches:{ready:true, conflict:"", draftRecovery:null},
         currentRun:"run_a", runName:() => context.currentRun,
         currentBranch:() => "main", scopedPath:path => path,
@@ -97,7 +98,7 @@ function editorialFixture() {
         setTimeout:fn => { timers.set(++timerId, fn); return timerId; }, clearTimeout:id => timers.delete(id),
         api:{fetchApi:(_route, options) => new Promise(resolve => requests.push({body:JSON.parse(options.body), resolve}))},
     });
-    vm.runInContext(["normalizedEditorial", "editorialPayload", "applyEditorialPayload", "editorialSignature",
+    vm.runInContext(["normalizedEditorial", "editorialPayload", "applyEditorialPayload", "refreshEditorialBinding", "editorialSignature",
         "syncAlternateTakeWidget", "persistEditorial", "scheduleEditorialSave", "flushProjectWrites"]
         .map(name => handler(studioSource, name)).join("\n"), context);
     const incoming = {run_name:"run_a", revision:"a".repeat(32), chapters:[], scene_order:[{scene:1, scene_id:"one"}],
@@ -196,3 +197,34 @@ for (const blocked of [{ready:false}, {conflict:"stale workflow"}, {draftRecover
         "An ABA Run switch must not adopt an old view's revision");
 }
 console.log("Release audit: archive restore isolation, editorial ordering, flush and revision conflicts pass");
+
+for (const undoBeforeResponse of [false, true]) {
+    const f = editorialFixture();
+    f.state.plan.chapters = [{id:"chapter_01", title:"Keep notes", start_scene_id:"one", text:"Notes"}];
+    f.context.applyEditorialPayload({...f.incoming, chapters:[{...f.state.plan.chapters[0], start_scene:1}]});
+    const rename = name => {
+        const edit = planCore.renamePlanShot(f.state.plan, 0, name);
+        remapStudioEditorialSceneId(f.state.editorial, edit.previousId, edit.id);
+        f.context.scheduleEditorialSave(0, edit);
+    };
+    rename("accidental"); await f.fire();
+    assert.equal(f.requests.length, 1);
+    if (!undoBeforeResponse) await f.respond(0, "b".repeat(32));
+    // A second edit must be allowed while the rename request is still pending.
+    f.state.editorial.placements = [{scene_id:f.state.plan.shots[0].id, start_frame:72}];
+    f.context.scheduleEditorialSave(); await f.fire();
+    assert.equal(f.state.editorialBindingError, "");
+    rename("one"); await f.fire();
+    if (undoBeforeResponse) await f.respond(0, "b".repeat(32));
+    await f.respond(1, "c".repeat(32));
+    await f.respond(2, "d".repeat(32));
+    assert.equal(f.requests[2].body.scene_order[0].scene_id, "one");
+    assert.equal(f.requests[2].body.chapters[0].start_scene_id, "one");
+    assert.equal(f.requests[2].body.chapters[0].text, "Notes");
+    assert.equal(f.requests[2].body.placements[0].start_frame, 72);
+    assert.equal(f.requests[2].body.placements[0].scene_id, "one");
+    assert.equal(f.state.editorialStored.scene_order[0].scene_id, "one");
+    assert.equal(f.state.editorialBindingError, "");
+    assert.equal(f.state.editorialDraft, null);
+}
+console.log("Studio rename/undo: in-flight edits preserve chapters, placement and serialized revisions");

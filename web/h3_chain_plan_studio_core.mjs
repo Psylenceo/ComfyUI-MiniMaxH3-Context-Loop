@@ -64,10 +64,13 @@ export function remapStudioEditorialSceneId(editorial, previousId, nextId) {
     const previous = String(previousId ?? "");
     const next = String(nextId ?? "");
     if (!previous || !next || previous === next) return editorial;
-    for (const field of ["placements", "trims", "replacements"]) {
+    for (const field of ["scene_order", "placements", "trims", "replacements"]) {
         for (const item of Array.isArray(editorial[field]) ? editorial[field] : []) {
             if (String(item?.scene_id ?? "") === previous) item.scene_id = next;
         }
+    }
+    for (const chapter of Array.isArray(editorial.chapters) ? editorial.chapters : []) {
+        if (String(chapter?.start_scene_id ?? "") === previous) chapter.start_scene_id = next;
     }
     if (Array.isArray(editorial.locked_scene_ids)) {
         editorial.locked_scene_ids = editorial.locked_scene_ids.map(

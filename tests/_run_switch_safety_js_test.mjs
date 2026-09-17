@@ -101,7 +101,7 @@ function studioContext() {
             return {ok:true, json:async () => ({editorial:{revision:"c".repeat(32)}})};
         }},
     });
-    const names = ["normalizedEditorial", "editorialPayload", "applyEditorialPayload", "syncAlternateTakeWidget", "scheduleEditorialSave",
+    const names = ["normalizedEditorial", "editorialPayload", "applyEditorialPayload", "refreshEditorialBinding", "syncAlternateTakeWidget", "scheduleEditorialSave",
         "sceneLocked", "trimForScene", "setSceneTrim", "setScenePlacement", "flushProjectWrites"];
     if (studio.includes("function editorialSignature(")) names.push("editorialSignature", "persistEditorial");
     vm.runInContext(names.map(name => handler(studio, name)).join("\n"), context);
@@ -350,3 +350,97 @@ for (const protectedField of [
         "a later checkpoint inventory must revoke the unused-scene allowance");
 }
 console.log("Run-switch safety: hydration, explicit saves, stale mutations, ABA, batches and disposal passed");
+
+// Explicit rename -> save -> undo must restore ALL saved references, including
+// chapter starts and the selected alternate, with or without an intervening GET.
+for (const poll of [false, true]) {
+    const f = studioContext();
+    const {context:c} = f;
+    c.state.plan.shots[0].id = "scene_b";
+    c.state.plan.chapters = structuredClone(incoming.chapters);
+    const saved = {...incoming, replacements:[{scene:1, scene_id:"scene_b",
+        base_revision:"1".repeat(32), alternate_revision:"2".repeat(32), media_mode:"picture_only"}]};
+    c.applyEditorialPayload(saved);
+    const rename = name => {
+        const edit = core.renamePlanShot(c.state.plan, 0, name);
+        studioCore.remapStudioEditorialSceneId(c.state.editorial, edit.previousId, edit.id);
+        c.scheduleEditorialSave(0, edit);
+    };
+    rename("accidental"); await f.flush();
+    assert.equal(f.writes.length, 1);
+    assert.equal(f.writes[0].chapters[0].start_scene_id, "accidental");
+    assert.equal(c.state.editorialStored.scene_order[0].scene_id, "accidental",
+        "successful saves advance the saved comparison snapshot immediately");
+    if (poll) c.applyEditorialPayload({...f.writes[0], revision:"c".repeat(32)});
+    rename("scene_b"); await f.flush();
+    assert.equal(f.writes.length, 2, "undo sends the restored cut without a workflow reload");
+    const restored = f.writes[1];
+    for (const field of ["scene_order", "placements", "trims", "replacements"]) {
+        assert.equal(restored[field][0].scene_id, "scene_b", field);
+    }
+    assert.equal(restored.chapters[0].start_scene_id, "scene_b");
+    assert.equal(restored.replacements[0].alternate_revision, "2".repeat(32));
+    assert.equal(restored.trims[0].out_frame, 90);
+    assert.equal(c.state.editorialBindingError, "");
+    c.state.plan.shots[0].seed = 111;
+    c.scheduleEditorialSave(); await f.flush();
+    assert.equal(f.writes.length, 2, "a subsequent prompt/seed edit does not write the cut again");
+}
+
+// A mismatch pause must be re-evaluated before retrying, without using GET
+// hydration to overwrite a local placement made while the name was wrong.
+{
+    const f = studioContext(); const c = f.context;
+    c.applyEditorialPayload(incoming);
+    c.state.editorial.placements = [{scene_id:"scene_a", start_frame:72}];
+    c.scheduleEditorialSave(); await f.flush();
+    assert.equal(f.writes.length, 0);
+    assert.ok(c.state.editorialSaveError);
+    c.state.plan.shots[0].id = "scene_b";
+    studioCore.remapStudioEditorialSceneId(c.state.editorial, "scene_a", "scene_b");
+    c.refreshEditorialBinding();
+    assert.equal(c.state.editorialBindingError, "");
+    assert.equal(c.applyEditorialPayload(incoming), false,
+        "revalidation must not open the door to overwriting the unsaved placement");
+    assert.equal(c.state.editorial.placements[0].start_frame, 72);
+    c.scheduleEditorialSave(); await f.flush();
+    assert.equal(f.writes.length, 1);
+    assert.equal(f.writes[0].placements[0].start_frame, 72);
+    assert.equal(f.writes[0].trims[0].out_frame, 90, "filtered saved edits are preserved");
+    assert.equal(c.state.editorialBindingError, "");
+    assert.equal(c.state.editorialSaveError, "");
+}
+
+// Renaming a known scene does NOT license removing another Run's missing scene.
+{
+    const f = studioContext(); const c = f.context;
+    c.state.plan.shots[0].id = "scene_b";
+    c.applyEditorialPayload({...incoming, scene_order:[...incoming.scene_order,
+        {scene:2, scene_id:"unrelated_saved_scene"}]});
+    const edit = core.renamePlanShot(c.state.plan, 0, "opening");
+    studioCore.remapStudioEditorialSceneId(c.state.editorial, edit.previousId, edit.id);
+    c.scheduleEditorialSave(0, edit); await f.flush();
+    assert.equal(f.writes.length, 0);
+    assert.match(c.state.editorialBindingError, /unrelated_saved_scene/);
+}
+console.log("Studio rename/undo: chapter starts, alternate takes, retry and unrelated-Run protection pass");
+
+// Ownership/branch pauses retain the explicit rename for a later Retry, but
+// never publish it while that separate authority guard is still blocking.
+{
+    const f = studioContext(); const c = f.context;
+    c.state.plan.shots[0].id = "scene_b";
+    c.state.plan.chapters = structuredClone(incoming.chapters);
+    c.applyEditorialPayload(incoming);
+    c.branches.ready = false;
+    const edit = core.renamePlanShot(c.state.plan, 0, "opening");
+    studioCore.remapStudioEditorialSceneId(c.state.editorial, edit.previousId, edit.id);
+    c.scheduleEditorialSave(0, edit); await f.flush();
+    assert.equal(f.writes.length, 0);
+    assert.match(c.state.editorialSaveError, /branches/);
+    c.branches.ready = true;
+    c.scheduleEditorialSave(0); await f.flush();
+    assert.equal(f.writes.length, 1);
+    assert.equal(f.writes[0].scene_order[0].scene_id, "opening");
+    assert.equal(f.writes[0].chapters[0].start_scene_id, "opening");
+}

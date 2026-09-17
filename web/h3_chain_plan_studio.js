@@ -128,7 +128,7 @@ import {
     studioRulerTicks,
     studioWaveformIntervalSamples,
     timedLyricAtSecond,
-} from "./h3_chain_plan_studio_core.mjs?v=0.7.24";
+} from "./h3_chain_plan_studio_core.mjs?v=editorial-rename-1";
 import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.2";
 import {
     projectMutationOptions, subscribeProjectOwnership, isProjectReadOnlyError,
@@ -748,7 +748,7 @@ function mount(node) {
         planNotifyTimer:null, editorialTimer:null, editorialPending:null,
         editorialSavePromise:null, lastEditorialSignature:"",
         editorialReady:false, editorialRun:"", editorialBindingError:"",
-        editorialStored:null, editorialBaseline:null, editorialEditEpoch:0,
+        editorialStored:null, editorialBaseline:null, editorialDraft:null, editorialEditEpoch:0,
         editorial:{revision:"", placements:[], trims:[], locked_scene_ids:[], subtitles:{},
             alternate_draft:null, replacements:[]},
         subtitleAssets:[], subtitleAssetsRun:"", subtitleAssetsToken:0,
@@ -873,7 +873,8 @@ function mount(node) {
         captureRecovery:() => {
             const editorial = state.editorialPending || state.editorialSavePromise || state.editorialSaveError
                 ? {value:structuredClone(state.editorial), baseline:structuredClone(state.editorialBaseline),
-                    stored:structuredClone(state.editorialStored), ready:state.editorialReady} : null;
+                    stored:structuredClone(state.editorialStored), draft:structuredClone(state.editorialDraft),
+                    ready:state.editorialReady} : null;
             const history = structuredClone(state.history.pendingDraft);
             return editorial || history ? {editorial, history} : null;
         },
@@ -883,6 +884,7 @@ function mount(node) {
                 state.editorial = normalizedEditorial(recovery.editorial.value);
                 state.editorialBaseline = recovery.editorial.baseline;
                 state.editorialStored = recovery.editorial.stored;
+                state.editorialDraft = recovery.editorial.draft ?? null;
                 state.editorialRun = runName();
                 state.editorialReady = recovery.editorial.ready;
                 state.editorialEditEpoch = (state.editorialEditEpoch ?? 0) + 1;
@@ -1622,7 +1624,17 @@ function mount(node) {
         // Plan fields (notably chapters) must survive an unrelated scene edit.
         state.editorialStored = structuredClone(payload);
         state.editorialBaseline = editorialPayload();
-        const knownIds = new Set(state.editorialBaseline.scene_order.map((row) => row.scene_id));
+        state.editorialDraft = null;
+        refreshEditorialBinding(payload, unusedSceneIds);
+        state.lastEditorialSignature = editorialSignature(state.editorialStored);
+        syncAlternateTakeWidget();
+        return previous !== JSON.stringify(next)
+            || previousError !== state.editorialBindingError;
+    }
+
+    function refreshEditorialBinding(payload = state.editorialDraft?.payload ?? state.editorialStored, unusedSceneIds = state.editorialUnusedSceneIds) {
+        if (!payload || state.editorialRun !== runName()) return;
+        const knownIds = new Set(editorialPayload().scene_order.map((row) => row.scene_id));
         // Only the same fresh checkpoint response can prove a missing order
         // entry has no active or retained render. Cached/older servers fail
         // closed. This permission never applies to saved editorial edits.
@@ -1642,10 +1654,8 @@ function mount(node) {
         state.editorialBindingError = missingIds.length
             ? `Editorial saving paused: this Run contains saved scenes or edits absent from the connected Plan (${missingIds.slice(0, 5).join(", ")}${missingIds.length > 5 ? ", …" : ""}). Load its matching Plan or choose a new Run name.`
             : "";
-        state.lastEditorialSignature = editorialSignature(state.editorialStored);
-        syncAlternateTakeWidget();
-        return previous !== JSON.stringify(next)
-            || previousError !== state.editorialBindingError;
+        // Keep any save error until Retry succeeds: otherwise the next GET
+        // could erase the unsaved edits as soon as the name is restored.
     }
 
     function editorialSignature(payload) {
@@ -1663,7 +1673,7 @@ function mount(node) {
         if (snapshot) node.properties[CHECKPOINT_CACHE_PROPERTY] = snapshot;
     }
 
-    async function persistEditorial(payload, signature) {
+    async function persistEditorial(payload, signature, localBaseline) {
         const requestBranch = payload.branch_id ?? currentBranch();
         // Capture the editor binding, not just its Run name: A -> B -> A
         // creates a new view that must not adopt an old request's revision.
@@ -1696,11 +1706,19 @@ function mount(node) {
             if (state.editorial === binding && state.editorialRun === payload.run_name
                     && saved && typeof saved === "object") {
                 state.editorial.revision = String(saved.revision ?? "");
+                state.editorialStored = structuredClone({...outbound, ...saved});
+                // Compare the next edit with what this request actually sent,
+                // not the original GET or edits made while it was in flight.
+                if (localBaseline) state.editorialBaseline = structuredClone(localBaseline);
                 // Invalidate checkpoint GETs that started before this commit.
                 state.editorialEditEpoch = (state.editorialEditEpoch ?? 0) + 1;
                 // A newer edit may have been blocked while this POST was in
                 // flight. Only this request's edits have now been saved.
-                if (state.lastEditorialSignature === signature) state.editorialSaveError = "";
+                if (state.lastEditorialSignature === signature) {
+                    state.editorialSaveError = "";
+                    state.editorialDraft = null;
+                    state.lastEditorialSignature = editorialSignature(state.editorialStored);
+                }
                 if (!state.disposed) renderStatus();
             }
             return {binding, run_name:payload.run_name, revision:String(saved?.revision ?? readRevision)};
@@ -1743,19 +1761,31 @@ function mount(node) {
         }
     }
 
-    function scheduleEditorialSave(delay = 250) {
+    function scheduleEditorialSave(delay = 250, sceneRename = null) {
         syncAlternateTakeWidget();
         if (!state.plan) return;
         if (!state.editorialReady || state.editorialRun !== runName()) return;
         const local = editorialPayload();
-        const payload = {...state.editorialStored};
+        // Subsequent edits (including undo) build on the last accepted local
+        // document while its POST is pending. The saved snapshot stays separate.
+        const base = state.editorialDraft?.payload ?? state.editorialStored;
+        const baseline = state.editorialDraft?.baseline ?? state.editorialBaseline;
+        const payload = structuredClone(base ?? {});
         // Only explicitly changed fields may replace saved project data.
         for (const [key, value] of Object.entries(local)) {
-            if (JSON.stringify(value) !== JSON.stringify(state.editorialBaseline?.[key])) {
+            if (JSON.stringify(value) !== JSON.stringify(baseline?.[key])) {
                 payload[key] = value;
             }
         }
         payload.run_name = local.run_name;
+        // Only an explicit, validated rename may carry saved references to a
+        // new ID. Never infer renames from scene positions in a loaded Plan.
+        const bindingPayload = structuredClone(base);
+        if (sceneRename?.changed) {
+            remapStudioEditorialSceneId(payload, sceneRename.previousId, sceneRename.id);
+            remapStudioEditorialSceneId(bindingPayload, sceneRename.previousId, sceneRename.id);
+        }
+        refreshEditorialBinding(bindingPayload);
         // Do not turn a GET (or a seed/prompt-only edit) into a project write.
         if (editorialSignature(payload) === state.lastEditorialSignature) return;
         // Scene-indexed edits and their ID/number map are one document. The
@@ -1775,6 +1805,9 @@ function mount(node) {
             : branches.conflict ? branches.conflict
             : branches.draftRecovery ? "Resolve the local recovery draft before saving the cut."
             : ""));
+        if (!state.editorialBindingError) {
+            state.editorialDraft = {payload:structuredClone(payload), baseline:structuredClone(local)};
+        }
         if (blocked) {
             if (state.editorialTimer != null) clearTimeout(state.editorialTimer);
             state.editorialTimer = null; state.editorialPending = null;
@@ -1788,7 +1821,7 @@ function mount(node) {
         payload.branch_id = currentBranch();
         if (state.editorialTimer != null) clearTimeout(state.editorialTimer);
         if (!payload.run_name) return;
-        state.editorialPending = {payload, signature};
+        state.editorialPending = {payload, signature, localBaseline:local};
         // A pointer drop does not emit a form input/change event. Persist its
         // recovery now instead of waiting for the next background observation.
         void branches?.observe?.();
@@ -1796,7 +1829,7 @@ function mount(node) {
             state.editorialTimer = null;
             const pending = state.editorialPending;
             if (pending?.signature === signature) state.editorialPending = null;
-            void persistEditorial(payload, signature).catch(() => {});
+            void persistEditorial(payload, signature, local).catch(() => {});
         }, Math.max(0, Number(delay) || 0));
     }
 
@@ -1812,7 +1845,7 @@ function mount(node) {
                 const pending = state.editorialPending;
                 state.editorialPending = null;
                 if (pending?.payload?.run_name === run) {
-                    await persistEditorial(pending.payload, pending.signature);
+                    await persistEditorial(pending.payload, pending.signature, pending.localBaseline);
                 } else if (state.editorialSavePromise) {
                     await state.editorialSavePromise;
                 }
@@ -1825,7 +1858,7 @@ function mount(node) {
         if (editorialError) throw editorialError;
     }
 
-    function writePlan(message = null) {
+    function writePlan(message = null, sceneRename = null) {
         if (!state.plan || !state.planWidget) return;
         // A linked dedicated editor owns scene prompts. Re-read those fields at
         // the last possible moment so a Studio seed/length edit cannot overwrite
@@ -1853,7 +1886,7 @@ function mount(node) {
         }
         if (message) message.textContent = state.planNode
             ? "Saved to connected Plan" : "Saved in standalone Plan Studio";
-        scheduleEditorialSave();
+        scheduleEditorialSave(250, sceneRename);
         renderStatus();
         dirty();
     }
@@ -3657,7 +3690,7 @@ function mount(node) {
             remapStudioEditorialSceneId(
                 state.editorial, previousId, renamed.id,
             );
-            writePlan(); renderShell();
+            writePlan(null, renamed); renderShell();
         });
         const mode = element("select");
         for (const [value,label] of [["default","Plan default"],["seconds","Seconds"],["frames","Exact frames"]]) {
@@ -7032,6 +7065,7 @@ function mount(node) {
                 state.editorialBindingError = "";
                 state.editorialSaveError = "";
                 state.editorialUnusedSceneIds = [];
+                state.editorialDraft = null;
                 state.editorial = cached?.editorial
                     ? normalizedEditorial(cached.editorial)
                     : {revision:"", placements:[], trims:[], locked_scene_ids:[], subtitles:{
@@ -7054,6 +7088,7 @@ function mount(node) {
             state.active = Math.min(state.active, state.plan.shots.length - 1);
             // Always synchronize the hidden one-shot queue widget on load.
             // Editorial data is useful even when the Plan has no chapters.
+            if (!runChanged) refreshEditorialBinding();
             syncAlternateTakeWidget();
             renderShell(); void refreshCheckpoints();
             if (runChanged && currentRun) {

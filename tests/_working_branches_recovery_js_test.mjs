@@ -65,15 +65,19 @@ const memoryStorage = () => {
             prompt:'alternate words',seed:'99',media_mode:'picture_only'}};
     const state={plan:{shots:[{id:'one'}]},editorial:structuredClone(value),editorialBaseline:{base:'old'},
         editorialStored:{revision:'f'.repeat(32)},editorialPending:{},editorialReady:true,
+        editorialDraft:{payload:{scene_order:[{scene:1,scene_id:'one'}]},baseline:{scene_order:[{scene:1,scene_id:'one'}]}},
         editorialEditEpoch:4,history:{pendingDraft:{sceneId:'one',prompt:'local words'}}};
     let synced=0;
     const context=vm.createContext({state,structuredClone,MAX_SEED:2n**64n-1n,MAX_H3_FRAMES:1000,
         safeShotId:(id,fallback)=>id||fallback,runName:()=> 'demo',renderShell(){},syncAlternateTakeWidget(){synced++;}});
     vm.runInContext(`${normalize}\nvar recoveryCallbacks = {${capture}\n${restore}};`,context);
     const draft=context.recoveryCallbacks.captureRecovery();
+    const renameDraft=structuredClone(state.editorialDraft);
+    state.editorialDraft=null;
     state.editorial={};state.editorialPending=null;state.history.pendingDraft=null;
     await context.recoveryCallbacks.restoreRecovery(draft);
     assert.deepEqual(JSON.parse(JSON.stringify(state.editorial)),value);
+    assert.deepEqual(state.editorialDraft,renameDraft,'pending rename survives local recovery without changing the saved snapshot');
     assert.deepEqual(state.history.pendingDraft,{sceneId:'one',prompt:'local words'});
     assert.equal(state.editorialEditEpoch,5);
     assert.match(state.editorialSaveError,/recovered/);

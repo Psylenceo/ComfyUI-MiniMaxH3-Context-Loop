@@ -247,6 +247,8 @@ const cache = studioCheckpointCacheSnapshot(
 assert.equal(restoreStudioCheckpointCache(cache, "run-a").checkpoints.length, 1);
 assert.equal(restoreStudioCheckpointCache(cache, "run-b"), null);
 const editorialRename = {
+    scene_order:[{scene:1, scene_id:"one"}],
+    chapters:[{id:"chapter_01", start_scene_id:"one", text:"Keep chapter notes"}],
     placements:[{scene_id:"one", start_frame:2}],
     trims:[{scene_id:"one", out_frame:72}],
     locked_scene_ids:["one"],
@@ -254,6 +256,9 @@ const editorialRename = {
     replacements:[{scene_id:"one"}],
 };
 remapStudioEditorialSceneId(editorialRename, "one", "opening");
+assert.equal(editorialRename.scene_order[0].scene_id, "opening");
+assert.equal(editorialRename.chapters[0].start_scene_id, "opening");
+assert.equal(editorialRename.chapters[0].text, "Keep chapter notes");
 assert.equal(editorialRename.placements[0].scene_id, "opening");
 assert.equal(editorialRename.trims[0].scene_id, "opening");
 assert.deepEqual(editorialRename.locked_scene_ids, ["opening"]);
