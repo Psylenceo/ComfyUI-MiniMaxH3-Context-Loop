@@ -42,6 +42,7 @@ const context = vm.createContext({
     api:{fetchApi:async () => ({ok:true, json:async () => response})},
     applyEditorialPayload:() => false, cacheStudioPresentation(){},
     renderStatus(){}, renderTimeline(){},
+    syncTimelineTrimControls(){}, refreshSceneTrimControls(){},
     renderPanel() { panelRenders += 1; },
     checkpointThumbnailUrl:(_index, record) => record?.video ?? "",
     playerCheckpoint:index => state.checkpoints.get(index + 1),

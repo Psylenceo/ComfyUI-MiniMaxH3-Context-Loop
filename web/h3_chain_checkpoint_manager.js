@@ -1,8 +1,10 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {
     CHECKPOINT_STAGES,
     checkpointStageVariants,
+    checkpointProcessingBranchRows,
     checkpointVariantLatentStatus,
     checkpointBranchRows,
     checkpointChapterBranchRows,
@@ -20,18 +22,18 @@ import {
     checkpointOutputSummary,
     formatCheckpointBytes,
     selectedCheckpointRevision,
-} from "./h3_checkpoint_manager_core.mjs?v=0.6.8";
+} from "./h3_checkpoint_manager_core.mjs?v=0.6.10";
 import {
     parsePlanJson,
     planToJson,
     promptValueToText,
-} from "./h3_chain_plan_core.mjs?v=0.6.8";
-import {applyCheckpointRevisionSet} from "./h3_chain_review_core.mjs?v=0.6.8";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.8";
+} from "./h3_chain_plan_core.mjs?v=0.6.10";
+import {applyCheckpointRevisionSet} from "./h3_chain_review_core.mjs?v=0.6.10";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.10";
 import {
     refreshRestoredPlanEditors,
     restoreConnectedPolicyInputs,
-} from "./h3_plan_restore_core.mjs?v=0.6.8";
+} from "./h3_plan_restore_core.mjs?v=0.6.10";
 
 const NODE_NAME = "MiniMaxH3ChainCheckpointManager";
 const PLAN_NAME = "MiniMaxH3ChainPlan";
@@ -202,7 +204,9 @@ function injectStyles() {
       .h3cm-stage-tab { white-space:nowrap; }
       .h3cm-stage-tab[aria-selected="true"] { color:var(--h3cm-accent); border-color:var(--h3cm-accent); }
       .h3cm-stage-note { flex:0 0 auto; color:var(--h3cm-muted); overflow-wrap:anywhere; }
-      .h3cm-variant-group { display:flex; flex-direction:column; gap:5px; }
+      .h3cm-processing-head { flex-wrap:wrap; }
+      .h3cm-latest-label { color:var(--h3cm-chapter); font-weight:750; }
+      .h3cm-processing-source { margin-bottom:5px; }
       .h3cm-chapter-tabs { flex:0 0 auto; overflow:auto; padding:2px 0; }
       .h3cm-chapter-tab { white-space:nowrap; border-radius:999px !important; }
       .h3cm-chapter-selected { color:var(--h3cm-chapter) !important; border-color:#d6a650 !important;
@@ -249,6 +253,7 @@ function injectStyles() {
         box-shadow:inset 3px 0 0 #b493f0; }
       .h3cm-revision-empty { border-style:dashed !important; color:var(--h3cm-muted) !important;
         background:color-mix(in srgb,var(--h3cm-panel) 72%,transparent) !important; }
+      div.h3cm-revision-empty { padding:5px 8px; border:1px dashed var(--h3cm-border); border-radius:6px; }
       .h3cm-revision-empty-selected { border-color:var(--h3cm-accent) !important;
         color:var(--h3cm-accent) !important; }
       .h3cm-revision-shared { border-color:var(--h3cm-shared-color) !important;
@@ -319,6 +324,7 @@ function mount(node) {
         initialRefresh:true, attribution:null, attributionButton:null,
     };
     const root = element("div", "h3cm-root");
+    bindNodeWheel(root, node, app);
     const head = element("div", "h3cm-head");
     const title = element("div", "h3cm-title", "Checkpoint Manager");
     const summary = element("div", "h3cm-summary", "Select a saved run");
@@ -406,11 +412,16 @@ function mount(node) {
     const load = button("Load selected branch", "Project-wide: activate this chapter lineage and restore the connected Plan for generation", () => void loadSelected());
     const activate = button("Make branch active (project)", "Project-wide: promote this chapter for all workflows using this Run", () => void activateSelected());
     const remove = button("Delete selected revision", "Delete an inactive leaf or roll back the active branch tip after confirmation", () => void deleteSelected(), "h3cm-delete-button");
+    const removeObsolete = button("Delete obsolete path…", "Preview removing this unused take and redundant downstream links; reattached scenes and shared files are kept", () => void obsoletePathAction(), "h3cm-delete-button");
+    const obsoletePanel = element("div", "h3cm-obsolete-preview");
+    let obsoleteIdentity = "", obsoleteConfirm = null;
+    obsoletePanel.hidden = true;
     load.disabled = true;
     activate.disabled = true;
     remove.disabled = true;
     deletionActions.append(load, activate, status, remove);
-    deletion.append(deletionTitle, deletionBody, deletionActions);
+    deletionActions.append(removeObsolete);
+    deletion.append(deletionTitle, deletionBody, deletionActions, obsoletePanel);
     root.append(head, runRow, outputRow, stageTabs, stageNote, chapterTabs, scenes, main, deletion);
 
     function setPreviewHeight(value, persist = false) {
@@ -634,6 +645,8 @@ function mount(node) {
         load.disabled = state.busy || Boolean(state.attribution) || !canLoadSelected();
         activate.disabled = state.busy || Boolean(state.attribution) || !canActivateSelected();
         remove.disabled = state.busy || Boolean(state.attribution) || !state.deletion?.allowed;
+        removeObsolete.disabled = state.busy || Boolean(state.attribution) || !obsoletePathIdentity();
+        if (obsoleteConfirm) obsoleteConfirm.disabled = state.busy || obsoleteIdentity !== obsoletePathIdentity();
         for (const control of retireButtons) control.disabled = state.busy || Boolean(state.attribution);
         if (state.attributionButton) {
             state.attributionButton.disabled = state.busy || !state.attribution?.candidate;
@@ -740,13 +753,13 @@ function mount(node) {
             stageTabs.append(tab);
         }
         stageNote.textContent = state.stage === "original" ? ""
-            : `${stageLabel()} versions grouped by their original source branch. Browsing does not change output.`
+            : `${stageLabel()} saved branches, newest save first. Each row follows its recorded processing history; shared clips have matching colors. Browsing does not change output.`
                 + (state.stage === "derope" ? " Select a saved take, then Use DeRoPE branch locally for deferred upscaling. Unsaved scenes use their original take." : "");
         const warnings = state.payload?.processing_variant_warnings ?? [];
         if (warnings.length) stageNote.textContent += ` ${warnings.length} processing metadata warning(s): ${warnings[0]}`;
         stageNote.hidden = !stageNote.textContent;
         branchLegend.textContent = state.stage === "original" ? "matching color = same saved clip"
-            : "saved versions per source clip";
+            : "saved processing branches · newest save first";
     }
 
     function selectAttribution(parent, slot) {
@@ -775,6 +788,7 @@ function mount(node) {
         const maximum = Math.max(
             0,
             ...(state.payload?.scenes ?? []).map((scene) => Number(scene.scene) || 0),
+            ...(state.payload?.processing_variants ?? []).map((scene) => Number(scene.scene) || 0),
             ...(state.payload?.editorial?.scene_order ?? []).map(
                 (scene) => Number(scene.scene) || 0,
             ),
@@ -1018,13 +1032,23 @@ function mount(node) {
         }
     }
 
-    function variantCard(record, original = null, branchTip = null) {
+    function variantCard(record, entry = null) {
         const card = button(`S${record.scene} · ${record.revision.slice(0, 8)}`,
-            `${record.profile_path}\n${checkpointVariantLatentStatus(record)}`,
-            () => selectVariant(record, original, branchTip), "h3cm-revision h3cm-processing-variant");
+            `${record.profile_path}\nCreated: ${localTime(record.created_at)}\n${checkpointVariantLatentStatus(record)}`,
+            () => selectVariant(record), "h3cm-revision h3cm-processing-variant");
+        if (entry?.shared_count > 1) {
+            card.classList.add("h3cm-revision-shared");
+            card.dataset.sharedKey = entry.shared_key;
+            card.style.setProperty("--h3cm-shared-color", sharedColor(entry.shared_key));
+            card.append(element("span", "h3cm-shared-label", `shared ×${entry.shared_count}`));
+        }
+        card.append(element("small", "", `Created: ${localTime(record.created_at)}`));
         card.append(element("small", "", record.profile));
         card.append(element("small", "", `${record.width || "?"}×${record.height || "?"} · ${record.ready ? "saved" : "missing artifacts"}`));
         card.append(element("small", "", record.latent_saved ? "full latent saved" : "full latent not saved"));
+        card.append(element("small", "h3cm-muted", (record.originals ?? []).length
+            ? `Original: ${(record.originals ?? []).map(item => String(item.revision).slice(0, 8)).join(" / ")}`
+            : "Original unavailable or mismatched"));
         if (currentVariant()?.key === record.key) card.classList.add("h3cm-revision-selected");
         return card;
     }
@@ -1032,42 +1056,56 @@ function mount(node) {
     function renderVariantBranchRows(container, rows) {
         for (const branch of rows) {
             const row = element("div", "h3cm-branch");
-            const header = element("div", "h3cm-branch-head");
-            header.append(element("span", branch.active ? "h3cm-branch-active" : "",
-                `Source: ${branch.active ? "Project active branch" : branch.label}`));
+            const header = element("div", "h3cm-branch-head h3cm-processing-head");
+            const tip = branch.entries.at(-1);
+            header.append(element("span", "h3cm-branch-active",
+                `${branch.history_known ? "Branch" : "Take"} ${String(tip.revision).slice(0, 8)}`));
+            if (branch.latest) header.append(element("span", "h3cm-latest-label", "Latest save"));
+            header.append(element("span", "h3cm-muted", `Last saved: ${localTime(branch.created_at)}`));
+            const description = branch.history_known
+                ? `Scenes ${branch.entries[0].scene}–${tip.scene} · ${branch.entries.length - branch.missing_count} saved`
+                    + (branch.missing_count ? ` · ${branch.missing_count} missing — history incomplete` : "")
+                : "Branch history unavailable — standalone saved take";
+            const source = element("div", "h3cm-muted h3cm-processing-source", `${branch.profile} · ${description}`);
+            source.title = branch.profile_path;
+            // Heading clicks preview the saved tip only; they never activate
+            // an original branch or alter the workflow's output selection.
+            if (tip.record) {
+                header.role = "button";
+                header.tabIndex = 0;
+                header.title = "Preview this saved processing branch tip; output stays unchanged";
+                header.addEventListener("click", () => selectVariant(tip.record));
+                header.addEventListener("keydown", event => {
+                    if (!["Enter", " "].includes(event.key)) return;
+                    event.preventDefault();
+                    selectVariant(tip.record);
+                });
+            }
+            if (state.variantKey === tip.metadata_path) row.classList.add("h3cm-branch-selected");
             const path = element("div", "h3cm-branch-path");
-            branch.revisions.forEach((original, index) => {
+            branch.entries.forEach((entry, index) => {
                 if (index) path.append(element("span", "h3cm-arrow", "→"));
-                const group = element("div", "h3cm-variant-group");
-                group.append(element("small", "h3cm-muted", `Original S${original.scene} · ${original.revision.slice(0, 8)}`));
-                const records = checkpointStageVariants(state.payload, state.stage, original);
-                for (const record of records) group.append(variantCard(record, original, branch.revisions.at(-1)));
-                if (!records.length) group.append(button(`S${original.scene} · not saved`,
-                    `No saved ${stageLabel()} version of this source revision`,
-                    () => selectRevision(original, false), "h3cm-revision h3cm-revision-empty"));
-                path.append(group);
+                if (entry.record) {
+                    path.append(variantCard(entry.record, entry));
+                } else {
+                    const gap = element("div", "h3cm-revision h3cm-revision-empty",
+                        `S${entry.scene} · ${String(entry.revision).slice(0, 8)}`);
+                    gap.append(element("small", "", "Missing saved take"));
+                    gap.title = "This exact take is missing or its identity does not match. No other version is substituted.";
+                    path.append(gap);
+                }
             });
-            row.append(header, path);
+            row.append(header, source, path);
             container.append(row);
         }
-    }
-
-    function renderUnlinkedVariants() {
-        if (state.stage === "original") return;
-        const records = checkpointStageVariants(state.payload, state.stage, null, activeChapterRange())
-            .filter(item => !(item.originals ?? []).length);
-        if (!records.length) return;
-        branches.append(element("div", "h3cm-muted", "Saved versions with an unavailable or mismatched original (not attached to another take)"));
-        const row = element("div", "h3cm-branch-path");
-        for (const record of records) row.append(variantCard(record));
-        branches.append(row);
     }
 
     function renderBranches() {
         branches.replaceChildren();
         const ranges = chapterRanges();
         if (!ranges.length) {
-            const rows = checkpointBranchRows(state.payload);
+            const rows = state.stage === "original" ? checkpointBranchRows(state.payload)
+                : checkpointProcessingBranchRows(state.payload, state.stage);
             if (rows.length) renderBranchRows(branches, rows);
             else branches.append(element(
                 "div", "h3cm-muted", "No versioned checkpoints were found.",
@@ -1078,7 +1116,8 @@ function mount(node) {
             ? ranges : ranges.filter((range) => range.id === state.chapterTab);
         let rendered = 0;
         for (const range of visibleRanges) {
-            const rows = checkpointChapterBranchRows(state.payload, range);
+            const rows = state.stage === "original" ? checkpointChapterBranchRows(state.payload, range)
+                : checkpointProcessingBranchRows(state.payload, state.stage, range);
             if (!rows.length) continue;
             if (state.chapterTab === "all") {
                 const section = element("section", "h3cm-branch-chapter");
@@ -1169,8 +1208,8 @@ function mount(node) {
                 candidates,
                 element("div", "h3cm-muted",
                     attribution.candidate
-                        ? "This candidate uses no predecessor video or generated-audio context. Attribution creates a new lineage link without regeneration or media duplication."
-                        : "No reusable candidate is proven independent by its saved metadata."),
+                        ? "This candidate uses no saved context, or all its saved video/audio context sources match this path. Attribution creates a new lineage link without regeneration or media duplication."
+                        : "No candidate has compatible saved context for this path."),
                 attach,
             );
             for (const blocked of attribution.blocked ?? []) {
@@ -1249,6 +1288,13 @@ function mount(node) {
     }
 
     function renderDeletion() {
+        removeObsolete.hidden = state.stage !== "original" || state.selected?.take_kind === "editorial_alternate";
+        removeObsolete.disabled = state.busy || Boolean(state.attribution) || !obsoletePathIdentity();
+        if (obsoleteIdentity !== obsoletePathIdentity()) {
+            obsoletePanel.replaceChildren();
+            obsoletePanel.hidden = true;
+            obsoleteConfirm = null;
+        }
         deletionBody.replaceChildren();
         retireButtons = [];
         const processing = state.stage !== "original";
@@ -1378,7 +1424,6 @@ function mount(node) {
         renderStageTabs();
         renderScenes();
         renderBranches();
-        renderUnlinkedVariants();
         renderDetail();
         renderDeletion();
     }
@@ -1684,7 +1729,7 @@ function mount(node) {
         if (!candidate || !parent || state.busy) return;
         const confirmed = window.confirm(
             `Attribute scene ${candidate.scene} candidate ${candidate.revision.slice(0, 8)} after scene ${parent.scene} revision ${parent.revision.slice(0, 8)}?\n\n` +
-            "The candidate has no predecessor video or generated-audio dependency. A new immutable lineage record will be created; its existing video, audio, prompt, and checkpoint files remain shared. Nothing is regenerated or copied.",
+            "The candidate's saved video/audio context sources match this path, or it uses no saved context. A new immutable lineage record will be created; its existing video, audio, prompt, and checkpoint files remain shared. Nothing is regenerated or copied.",
         );
         if (!confirmed) return;
         setBusy(true, "Attributing saved candidate to branch…");
@@ -1883,6 +1928,66 @@ function mount(node) {
             status.textContent = result.message;
         } catch (error) {
             await refreshDeletionPreview();
+            status.className = "h3cm-status h3cm-error";
+            status.textContent = error.message;
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    function obsoletePathIdentity() {
+        const record = state.selected;
+        return state.stage === "original" && record && !record.active && !state.attribution
+            && record.take_kind !== "editorial_alternate"
+            ? JSON.stringify([state.runName, "main", record.scene, record.revision]) : "";
+    }
+
+    async function obsoletePathAction(preview = null) {
+        const identity = obsoletePathIdentity();
+        if (state.busy || !identity || (preview && identity !== obsoleteIdentity)) return;
+        const [run, branch, scene, revision] = JSON.parse(identity);
+        if (preview && (!preview.allowed || !window.confirm(
+            `Permanently delete this obsolete path?\n\n${preview.revisions.map(item =>
+                `S${item.scene} · ${item.revision.slice(0, 8)}`).join("\n")}\n\n` +
+            `${preview.owned_file_count} files · ${formatCheckpointBytes(preview.reclaimed_bytes)}\n` +
+            "Reattached scenes and shared media are kept. This cannot be undone."))) return;
+        const token = state.requestToken;
+        setBusy(true, preview ? "Deleting obsolete path…" : "Checking obsolete path and shared files…");
+        try {
+            const path = "/minimax_h3_context_loop/checkpoint-revisions/obsolete-" + (preview ? "delete" : "preview");
+            const options = {method:"POST", headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({run_name:run, branch_id:branch, scene, revision,
+                    ...(preview ? {snapshot:preview.snapshot} : {})})};
+            const payload = await jsonRequest(path, options);
+            if (identity !== obsoletePathIdentity() || token !== state.requestToken) return;
+            if (preview) {
+                obsoletePanel.replaceChildren(); obsoletePanel.hidden = true; obsoleteConfirm = null;
+                await refreshCheckpoints();
+                status.className = "h3cm-status";
+                status.textContent = `${payload.message} Reclaimed ${formatCheckpointBytes(payload.reclaimed_bytes)}.`;
+                return;
+            }
+            obsoleteIdentity = identity;
+            obsoleteConfirm = null;
+            obsoletePanel.replaceChildren(); obsoletePanel.hidden = false;
+            obsoletePanel.append(element("strong", "", "Obsolete path deletion preview"));
+            for (const item of payload.revisions ?? []) obsoletePanel.append(element("div", "",
+                `Remove link: S${item.scene} · ${item.revision.slice(0, 8)}`));
+            for (const item of payload.retained_revisions ?? []) obsoletePanel.append(element("div", "h3cm-muted",
+                `Keep reattached: S${item.scene} · ${item.revision.slice(0, 8)}`));
+            for (const reason of payload.blockers ?? []) obsoletePanel.append(element("div", "h3cm-error", reason));
+            const files = element("ul", "h3cm-files");
+            for (const file of payload.files ?? []) if (file.exists) files.append(element("li", "",
+                `${file.owned ? "Delete" : file.shared ? "Keep shared" : "Keep"}: ${file.path} · ${formatCheckpointBytes(file.size_bytes)}`));
+            obsoletePanel.append(files);
+            if (payload.allowed) {
+                obsoleteConfirm = button("Confirm obsolete path deletion", "Delete only the previewed files", () => void obsoletePathAction(payload), "h3cm-delete-button");
+                obsoletePanel.append(obsoleteConfirm);
+            }
+            status.textContent = payload.allowed ? "Review the obsolete path preview before confirming." : "Obsolete path cleanup is blocked; see the preview.";
+        } catch (error) {
+            if (identity !== obsoletePathIdentity()) return;
+            obsoletePanel.replaceChildren(); obsoletePanel.hidden = true; obsoleteConfirm = null;
             status.className = "h3cm-status h3cm-error";
             status.textContent = error.message;
         } finally {

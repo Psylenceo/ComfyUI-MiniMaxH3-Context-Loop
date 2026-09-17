@@ -2,6 +2,7 @@
 """Standalone scheduler compiler test without importing a ComfyUI checkout."""
 
 import importlib.util
+import inspect
 import json
 import math
 import pathlib
@@ -318,9 +319,8 @@ assert video_inputs["timeline_mode"][0] == [
     "restart_each_scene", "sequential"]
 assert "state" in chain.MiniMaxH3ScheduledReferenceToVideo.INPUT_TYPES()[
     "optional"]
-apply_arguments = (
-    chain.MiniMaxH3ScheduledReferenceToVideo.apply.__code__.co_varnames[
-        :chain.MiniMaxH3ScheduledReferenceToVideo.apply.__code__.co_argcount])
+apply_arguments = inspect.signature(
+    chain.MiniMaxH3ScheduledReferenceToVideo.apply).parameters
 assert "state" in apply_arguments and "prompt_compliance" in apply_arguments
 assert "timeline_mode" not in chain._reference_entry_contract({
     "kind": "video", "tag": "motion", "scenes": "all",
@@ -1105,6 +1105,85 @@ timeline_route_slice, timeline_route_detail = (
 assert chain.torch.equal(
     timeline_route_slice["waveform"], timeline_slice["waveform"])
 assert "@song source timeline 0.500..1.417s" in timeline_route_detail
+
+# Issue #53: the shipped lip-sync profile locks the target and deliberately
+# disables automatic loose reference/carry. An explicitly used soundtrack tag
+# must still compile to a real native audio reference, without changing policy.
+lip_sync_policy = chain.MiniMaxH3GenerationProfile().build(
+    "Visual continuity", "Lip-sync to source audio")[0]["audio_policy"]
+assert lip_sync_policy["source_reference"] == "off"
+assert lip_sync_policy["source_audio_target"] == "locked"
+locked_tagged = chain.MiniMaxH3TaggedAudioReference().add(
+    timeline_audio, "audio_1", "source_timeline", False)[0]
+locked_entry = locked_tagged["entries"][0]
+chain.GraphBuilder = FakeExpansionGraph
+try:
+    for base_state in (timeline_state, timeline_route_state):
+        for scene in (1, 2):
+            locked_state = {
+                **base_state, "index": scene,
+                "plan": {
+                    **base_state["plan"],
+                    "compatibility": {
+                        **base_state["plan"]["compatibility"],
+                        "audio_policy": lip_sync_policy,
+                    },
+                },
+            }
+            before = chain._canonical_json(locked_state["plan"])
+            expansion = chain.MiniMaxH3TaggedReferenceToVideo().apply(
+                "clip", "video-vae", "audio-vae", locked_tagged, scene, 2,
+                "Follow @audio_1.", 64, 32, 22, "match", state=locked_state)
+            native = expansion["expand"]["TaggedRef2VA"]["inputs"]
+            assert native["prompt"] == "Follow <Audio 1>."
+            expected, _ = chain._tagged_audio_reference_value(
+                timeline_entry, {**base_state, "index": scene}, scene, 2, 22)
+            assert chain.torch.equal(
+                native["ref_audios.ref_audio_0"]["waveform"],
+                expected["waveform"])
+            assert chain._canonical_json(locked_state["plan"]) == before
+            assert chain._audio_policy_locks_source_audio(locked_state["plan"])
+            assert not chain._audio_policy_uses_source_reference(locked_state["plan"])
+
+    # Per-scene locks work too; disabling a lock for a scene must not silently
+    # enable references. Final mux=source alone is not generation permission.
+    for policy, override, allowed in (
+        (chain._contract_audio_policy("source", "off", "off"),
+         {"source_audio_target": "locked"}, True),
+        (lip_sync_policy, {"source_audio_target": "off"}, False),
+        (chain._contract_audio_policy("source", "off", "off"), {}, False),
+        (chain._contract_audio_policy("generated", "off", "on"), {}, False),
+    ):
+        effective_state = {
+            **timeline_state,
+            "plan": {
+                **timeline_state["plan"],
+                "compatibility": {
+                    **timeline_state["plan"]["compatibility"],
+                    "audio_policy": policy,
+                },
+                "shots": [timeline_state["plan"]["shots"][0],
+                          {**timeline_state["plan"]["shots"][1], **override}],
+            },
+        }
+        try:
+            chain._tagged_audio_reference_value(locked_entry, effective_state, 2, 2, 22)
+        except ValueError as exc:
+            assert not allowed and "Source reference=on" in str(exc)
+        else:
+            assert allowed, "Disabled scene audio policy accepted a timeline reference"
+
+    # Even with a locked target, the existing track-identity guard must hold.
+    wrong_entry = {**locked_entry, "content_hash": "different-track"}
+    try:
+        chain._tagged_audio_reference_value(wrong_entry, locked_state, 2, 2, 22)
+    except ValueError as exc:
+        assert "different full source track" in str(exc)
+    else:
+        raise AssertionError("Lip-sync accepted a different tagged source track")
+finally:
+    chain.GraphBuilder = original_graph_builder
+
 different_route_audio = {
     "waveform": timeline_audio["waveform"] + 1,
     "sample_rate": timeline_audio["sample_rate"],

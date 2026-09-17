@@ -797,7 +797,11 @@ def _conditioning_from_tagged_upscale_override(
         if detail:
             slice_details.append(detail)
 
-    pictures = [entry["value"] for entry in bindings["pictures"]]
+    # Carousel entries are lazy file descriptors. Resolve only the references
+    # selected for this scene, just as generation does; leave the registry and
+    # its fingerprints untouched (and unused project images unopened).
+    pictures = [chain._project_asset_image(entry["value"])
+                for entry in bindings["pictures"]]
     has_visual_refs = bool(pictures or resolved_videos)
     has_audio_refs = bool(
         resolved_audios or any(
@@ -830,7 +834,7 @@ def _conditioning_from_tagged_upscale_override(
             "standalone_audio_count": len(resolved_audios),
             "anchors": [{
                 "tag": anchor["tag"],
-                "image": anchor["entry"]["value"],
+                "image": chain._project_asset_image(anchor["entry"]["value"]),
                 "timestamps": tuple(anchor["timestamps"]),
                 "untimed": bool(anchor.get("untimed")),
             } for anchor in semantic_anchors],
@@ -2993,21 +2997,30 @@ class MiniMaxH3ChainUpscaleAdvance:
 
 
 def _validate_upscale_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    if manifest.get("format") != "h3_chain_upscale_manifest_v1":
-        raise ValueError("H3 Chain Assemble requires a complete upscale manifest.")
+    partial = manifest.get("format") == "h3_chain_upscale_partial_manifest_v1"
+    if not partial and manifest.get("format") != "h3_chain_upscale_manifest_v1":
+        raise ValueError("H3 Chain Assemble requires a complete or partial upscale manifest.")
     segments = manifest.get("segments") or []
     count = int(manifest.get("clip_count", 0))
-    if count < 1 or len(segments) != count:
+    completed = len(segments)
+    if count < 1 or not 1 <= completed <= count or (not partial and completed != count):
         raise ValueError("Upscale manifest contains %d/%d scenes." %
-                         (len(segments), count))
+                         (completed, count))
+    if int(manifest.get("completed_clip_count", completed)) != completed:
+        raise ValueError("Upscale manifest completed scene count is inconsistent.")
+    if int(manifest.get("planned_clip_count", count)) != count:
+        raise ValueError("Upscale manifest planned scene count is inconsistent.")
     total = 0
     source = manifest.get("source_manifest") or {}
     first, last = _source_bounds(source)
     if count != last - first + 1:
         raise ValueError("Upscale manifest does not cover its selected source scenes.")
+    saved_last = first + completed - 1
     if (int(manifest.get("scene_start", first)) != first or
-            int(manifest.get("scene_end", last)) != last):
+            int(manifest.get("scene_end", saved_last)) != saved_last):
         raise ValueError("Upscale manifest scene bounds do not match its source.")
+    if int(manifest.get("last_completed_clip", saved_last)) != saved_last:
+        raise ValueError("Upscale manifest last completed scene is inconsistent.")
     for index, segment in enumerate(segments, start=first):
         _verify_upscale_segment(segment, index)
         total += int(segment.get("delivered_frames", 0))
@@ -3034,6 +3047,9 @@ def _assembly_manifest(manifest: dict[str, Any],
     width, height = next(iter(sizes))
     resolution = {"width": width, "height": height}
     compatibility.update(resolution)
+    first, _last = _source_bounds(source)
+    saved_last = first + len(segments) - 1
+    partial = manifest.get("format") == "h3_chain_upscale_partial_manifest_v1"
     assembled = []
     for item in segments:
         assembled.append({
@@ -3041,12 +3057,15 @@ def _assembly_manifest(manifest: dict[str, Any],
             "blend_frames": 0,
         })
     assembly = {
-        "format": "h3_chain_manifest_v3",
+        "format": ("h3_chain_partial_manifest_v3" if partial else
+                   "h3_chain_manifest_v3"),
         "run_name": manifest["run_name"],
         "plan_hash": source.get("plan_hash"),
         "prompt_prefix": source.get("prompt_prefix", ""),
         "compatibility": compatibility,
         "clip_count": len(assembled),
+        "scene_start": first,
+        "scene_end": saved_last,
         "total_delivered_frames": int(manifest["total_delivered_frames"]),
         "duration_seconds": float(manifest["duration_seconds"]),
         "segments": assembled,
@@ -3055,18 +3074,31 @@ def _assembly_manifest(manifest: dict[str, Any],
             "profile": manifest["profile"],
             "source_manifest_hash": manifest["source_manifest_hash"],
             "profile_config": manifest["profile_config"],
+            "complete": not partial,
+            "planned_clip_count": int(manifest["clip_count"]),
+            "completed_clip_count": len(assembled),
         },
     }
+    if partial:
+        assembly["planned_clip_count"] = int(manifest["clip_count"])
+        assembly["last_completed_clip"] = saved_last
     if isinstance(source.get("source_timeline"), dict):
         assembly["source_timeline"] = chain._json_document(
             source["source_timeline"])
     if source.get("chapter"):
         assembly["format"] = chain.CHAPTER_MANIFEST_FORMAT
-        for key in ("chapter", "scene_start", "scene_end", "source_scene_count", "editorial"):
+        for key in ("chapter", "source_scene_count", "editorial"):
             if key in source:
                 assembly[key] = (chain._json_document(source[key])
                                  if isinstance(source[key], dict) else source[key])
         assembly["chapter"]["resolution"] = resolution
+        planned_end = int(assembly["chapter"].get(
+            "planned_end_scene", assembly["chapter"]["end_scene"]))
+        assembly["chapter"].update({
+            "end_scene": saved_last,
+            "planned_end_scene": planned_end,
+            "complete": saved_last == planned_end,
+        })
     if source.get("presentation_source"):
         # ALT pictures have already been baked into HQ. Keep the frozen cut's
         # timing but never substitute low-resolution alternates during assembly.
@@ -3087,6 +3119,11 @@ def _write_upscale_final_record(manifest: dict[str, Any],
         "video": chain._relative_output_path(final_path),
         "video_sha256": chain._file_sha256(final_path),
         "frame_count": int(manifest["total_delivered_frames"]),
+        "complete": manifest.get("format") == "h3_chain_upscale_manifest_v1",
+        "planned_clip_count": int(manifest["clip_count"]),
+        "completed_clip_count": len(manifest["segments"]),
+        "scene_start": int(manifest["segments"][0]["index"]),
+        "scene_end": int(manifest["segments"][-1]["index"]),
         "created_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds").replace("+00:00", "Z"),
     }
@@ -3098,6 +3135,62 @@ def _write_upscale_final_record(manifest: dict[str, Any],
                 generated_sidecar),
         })
     chain._atomic_json(os.path.splitext(final_path)[0] + ".json", record)
+
+
+class MiniMaxH3ChainUpscaleManifestLoad:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "manifest_path": ("STRING", {
+                "default": "",
+                "tooltip": "Saved upscale_manifest.json (complete), or "
+                           "partial/through_clip_NNNN.manifest.json. Accepts an "
+                           "absolute path or a path relative to ComfyUI output. "
+                           "Connect manifest directly to H3 Chain Assemble; "
+                           "no Adapter, sampler, or source Plan is needed.",
+            }),
+        }}
+
+    RETURN_TYPES = (UPSCALE_MANIFEST_TYPE, "STRING", "STRING")
+    RETURN_NAMES = ("manifest", "manifest_json", "status")
+    OUTPUT_TOOLTIPS = (
+        "Saved complete or partial upscale manifest for H3 Chain Assemble.",
+        "Readable JSON of the saved upscale manifest.",
+        "Verified saved scene count and manifest location.",
+    )
+    FUNCTION = "load"
+    CATEGORY = "conditioning/minimax/context_loop/upscale"
+    DESCRIPTION = (
+        "Reload a saved upscale for assembly without regenerating any scene. "
+        "Reads the chosen manifest and verifies its saved artifacts only when "
+        "executed. Does not scan projects, change branches, or rewrite saves.")
+
+    @classmethod
+    def IS_CHANGED(cls, *args, **kwargs):
+        return float("NaN")
+
+    def load(self, manifest_path):
+        address = str(manifest_path or "").strip()
+        if not address:
+            raise ValueError(
+                "Choose the saved upscale_manifest.json, or a saved "
+                "partial/through_clip_NNNN.manifest.json.")
+        path = chain._absolute_output_path(address)
+        manifest = chain._read_json(path)
+        if not isinstance(manifest, dict) or manifest.get("format") not in (
+                "h3_chain_upscale_manifest_v1",
+                "h3_chain_upscale_partial_manifest_v1"):
+            raise ValueError(
+                "Select an upscale manifest, not a scene checkpoint, "
+                "final-video record, or generation manifest.")
+        segments = _validate_upscale_manifest(manifest)
+        complete = manifest["format"] == "h3_chain_upscale_manifest_v1"
+        status = (
+            "Loaded saved %s upscale: %d/%d scenes from %s. "
+            "Connect to H3 Chain Assemble; no regeneration." % (
+                "complete" if complete else "partial", len(segments),
+                manifest["clip_count"], path))
+        return manifest, json.dumps(manifest, ensure_ascii=False, indent=2), status
 
 
 class MiniMaxH3ChainUpscaleMerge:
@@ -3174,6 +3267,7 @@ UPSCALE_NODE_CLASS_MAPPINGS = {
     "MiniMaxH3ChainUpscaleHandoff": MiniMaxH3ChainUpscaleHandoff,
     "MiniMaxH3ChainUpscaleAdvance": MiniMaxH3ChainUpscaleAdvance,
     "MiniMaxH3ChainUpscaleMerge": MiniMaxH3ChainUpscaleMerge,
+    "MiniMaxH3ChainUpscaleManifestLoad": MiniMaxH3ChainUpscaleManifestLoad,
 }
 
 UPSCALE_NODE_DISPLAY_NAME_MAPPINGS = {
@@ -3196,4 +3290,5 @@ UPSCALE_NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3ChainUpscaleSegmentSave": "MiniMax H3 Upscale Segment Save",
     "MiniMaxH3ChainUpscaleLoopEnd": "MiniMax H3 Upscale Loop End",
     "MiniMaxH3ChainUpscaleMerge": "MiniMax H3 Upscale Merger (Legacy)",
+    "MiniMaxH3ChainUpscaleManifestLoad": "MiniMax H3 Upscale Manifest Load",
 }

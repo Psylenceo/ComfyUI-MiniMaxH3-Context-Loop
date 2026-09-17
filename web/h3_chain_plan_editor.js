@@ -1,5 +1,7 @@
 import {app} from "/scripts/app.js";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
+import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.6.10";
 import {
     H3_CONTEXT_LENGTHS,
     MAX_SHOTS,
@@ -12,6 +14,9 @@ import {
     moveShot,
     removePlanShot,
     parsePlanJson,
+    planDefaultSteps,
+    setPlanDefaultSteps,
+    clearSceneStepOverrides,
     planToJson,
     promptTextToLines,
     promptValueToText,
@@ -31,8 +36,8 @@ import {
     shotLengthMode,
     sharedPrompt,
     visualContextCompositions,
-} from "./h3_chain_plan_core.mjs?v=0.6.8";
-import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.6.8";
+} from "./h3_chain_plan_core.mjs?v=0.6.10";
+import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.6.10";
 import {
     applySceneAudioOverride,
     applySceneLipSync,
@@ -43,21 +48,21 @@ import {
     sceneAudioPolicy,
     sceneTransitionPreset,
     transitionPresetLabel,
-} from "./h3_policy_core.mjs?v=0.6.8";
+} from "./h3_policy_core.mjs?v=0.6.10";
 import {
     resolveAudioContextLength,
     resolveAudioPolicy,
     resolveTransitionPolicy,
-} from "./h3_socket_presentation_core.mjs?v=0.6.8";
+} from "./h3_socket_presentation_core.mjs?v=0.6.10";
 import {
     availableLoRARoutes,
     loraRouteLabel,
-} from "./h3_lora_scheduler_core.mjs?v=0.6.8";
+} from "./h3_lora_scheduler_core.mjs?v=0.6.10";
 import {
     MODERN_PLAN_NODE as MODERN_NODE_NAME,
     MODERN_PLAN_WIDGET_NAMES as MODERN_BACKING_WIDGETS,
     upgradeLegacyPlanNode,
-} from "./h3_plan_upgrade_core.mjs?v=0.6.8";
+} from "./h3_plan_upgrade_core.mjs?v=0.6.10";
 
 // This scene editor is an original implementation. Its quick @ reference and
 // # dialogue interactions are inspired by nkxx188/ComfyUI-MiniMaxH3-Easy,
@@ -122,7 +127,7 @@ function injectStyles() {
         }
         .h3c-editor button:hover { border-color: var(--h3c-accent); }
         .h3c-editor button:disabled { cursor: not-allowed; opacity: .4; }
-        .h3c-header, .h3c-toolbar, .h3c-card-head, .h3c-prompt-tools,
+        .h3c-header, .h3c-toolbar, .h3c-card-head, .h3c-prefix-head, .h3c-prompt-tools,
         .h3c-json-actions, .h3c-footer { display: flex; align-items: center; gap: 6px; }
         .h3c-header { justify-content: space-between; margin-bottom: 8px; }
         .h3c-header-actions { display:flex; align-items:center; justify-content:flex-end;
@@ -170,7 +175,11 @@ function injectStyles() {
         .h3c-label { display: block; margin-bottom: 4px; color: var(--h3c-muted); font-weight: 650; }
         .h3c-help { margin-top: 4px; color: var(--h3c-muted); }
         .h3c-prefix { min-height: 88px; }
-        .h3c-toolbar { position: sticky; top: -10px; z-index: 4; padding: 7px 0; background: var(--h3c-bg); }
+        .h3c-prefix-head { margin-bottom: 7px; }
+        .h3c-prefix-head .h3c-label { margin-bottom: 0; }
+        .h3c-prefix-section.h3c-collapsed .h3c-prefix-head { margin-bottom: 0; }
+        .h3c-prefix-body[hidden] { display: none; }
+        .h3c-toolbar { position: sticky; top: -10px; z-index: 4; padding: 7px 0; background: var(--h3c-bg); flex-wrap: wrap; }
         .h3c-toolbar .h3c-spacer { flex: 1; }
         .h3c-card {
             --h3c-scene-color: var(--h3c-accent);
@@ -186,6 +195,9 @@ function injectStyles() {
         .h3c-card.h3c-invalid { border-left-color: #ff6b72; }
         .h3c-card.h3c-drag-over { outline: 2px solid var(--h3c-accent); }
         .h3c-card-head { margin-bottom: 7px; }
+        .h3c-card.h3c-collapsed .h3c-card-head { margin-bottom: 0; }
+        .h3c-card-body[hidden] { display: none; }
+        .h3c-collapse { flex: none; width: 25px; padding: 4px !important; }
         .h3c-drag { cursor: grab; user-select: none; padding: 4px 3px; color: var(--h3c-muted); }
         .h3c-index { min-width: 58px; font-weight: 700; }
         .h3c-color {
@@ -374,6 +386,17 @@ function collapseModernBackingWidgets(node) {
     if ((node.comfyClass ?? node.type) !== MODERN_NODE_NAME) return;
     for (const name of MODERN_BACKING_WIDGETS) {
         const widget = node.widgets?.find((item) => item.name === name);
+        if (widget && node.inputs?.some((input) => input.widget?.name === name)) {
+            // A converted widget owns a real socket. Hiding it also hides or
+            // mispositions that socket in the frontend (notably fingerprints).
+            if (widget.type === "hidden") {
+                widget.type = widget._h3OriginalType ?? "converted-widget";
+                widget.computeSize = widget._h3OriginalComputeSize;
+                widget.draw = widget._h3OriginalDraw;
+            }
+            widget.hidden = false;
+            continue;
+        }
         if (widget) collapseWidget(widget);
     }
 }
@@ -436,6 +459,10 @@ function planLayout(node) {
     if (!layout.promptHeights || typeof layout.promptHeights !== "object"
             || Array.isArray(layout.promptHeights)) {
         layout.promptHeights = {};
+    }
+    if (!layout.collapsedScenes || typeof layout.collapsedScenes !== "object"
+            || Array.isArray(layout.collapsedScenes)) {
+        layout.collapsedScenes = {};
     }
     return layout;
 }
@@ -525,7 +552,7 @@ function mountEditor(node) {
     ]) {
         root.addEventListener(eventName, (event) => event.stopPropagation());
     }
-    root.addEventListener("wheel", (event) => event.stopPropagation());
+    bindNodeWheel(root, node, app);
     const savedLayout = planLayout(node);
     const state = {
         plan: null,
@@ -537,6 +564,7 @@ function mountEditor(node) {
         draggedIndex: null,
         resizeObservers: [],
         seedRefreshers: [],
+        collapseRefreshers: [],
     };
     node._h3ChainEditor = state;
 
@@ -561,6 +589,16 @@ function mountEditor(node) {
         layout.jsonOpen = state.jsonOpen;
         layout.settingsOpen = state.settingsOpen;
         graphDirty();
+    }
+
+    function setScenesCollapsed(collapsed) {
+        const collapsedScenes = {};
+        if (collapsed) state.plan.shots.forEach((shot, index) => {
+            collapsedScenes[sceneColorKey(shot, index)] = true;
+        });
+        node.properties[LAYOUT_PROPERTY] = {...planLayout(node), collapsedScenes};
+        state.collapseRefreshers.forEach(refresh => refresh());
+        graphDirty(); // UI only: never syncPlan, rerender cards, or refresh seeds.
     }
 
     function disconnectResizeObservers() {
@@ -632,8 +670,9 @@ function mountEditor(node) {
         );
         setProjectAssetManagedWidget(
             node.widgets?.find((item) => item.name === "generation_fingerprint"),
-            managed,
+            managed && !inputConnected(node, "generation_fingerprint"),
         );
+        collapseModernBackingWidgets(node);
         root.classList.toggle("h3c-project-assets-managed", managed);
         root.title = managed
             ? "Run name and reference fingerprint are managed by the connected Project Assets node."
@@ -685,6 +724,8 @@ function mountEditor(node) {
     function updateTiming() {
         if (!state.plan) return;
         const result = timing();
+        const defaultSteps = planDefaultSteps(
+            state.plan, widgetValue(node, "default_steps", 20));
         const summary = root.querySelector(".h3c-summary");
         if (summary) {
             summary.textContent = `${result.shots.length} scenes · ${result.totalFrames} delivered frames · ${formatClock(result.totalSeconds)}`;
@@ -699,6 +740,8 @@ function mountEditor(node) {
                     `Generation starts at delivered frame ${row.generationStartFrame}. ` +
                     `The incoming assembly boundary blends ${row.videoBlendFrames} frame(s).`;
             }
+            const steps = card.querySelector(".h3c-steps");
+            if (steps) steps.placeholder = String(defaultSteps);
             card.classList.toggle("h3c-invalid", row.errors.length > 0);
         }
         const errors = root.querySelector(".h3c-errors");
@@ -807,6 +850,29 @@ function mountEditor(node) {
         });
 
         const head = element("div", "h3c-card-head");
+        const body = element("div", "h3c-card-body");
+        const collapse = button("", "", () => {
+            const layout = planLayout(node);
+            const key = sceneColorKey(shot, index);
+            const collapsedScenes = {...layout.collapsedScenes};
+            if (collapsedScenes[key] === true) delete collapsedScenes[key];
+            else collapsedScenes[key] = true;
+            node.properties[LAYOUT_PROPERTY] = {...layout, collapsedScenes};
+            refreshCollapsed();
+            graphDirty();
+        });
+        collapse.classList.add("h3c-collapse");
+        function refreshCollapsed() {
+            const collapsed = planLayout(node).collapsedScenes[sceneColorKey(shot, index)] === true;
+            body.hidden = collapsed;
+            card.classList.toggle("h3c-collapsed", collapsed);
+            collapse.textContent = collapsed ? "▸" : "▾";
+            collapse.title = collapsed ? "Expand scene" : "Collapse scene";
+            collapse.setAttribute("aria-label", `${collapse.title} ${index + 1}`);
+            collapse.setAttribute("aria-expanded", String(!collapsed));
+        }
+        state.collapseRefreshers.push(refreshCollapsed);
+        refreshCollapsed();
         const drag = element("span", "h3c-drag", "⠿");
         drag.title = "Drag to reorder";
         drag.draggable = true;
@@ -863,6 +929,11 @@ function mountEditor(node) {
                 node.properties[SCENE_COLOR_PROPERTY] = {...colors};
             }
             const heights = planLayout(node).promptHeights;
+            const collapsedScenes = planLayout(node).collapsedScenes;
+            if (previousKey !== nextKey && collapsedScenes[previousKey] === true) {
+                collapsedScenes[nextKey] = true;
+                delete collapsedScenes[previousKey];
+            }
             const previousPromptKey = `scene:${previousKey}`;
             const nextPromptKey = `scene:${nextKey}`;
             if (previousPromptKey !== nextPromptKey && heights[previousPromptKey]) {
@@ -895,12 +966,13 @@ function mountEditor(node) {
             if (state.plan.shots.length <= 1) return;
             if (!window.confirm(`Delete scene ${index + 1}?`)) return;
             saveSceneColor(sceneColorKey(shot, index), null);
+            delete planLayout(node).collapsedScenes[sceneColorKey(shot, index)];
             removePlanShot(state.plan, index);
             syncPlan();
             render();
         });
         remove.disabled = state.plan.shots.length <= 1;
-        head.append(drag, color, ordinal, id, timingLabel, up, down, copy, remove);
+        head.append(collapse, drag, color, ordinal, id, timingLabel, up, down, copy, remove);
 
         const lengthRow = element("div", "h3c-length-row");
         const mode = element("select");
@@ -1113,13 +1185,16 @@ function mountEditor(node) {
 
         const advanced = element("div", "h3c-advanced-fields");
         const steps = numberInput(shot.steps ?? "", {min: "1", max: "10000", step: "1"});
-        steps.placeholder = String(widgetValue(node, "default_steps", 20));
-        steps.title = "Optional sampler-step override for only this scene. Leave blank to inherit the Plan node default.";
+        steps.classList.add("h3c-steps");
+        steps.placeholder = String(planDefaultSteps(
+            state.plan, widgetValue(node, "default_steps", 20)));
+        steps.title = "An entered value overrides the default for this scene. Clear it to inherit the displayed Plan default.";
         steps.addEventListener("input", () => {
             if (steps.value) shot.steps = Number(steps.value);
             else delete shot.steps;
             syncPlan();
         });
+        steps.addEventListener("change", () => render());
         const context = element("select", "h3c-context");
         const resolvedPlanSettings = currentSettings();
         const planContextLength = Number(resolvedPlanSettings.contextLength);
@@ -1586,7 +1661,6 @@ function mountEditor(node) {
             field("Lock source audio", lockSourceAudio),
         );
         advanced.append(
-            field("Steps (blank = default)", steps),
             field("Advanced visual context", context),
             field("Visual context source", visualSource),
             field("Context block 1 source", visualLeadSource),
@@ -1595,19 +1669,20 @@ function mountEditor(node) {
             field("Advanced implementation", continuation),
             field("Boundary spatial proxy", spatialProxy),
         );
-        card.append(
-            head,
+        body.append(
             lengthRow,
             field("Basic prompt (plain language, optimized separately)", basicPrompt),
             field("Scene prompt (optional with shared prompt)", prompt),
             promptTools(prompt, index + 1),
             field("Prompt alternatives", promptSeedControl),
             field("Scene seed", seedControl),
+            field("Steps override (blank = Plan default)", steps),
             field("Scene LoRA route", loraRoute),
             boundary,
             audioFields,
             advanced,
         );
+        card.append(head, body);
         return card;
     }
 
@@ -1671,7 +1746,10 @@ function mountEditor(node) {
         }
 
         function numberSetting(name, label, options) {
-            const control = numberInput(widgetValue(node, name, options.fallback), {
+            const value = () => name === "default_steps"
+                ? planDefaultSteps(state.plan, widgetValue(node, name, options.fallback))
+                : widgetValue(node, name, options.fallback);
+            const control = numberInput(value(), {
                 min: options.min,
                 max: options.max,
                 step: options.step,
@@ -1679,9 +1757,12 @@ function mountEditor(node) {
             control.title = options.title ?? "";
             control.addEventListener("change", () => {
                 if (!control.validity.valid || control.value === "") {
-                    control.value = String(widgetValue(
-                        node, name, options.fallback));
+                    control.value = String(value());
                     return;
+                }
+                if (name === "default_steps") {
+                    setPlanDefaultSteps(state.plan, control.value);
+                    syncPlan();
                 }
                 setWidgetValue(node, name, Number(control.value));
                 updateTiming();
@@ -1707,8 +1788,10 @@ function mountEditor(node) {
         });
         const fingerprint = textSetting(
             "generation_fingerprint", "Generation fingerprint", {
-                fallback: "", disabled: managed, wide: true,
-                title: managed
+                fallback: "", disabled: managed || inputConnected(node, "generation_fingerprint"), wide: true,
+                title: inputConnected(node, "generation_fingerprint")
+                    ? "Supplied by the connected generation_fingerprint socket. Edit the upstream node."
+                    : managed
                     ? "Project Assets contributes the active reference lineage."
                     : "Change this when model, VAE, LoRA, CFG, sampler, scheduler, or global references change.",
             },
@@ -1755,6 +1838,13 @@ function mountEditor(node) {
                 title:"Stable uint64 base used to derive one seed per scene.",
             }),
         );
+        const overrides = state.plan.shots.filter((shot) => shot.steps != null).length;
+        if (overrides) defaults.append(
+            element("div", "h3c-help", `${overrides} scene(s) override the default steps.`),
+            button("Use default steps for all scenes",
+                "Clear only per-scene step overrides. Prompts, seeds, and all other settings stay unchanged.",
+                () => { clearSceneStepOverrides(state.plan); syncPlan(); render(); }),
+        );
         const delivery = group(
             "Delivery",
             numberSetting("segment_crf", "Scene MP4 quality (CRF)", {
@@ -1776,6 +1866,7 @@ function mountEditor(node) {
         if (!state.plan) return;
         disconnectResizeObservers();
         state.seedRefreshers = [];
+        state.collapseRefreshers = [];
         const scrollTop = root.scrollTop;
         root.replaceChildren();
         root.classList.toggle("h3c-show-advanced", state.advanced);
@@ -1857,6 +1948,7 @@ function mountEditor(node) {
         );
 
         const prefix = element("textarea", "h3c-prefix");
+        prefix.setAttribute("aria-label", "Shared prompt");
         prefix.value = sharedPrompt(state.plan).text;
         prefix.placeholder = "Identity, wardrobe, style and continuity rules shared by every scene…";
         prefix.title = "Text automatically prepended to every scene prompt. Put identity, wardrobe, reference definitions, audio rules, style, and global continuity here instead of repeating them.";
@@ -1866,11 +1958,34 @@ function mountEditor(node) {
             syncPlan();
         });
         bindTextareaHeight(prefix, "shared", 88);
-        const prefixSection = element("section", "h3c-section");
-        prefixSection.append(
-            field("Shared prompt — automatically prepended to every scene", prefix),
-            promptTools(prefix, null),
+        const prefixSection = element("section", "h3c-section h3c-prefix-section");
+        const prefixHead = element("div", "h3c-prefix-head");
+        const prefixBody = element("div", "h3c-prefix-body");
+        const prefixCollapse = button("", "", () => {
+            const layout = planLayout(node);
+            node.properties[LAYOUT_PROPERTY] = {
+                ...layout, sharedPromptCollapsed: layout.sharedPromptCollapsed !== true,
+            };
+            refreshPrefixCollapsed();
+            graphDirty(); // UI only: keep prompt text, editor DOM, seeds and node size.
+        });
+        prefixCollapse.classList.add("h3c-collapse", "h3c-prefix-collapse");
+        function refreshPrefixCollapsed() {
+            const collapsed = planLayout(node).sharedPromptCollapsed === true;
+            prefixBody.hidden = collapsed;
+            prefixSection.classList.toggle("h3c-collapsed", collapsed);
+            prefixCollapse.textContent = collapsed ? "▸" : "▾";
+            prefixCollapse.title = collapsed ? "Expand global prompt" : "Collapse global prompt";
+            prefixCollapse.setAttribute("aria-label", prefixCollapse.title);
+            prefixCollapse.setAttribute("aria-expanded", String(!collapsed));
+        }
+        prefixHead.append(
+            prefixCollapse,
+            element("span", "h3c-label", "Shared prompt — automatically prepended to every scene"),
         );
+        prefixBody.append(prefix, promptTools(prefix, null));
+        prefixSection.append(prefixHead, prefixBody);
+        refreshPrefixCollapsed();
 
         const toolbar = element("div", "h3c-toolbar");
         const add = button("+ Add scene", "Append a new scene", () => {
@@ -1890,7 +2005,9 @@ function mountEditor(node) {
             savePanelState();
             render();
         });
-        toolbar.append(add, advanced, element("span", "h3c-spacer"), json);
+        const collapseAll = button("Collapse all", "Collapse all scene cards", () => setScenesCollapsed(true));
+        const expandAll = button("Expand all", "Expand all scene cards", () => setScenesCollapsed(false));
+        toolbar.append(add, advanced, collapseAll, expandAll, element("span", "h3c-spacer"), json);
 
         const errors = element("div", "h3c-errors");
         const cards = element("div", "h3c-cards");
@@ -2027,30 +2144,29 @@ function mountEditor(node) {
         widget._h3TimingWrapped = true;
     }
 
-    node._h3ChainEditorRefresh = () => {
-        collapseWidget(planWidget);
-        collapseModernBackingWidgets(node);
+    const refreshEditor = coalescedRefresh((reload) => {
+        if (reload) {
+            collapseWidget(planWidget);
+            collapseModernBackingWidgets(node);
+            const layout = planLayout(node);
+            state.advanced = Boolean(layout.advanced);
+            state.jsonOpen = Boolean(layout.jsonOpen);
+            state.settingsOpen = modern && layout.settingsOpen !== false;
+        }
         syncProjectAssetManagedWidgets();
-        const layout = planLayout(node);
-        state.advanced = Boolean(layout.advanced);
-        state.jsonOpen = Boolean(layout.jsonOpen);
-        state.settingsOpen = modern && layout.settingsOpen !== false;
-        loadFromWidget(true);
+        if (reload) loadFromWidget(true);
+        else render();
         scheduleResponsiveSize();
-    };
-    node._h3ChainEditorConnectionRefresh = () => {
-        syncProjectAssetManagedWidgets();
-        scheduleResponsiveSize();
-        render();
-    };
+    }, {isConfiguring:() => app.configuringGraph, isAlive:() => Boolean(node.graph)});
+    node._h3ChainEditorRefresh = () => refreshEditor(true);
+    node._h3ChainEditorConnectionRefresh = () => refreshEditor();
     node._h3ChainEditorFit = applyResponsiveSize;
-    syncProjectAssetManagedWidgets();
-    loadFromWidget(true);
-    scheduleResponsiveSize();
+    refreshEditor(true);
     const onLoRARoutesChanged = () => render();
     document.addEventListener("h3-lora-routes-changed", onLoRARoutesChanged);
     const removed = node.onRemoved;
     node.onRemoved = function () {
+        refreshEditor.cancel();
         disconnectResizeObservers();
         document.removeEventListener(
             "h3-lora-routes-changed", onLoRARoutesChanged);

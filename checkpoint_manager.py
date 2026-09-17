@@ -50,6 +50,23 @@ def checkpoint_audio_context_length(
     return audio
 
 
+def checkpoint_same_context_source(left: dict, right: dict) -> bool:
+    """Recognize metadata-only aliases, not unrelated revisions with new media."""
+    if not left or not right or left.get("scene") != right.get("scene"):
+        return False
+    revision = str(left.get("revision") or "").lower()
+    other = str(right.get("revision") or "").lower()
+    if not revision or not other:
+        return False
+    if revision == other:
+        return True
+    origin = str(left.get("adopted_from_revision") or revision).lower()
+    other_origin = str(right.get("adopted_from_revision") or other).lower()
+    digest = str(left.get("checkpoint_sha256") or "")
+    return bool(origin == other_origin and digest
+                and digest == right.get("checkpoint_sha256"))
+
+
 _RUN_LOCKS: dict[tuple[str, str], threading.RLock] = {}
 _RUN_LOCKS_GUARD = threading.Lock()
 _LOG = logging.getLogger("minimax_h3_context_loop.checkpoints")
@@ -443,6 +460,24 @@ class CheckpointGraphManager:
                 digest = str(hash_value or "")
                 candidates = by_hash.get((source_scene, digest), [])
                 key = candidates[0] if digest and len(candidates) == 1 else None
+                # After obsolete original links are removed, several retained
+                # aliases can still own the same context checkpoint. Prefer the
+                # consuming path's alias; never drop that dependency merely
+                # because the shared file has more than one surviving owner.
+                if digest and len(candidates) > 1 and len({
+                        self._attribution_source(records[item])
+                        for item in candidates}) == 1:
+                    ancestor = parent_key
+                    seen = set()
+                    while ancestor in records and ancestor not in seen:
+                        if ancestor in candidates:
+                            key = ancestor
+                            break
+                        seen.add(ancestor)
+                        ancestor = records[ancestor]["_parent"]
+                    if key is None:
+                        key = min(candidates, key=lambda item: (
+                            not records[item]["active"], item))
             if key in records and key not in found:
                 found.append(key)
 
@@ -709,9 +744,9 @@ class CheckpointGraphManager:
         return str(record.get("adopted_from_revision") or
                    record.get("revision") or "").lower()
 
-    def _attributable_without_predecessor(
-            self, record: dict[str, Any]) -> bool:
-        """Return whether a saved scene can safely receive another parent."""
+    def _attribution_context_lengths(
+            self, record: dict[str, Any]) -> tuple[int, int] | None:
+        """Read consumed context from the saved take, never today's Plan."""
         dependency = record["_metadata"].get("scene_dependency")
         if not isinstance(dependency, dict):
             dependency = record["_segment"].get("scene_dependency")
@@ -731,9 +766,9 @@ class CheckpointGraphManager:
         try:
             visual, audio = int(visual), int(audio)
         except (TypeError, ValueError):
-            return False
+            return None
         if visual < 0 or audio < 0:
-            return False
+            return None
         compatibility = record["_metadata"].get("compatibility")
         compatibility = compatibility if isinstance(compatibility, dict) else {}
         continuation = str(segment.get("continuation_mode") or
@@ -744,7 +779,92 @@ class CheckpointGraphManager:
             continuation, visual, audio, generated,
             str(segment.get("source_audio_target") or "").lower())
         # Unknown legacy audio policy must not silently mean 'off'.
-        return visual == 0 and (audio == 0 or (audio > 0 and generated == "off"))
+        if audio > 0 and generated != "on":
+            return None
+        return visual, audio
+
+    def _attributable_without_predecessor(
+            self, record: dict[str, Any]) -> bool:
+        return self._attribution_context_lengths(record) == (0, 0)
+
+    def _attribution_blocker(
+            self, records: dict[tuple[int, str], dict[str, Any]],
+            parent_key: tuple[int, str], candidate: dict[str, Any]
+    ) -> str | None:
+        """Allow reparenting when every consumed saved source still matches.
+
+        Uses only the graph's already-loaded metadata. No media reads, current
+        Plan comparisons or changes to the candidate's recorded context recipe.
+        A metadata-only alias of the same checkpoint is also the same source.
+        """
+        lengths = self._attribution_context_lengths(candidate)
+        if lengths is None:
+            return "Saved metadata cannot prove which video/audio context was used."
+        visual, audio = lengths
+        if not (visual or audio):
+            return None
+        lineage = {}
+        cursor = parent_key
+        while cursor in records and cursor[0] not in lineage:
+            record = records[cursor]
+            if record.get("_lineage_issue"):
+                return "The target path has an unresolved saved predecessor."
+            lineage[cursor[0]] = record
+            cursor = record["_parent"]
+        segment = candidate["_segment"]
+        previous = int(candidate["scene"]) - 1
+
+        def require_source(scene_value, revision_value, hash_value):
+            source_scene = int(scene_value)
+            source = lineage.get(source_scene)
+            if source is None or not source["ready"]:
+                raise ValueError("Context source scene %d is not available on the target path." % source_scene)
+            revision = str(revision_value or "").lower()
+            digest = str(hash_value or "")
+            if not revision and not digest:
+                raise ValueError("Saved context source scene %d has no revision or checkpoint identity." % source_scene)
+            if digest and digest != source["checkpoint_sha256"]:
+                raise ValueError("Context source scene %d uses a different checkpoint on the target path." % source_scene)
+            if revision and revision != source["revision"]:
+                original = records.get((source_scene, revision), {
+                    "scene":source_scene, "revision":revision,
+                    "checkpoint_sha256":digest})
+                if not checkpoint_same_context_source(original, source):
+                    raise ValueError("Context source scene %d uses a different saved take on the target path." % source_scene)
+
+        def require_named_source(prefix, *, lead=False):
+            source_scene = int(segment.get(prefix + "_source_scene", previous if not lead else 0))
+            revision = segment.get(prefix + "_source_revision")
+            digest = segment.get(prefix + ("_checkpoint_sha256" if lead else "_source_checkpoint_sha256"))
+            if not lead and source_scene == previous and not revision and not digest:
+                revision = candidate.get("predecessor_revision")
+                digest = candidate.get("predecessor_checkpoint_sha256")
+            require_source(source_scene, revision, digest)
+
+        try:
+            if visual:
+                blocks = segment.get("visual_context_blocks")
+                if "visual_context_blocks" in segment:
+                    if (not isinstance(blocks, list) or not blocks
+                            or any(not isinstance(block, dict) or int(block.get("frames", 0)) <= 0
+                                   for block in blocks)
+                            or sum(int(block["frames"]) for block in blocks) != visual):
+                        return "Saved visual context blocks do not account for the consumed frames."
+                    for block in blocks:
+                        require_source(block.get("source_scene"), block.get("source_revision"),
+                                       block.get("source_checkpoint_sha256"))
+                else:
+                    require_named_source("visual_context")
+                    if int(segment.get("visual_context_lead_frames", 0)) > 0:
+                        require_named_source("visual_context_lead", lead=True)
+            if audio:
+                require_named_source("audio_context")
+                if int(segment.get("audio_context_lead_frames", 0)) > 0:
+                    require_named_source("audio_context_lead", lead=True)
+        except (TypeError, ValueError) as exc:
+            return str(exc) if isinstance(exc, ValueError) and str(exc).startswith(
+                ("Context source", "Saved context")) else "Saved context source metadata is incomplete or invalid."
+        return None
 
     def _artifacts(self, scan: dict[str, Any], record: dict[str, Any]
                    ) -> list[dict[str, Any]]:
@@ -838,12 +958,11 @@ class CheckpointGraphManager:
                 continue
             if candidate["_parent"] == leaf_key:
                 continue
-            if not self._attributable_without_predecessor(candidate):
+            blocker = self._attribution_blocker(records, leaf_key, candidate)
+            if blocker:
                 blocked.append({
                     "scene": scene, "revision": candidate["revision"],
-                    "reason": "Saved predecessor video/audio context is in use, "
-                              "or the saved metadata cannot prove it was unused. "
-                              "Changing the current Plan does not change a saved take.",
+                    "reason": blocker,
                 })
                 continue
             source = self._attribution_source(candidate)
@@ -1126,7 +1245,7 @@ class CheckpointGraphManager:
     def attribute(
             self, run_name: Any, parent_scene: Any, parent_revision: Any,
             candidate_scene: Any, candidate_revision: Any) -> dict[str, Any]:
-        """Attach an independent saved candidate to another branch tip.
+        """Attach a saved candidate whose context still matches the new path.
 
         Only metadata is created. Video, audio, prompt, and checkpoint files
         remain shared with the original immutable candidate revision.
@@ -1171,9 +1290,10 @@ class CheckpointGraphManager:
                     "Both the target branch tip and candidate must have intact video and checkpoint files.")
             if candidate["_parent"] == parent_key:
                 raise ValueError("This candidate is already attached to that branch.")
-            if not self._attributable_without_predecessor(candidate):
+            blocker = self._attribution_blocker(records, parent_key, candidate)
+            if blocker:
                 raise ValueError(
-                    "This candidate consumes predecessor video or generated-audio context and cannot be safely attributed to another branch.")
+                    "This candidate's saved context cannot be safely attributed: " + blocker)
 
             source_revision = self._attribution_source(candidate)
             for record in records.values():
@@ -1323,7 +1443,8 @@ class CheckpointGraphManager:
         return references
 
     def deletion_preview(self, run_name: Any, scene: Any,
-                         revision: Any) -> dict[str, Any]:
+                         revision: Any, *, _scan=None,
+                         _skip_dependency_check=False) -> dict[str, Any]:
         run_dir, run = self._run_dir(run_name)
         scene_number = int(scene)
         token = str(revision or "").strip().lower()
@@ -1332,7 +1453,7 @@ class CheckpointGraphManager:
         with checkpoint_run_lock(self.output_root, run):
             if not os.path.isdir(run_dir):
                 raise FileNotFoundError("H3 run %r does not exist." % run)
-            scan = self._scan(run)
+            scan = _scan if _scan is not None else self._scan(run)
             key = (scene_number, token)
             record = scan["records"].get(key)
             if record is None:
@@ -1342,7 +1463,8 @@ class CheckpointGraphManager:
             artifacts = self._artifacts(scan, record)
             chapter_start, chapter_end = self._chapter_bounds(
                 scan, scene_number)
-            descendant_keys = self._descendant_keys(scan["records"], key)
+            descendant_keys = ([] if _skip_dependency_check else
+                               self._descendant_keys(scan["records"], key))
             dependents = []
             for child_key in descendant_keys:
                 child = scan["records"][child_key]

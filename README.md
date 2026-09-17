@@ -15,6 +15,24 @@ result later—without keeping the whole production in memory.
 
 ## Changelog
 
+### 0.6.10 — Checkpoint recovery and Plan editing fixes
+
+- Recover expanded visual context when resuming saved scenes (#72).
+- Improve deferred Carousel reference recovery and add a saved upscale loader
+  (#65); fix the tagged source-audio lip-sync example (#53).
+- Add persistent scene collapse controls to the base Plan editors (#69).
+- Improve checkpoint reattribution and add previewed obsolete-path cleanup,
+  plus opt-in checkpoint cleanup after completed assembly (#66).
+- Correct zoomed trim dragging and refresh trim controls as checkpoints load.
+  The remaining disabled-trim report in #68 is still under investigation.
+
+### 0.6.9 — Plan controls and workflow loading fixes
+
+- Combine repeated Plan refreshes during workflow loading.
+- Fix default steps and fingerprint input visibility; keep deliberate scene
+  overrides, with an explicit option to clear them.
+- Add a separate-loader source-audio example without the Carousel.
+
 ### 0.6.8 — Fractional H3 mask correction
 
 - Bring nightly's fractional video/audio denoise-mask correction to main,
@@ -163,6 +181,11 @@ upscale packs and example assets are listed in the [workflow catalog](example_wo
 
 For Studio workflows, set the run name in **Project Asset Carousel** instead.
 See [Getting started](docs/GETTING_STARTED.md) for setup and recovery steps.
+
+For disposable batch renders, Assemble has an opt-in
+[`delete_checkpoints_after_assembly`](docs/POST_EXPORT_CHECKPOINT_CLEANUP.md)
+setting. It frees checkpoint space only after a completed export. Leave it off
+if you need resume, latent upscale, or checkpoint-based reassembly later.
 
 To reuse a still as a reference, scrub the saved Review Gate preview, click
 **Capture frame…**, check the destination project and tag, then **Save to

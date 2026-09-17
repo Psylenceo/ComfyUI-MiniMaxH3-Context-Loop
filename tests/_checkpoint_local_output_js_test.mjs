@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import * as core from "../web/h3_checkpoint_manager_core.mjs";
+import {bindNodeWheel} from "../web/h3_dom_wheel.mjs";
 
 const a = "a".repeat(32), b = "b".repeat(32), c = "c".repeat(32), d = "d".repeat(32);
 const payload = {
@@ -70,6 +71,7 @@ const source = fs.readFileSync(new URL("../web/h3_chain_checkpoint_manager.js", 
 let currentGraph = structuredClone(payload), runs = ["demo", "other"], failRequests = false;
 let confirms = true, mutations = 0, dirty = 0;
 let attachResponse = null;
+let obsoleteResponse = null, obsoleteError = 0, delayedObsolete = null;
 let processingDeletion = false, deleteConflict = false, delayedProcessingPreview = null;
 let retainedPixelTakes = [];
 let snapshotRetirement = false, snapshotRetired = false, retirementError = 0, delayedRetirementPreview = null;
@@ -78,7 +80,7 @@ const confirmations = [];
 let extension;
 const requests = [];
 const context = vm.createContext({
-    ...core, URLSearchParams, console,
+    ...core, bindNodeWheel, URLSearchParams, console,
     document:{head:new Element("head"), getElementById:() => null, createElement:tag => new Element(tag)},
     app:{registerExtension(value){ extension = value; }, graph:{setDirtyCanvas(){}}},
     api:{apiURL:path => path, fetchApi:async (path, options={}) => {
@@ -130,6 +132,18 @@ const context = vm.createContext({
             data = {allowed:snapshotRetired, blockers:snapshotRetired ? [] : ["Snapshot pins this take"], files:[],
                 chapter_references:snapshotRetired ? [] : [{number:1, snapshot:a, path:snapshotAddress}]};
         }
+        else if (path.endsWith("/obsolete-preview")) {
+            assert.ok(obsoleteResponse, "cleanup must never scan automatically");
+            data = structuredClone(obsoleteResponse);
+            if (delayedObsolete) { const wait = delayedObsolete; delayedObsolete = null; await wait; }
+        }
+        else if (path.endsWith("/obsolete-delete")) {
+            mutations++;
+            assert.equal(JSON.parse(options.body).snapshot, "obsolete-token");
+            if (obsoleteError) return {ok:false, status:obsoleteError,
+                json:async () => ({error:"Obsolete preview changed or project read only"})};
+            data = {message:"Deleted obsolete path; reattached scenes kept.", reclaimed_bytes:100};
+        }
         else if (path.endsWith("/delete-preview")) data = {allowed:false, blockers:["test"]};
         else if (path.endsWith("/attribute") && attachResponse) {
             mutations++;
@@ -148,7 +162,7 @@ const context = vm.createContext({
     }},
     window:{setTimeout:callback => callback(), confirm:message => { confirmations.push(message); return confirms; }},
     projectMutationOptions:(_node, _run, options) => {
-        if (attachResponse || processingDeletion || snapshotRetirement) return options;
+        if (attachResponse || processingDeletion || snapshotRetirement || obsoleteResponse) return options;
         mutations++; throw new Error("Local output attempted project mutation");
     },
     promptCompanionSync:{},
@@ -355,10 +369,13 @@ const attaching = makeNode(core.checkpointSelectionJson(
     currentGraph, "demo", currentGraph.revisions[1], {start:2, end:3}, "chapter"));
 await settle();
 byText(attaching, "S3 · reuse saved clip").click();
+assert.ok(elements(attaching).some(item => item.textContent.includes(
+    "saved video/audio context sources match this path")), "Reuse explains context-compatible candidates");
 assert.equal(byClass(attaching, "h3cm-output-scope").value, "chapter");
 attachResponse = {scene:3, revision:"e".repeat(32), message:"Attached"};
 byText(attaching, "Attach selected candidate").click();
 await settle();
+assert.ok(confirmations.at(-1).includes("saved video/audio context sources match this path"));
 const attachedOutput = JSON.parse(await attaching.widgets[0].serializeValue());
 assert.equal(attachedOutput.output_scope, "chapter");
 assert.equal(attachedOutput.scope_start_scene, 2);
@@ -437,7 +454,7 @@ assert.equal(byClass(reopenedVariant, "h3cm-preview").dataset.source, "/view?fil
 assert.equal(reopenedVariant.properties.h3_checkpoint_manager_scene, 2,
     "restoring a processing view must not promote its source selection to the deepest original tip");
 assert.equal(value(reopenedVariant), originalOutput, "reopening a processing tab never rewrites original output");
-byText(variants, "S1 · not saved").click();
+byClass(variants, "h3cm-scenes").children[0].click();
 assert.equal(byClass(variants, "h3cm-preview").src, undefined, "missing stage does not impersonate original preview");
 assert.equal(value(variants), originalOutput, "even browsing another scene in a derivative tab leaves output unchanged");
 byText(variants, "Latent Upscale · 1").click();
@@ -614,3 +631,110 @@ assert.equal(JSON.parse(value(following)).lineage.at(-1).revision, c);
 select(following, 8, a); await settle();
 assert.equal(JSON.parse(value(following)).lineage.at(-1).revision, c);
 console.log("Checkpoint branch range: previews never trim output; explicit full-branch selection repairs legacy scene-8 pins");
+
+// Render actual processing histories, not source-branch stacks. Exercise the
+// real mounted renderer and handlers with shared prefixes, chapter tabs and
+// a deleted intermediate take, without changing execution selection.
+currentGraph = structuredClone(payload);
+currentGraph.editorial = {chapters:[{id:"first", title:"Chapter 1", start_scene:1},
+    {id:"second", title:"Chapter 2", start_scene:3}]};
+function processingTake(scene, id, hour) {
+    return {scene, key:`demo/pixel/${id}`, revision:id.repeat(32),
+        checkpoint_sha256:id.repeat(64), profile:"pixel", profile_path:"demo/pixel",
+        stage:"pixel_upscale", ready:true, latent_saved:false,
+        created_at:`2026-09-08T${hour}:00:00Z`,
+        originals:[{scene, revision:({1:a, 2:b, 3:d})[scene]}],
+        video:{filename:`${id}.mp4`}};
+}
+const p1 = processingTake(1, "1", "10"), p2 = processingTake(2, "2", "11"),
+    p2new = processingTake(2, "3", "12"), p3 = processingTake(3, "4", "13");
+function processingHistory(...items) {
+    return {path:items.at(-1).key, kind:"metadata", stage:"pixel_upscale",
+        profile:"pixel", profile_path:"demo/pixel",
+        lineage:items.map(item => ({scene:item.scene, revision:item.revision,
+            checkpoint_sha256:item.checkpoint_sha256, metadata_path:item.key}))};
+}
+currentGraph.processing_variants = [p3, p2new, p2, p1];
+currentGraph.processing_branches = [processingHistory(p1), processingHistory(p1, p2),
+    processingHistory(p1, p2new), processingHistory(p1, p2new, p3)];
+const branchView = makeNode(); await settle();
+const outputBeforePreview = value(branchView), mutationsBeforePreview = mutations;
+byText(branchView, "Pixel Upscale · 4").click();
+byText(branchView, "Chapter 1").click();
+const processingRows = () => elements(branchView).filter(item => item.className.split(" ").includes("h3cm-branch"));
+const cardNames = row => row.children.at(-1).children.filter(item => item.tag === "button").map(item => item.textContent);
+let displayed = processingRows();
+assert.equal(displayed.length, 2, "Source branches are not duplicated into stacks");
+assert.deepEqual(cardNames(displayed[0]), ["S1 · 11111111", "S2 · 33333333"]);
+assert.deepEqual(cardNames(displayed[1]), ["S1 · 11111111", "S2 · 22222222"]);
+assert.equal(elements(branchView).filter(item => item.textContent === "shared ×2").length, 2);
+assert.ok(displayed[0].children[0].children.some(item => item.textContent === "Latest save"));
+assert.ok(!displayed[1].children[0].children.some(item => item.textContent === "Latest save"));
+assert.ok(elements(branchView).some(item => item.textContent.startsWith("Created: ")));
+assert.ok(!elements(branchView).some(item => item.className.includes("h3cm-variant-group")));
+displayed[1].children[0].click(); await settle();
+assert.equal(byClass(branchView, "h3cm-preview").dataset.source, "/view?filename=2.mp4&subfolder=&type=output");
+assert.equal(value(branchView), outputBeforePreview, "Branch heading is preview only");
+processingRows()[0].children[0].listeners.keydown({key:"Enter", preventDefault(){}});
+await settle();
+assert.equal(byClass(branchView, "h3cm-preview").dataset.source, "/view?filename=3.mp4&subfolder=&type=output");
+assert.equal(value(branchView), outputBeforePreview, "Keyboard heading selection is preview only");
+assert.ok(byText(branchView, "Make branch active (project)").disabled);
+byText(branchView, "Chapter 2").click();
+assert.equal(processingRows().length, 1);
+assert.deepEqual(cardNames(processingRows()[0]), ["S3 · 44444444"]);
+byText(branchView, "Chapter 1").click();
+currentGraph.processing_variants = [p1, p2, p3];
+branchView._h3CheckpointManagerRefresh(); await settle();
+displayed = processingRows();
+assert.equal(displayed.length, 2);
+assert.ok(elements(branchView).some(item => item.textContent === "Missing saved take"));
+assert.ok(elements(branchView).some(item => /history incomplete/.test(item.textContent)));
+assert.equal(displayed.flatMap(row => cardNames(row)).filter(name => name === "S2 · 22222222").length, 1,
+    "Another take never fills a deleted branch member");
+assert.equal(value(branchView), outputBeforePreview);
+assert.equal(mutations, mutationsBeforePreview, "Rendering, headings and chapter tabs never mutate saved projects");
+console.log("Processing branch UI: shared colors, latest dates, real paths, missing slots, keyboard previews and output isolation pass");
+
+currentGraph = structuredClone(payload);
+const obsoleteNode = makeNode(); await settle();
+select(obsoleteNode, 2, c); await settle();
+const obsoletePin = value(obsoleteNode), obsoleteMutations = mutations;
+assert.ok(!requests.some(item => item.path.endsWith("/obsolete-preview")), "no background cleanup scan");
+obsoleteResponse = {allowed:true, snapshot:"obsolete-token", blockers:[],
+    revisions:[{scene:2, revision:c}], retained_revisions:[{scene:3, revision:d}],
+    files:[{path:"old.json", exists:true, owned:true, size_bytes:100},
+           {path:"shared.mp4", exists:true, owned:false, shared:true, size_bytes:500}],
+    owned_file_count:1, reclaimed_bytes:100};
+byText(obsoleteNode, "Delete obsolete path…").click(); await settle();
+assert.equal(mutations, obsoleteMutations, "preview is not deletion");
+assert.ok(elements(obsoleteNode).some(item => item.textContent.startsWith("Keep shared: shared.mp4")));
+confirms = false;
+byText(obsoleteNode, "Confirm obsolete path deletion").click(); await settle();
+assert.equal(mutations, obsoleteMutations, "cancel keeps every file");
+assert.equal(value(obsoleteNode), obsoletePin);
+confirms = true;
+for (const code of [409, 423]) {
+    obsoleteError = code;
+    byText(obsoleteNode, "Confirm obsolete path deletion").click(); await settle();
+    assert.match(byClass(obsoleteNode, "h3cm-status").textContent, /preview changed|read only/);
+    assert.equal(byClass(obsoleteNode, "h3cm-obsolete-preview").hidden, true);
+    assert.equal(value(obsoleteNode), obsoletePin);
+    byText(obsoleteNode, "Delete obsolete path…").click(); await settle();
+}
+obsoleteError = 0;
+byText(obsoleteNode, "Confirm obsolete path deletion").click(); await settle();
+assert.match(byClass(obsoleteNode, "h3cm-status").textContent, /reattached scenes kept/);
+assert.equal(value(obsoleteNode), obsoletePin, "cleanup does not change output selection");
+obsoleteResponse.allowed = false; obsoleteResponse.blockers = ["Tail not reattached"];
+byText(obsoleteNode, "Delete obsolete path…").click(); await settle();
+assert.equal(byText(obsoleteNode, "Confirm obsolete path deletion"), undefined);
+assert.ok(elements(obsoleteNode).some(item => item.textContent === "Tail not reattached"));
+let releaseObsolete;
+delayedObsolete = new Promise(resolve => { releaseObsolete = resolve; });
+byText(obsoleteNode, "Delete obsolete path…").click(); await settle();
+select(obsoleteNode, 3, d); await settle();
+releaseObsolete(); await settle();
+assert.equal(byClass(obsoleteNode, "h3cm-obsolete-preview").hidden, true,
+    "late preview cannot offer deletion of another selected path");
+console.log("Obsolete path UI: explicit preview, shared files, cancel, conflicts, ownership, success and stale selection pass");
