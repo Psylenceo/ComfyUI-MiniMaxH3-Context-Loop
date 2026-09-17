@@ -1934,15 +1934,21 @@ function mount(node) {
     // that exact position (see familyAttachPoint) — so a family nested
     // entirely under some other asset renders in place there, rather than
     // always being pulled up to the top of the tree.
-    function collectChildItems(nodeIds, byParent, hoisted, stacksByAttach) {
+    function collectChildItems(nodes, byParent, hoisted, stacksByAttach) {
         const items = [];
         const seenFamilies = new Set();
-        for (const id of nodeIds) {
-            for (const child of byParent.get(String(id)) ?? []) {
+        for (const node of nodes) {
+            const nodeFolder = String(node.folder_id ?? "");
+            for (const child of byParent.get(String(node.id)) ?? []) {
                 if (hoisted.has(child.id)) continue;
+                // Folder placement is authoritative: a crop moved to a
+                // different folder than its parent is no longer "nested
+                // under" the parent for display — it surfaces as its own
+                // root item in its own folder instead (see isLineageRoot).
+                if (String(child.folder_id ?? "") !== nodeFolder) continue;
                 items.push({type: "asset", asset: child});
             }
-            for (const [key, members] of stacksByAttach.get(String(id)) ?? []) {
+            for (const [key, members] of stacksByAttach.get(String(node.id)) ?? []) {
                 if (seenFamilies.has(key)) continue;
                 seenFamilies.add(key);
                 items.push({type: "family", members});
@@ -1958,7 +1964,7 @@ function mount(node) {
     function renderTreeNode(asset, byParent, folderMember = false, hoisted = new Set(), stacksByAttach = new Map()) {
         const wrapper = el("div", "h3pa-tree-node");
         wrapper.append(assetCard(asset, folderMember));
-        const items = collectChildItems([asset.id], byParent, hoisted, stacksByAttach);
+        const items = collectChildItems([asset], byParent, hoisted, stacksByAttach);
         if (items.length) {
             const expanded = state.expandedLineage.has(String(asset.id));
             const toggle = button(
@@ -1986,7 +1992,7 @@ function mount(node) {
         // in the family, not just the latest one shown here — union them all
         // so the toggle surfaces everything in the family, not only whatever
         // happens to have been cropped from the newest version.
-        const items = collectChildItems(members.map((member) => member.id), byParent, hoisted, stacksByAttach);
+        const items = collectChildItems(members, byParent, hoisted, stacksByAttach);
         if (items.length) {
             const toggleKey = String(latest.id);
             const expanded = state.expandedLineage.has(toggleKey);
@@ -2032,7 +2038,14 @@ function mount(node) {
         const byId = new Map((state.catalog.assets ?? []).map((item) => [String(item.id), item]));
         const isLineageRoot = (asset) => {
             const parentId = String(asset.parent_asset_id ?? "");
-            return !parentId || !byId.has(parentId);
+            if (!parentId) return true;
+            const parent = byId.get(parentId);
+            if (!parent) return true;
+            // Folder placement is authoritative: a crop the user moved to a
+            // different folder than its parent is no longer "the parent's
+            // child" for display purposes, even though the crop lineage
+            // still exists (surfaced in the bottom detail row instead).
+            return String(asset.folder_id ?? "") !== String(parent.folder_id ?? "");
         };
         const folders = state.catalog.folders ?? [];
         const folderById = new Map(folders.map(
