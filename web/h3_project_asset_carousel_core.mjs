@@ -117,6 +117,14 @@ export function familyAttachPoint(members, byId) {
     // current tab/role view) is not a usable attach point — fall back to
     // the root rather than leaving the stack with nowhere to render.
     if (!parentId || memberIds.has(parentId) || !byId.has(parentId)) return "";
+    const parent = byId.get(parentId);
+    // Folder placement is authoritative (see isLineageRoot/collectChildItems):
+    // a stack only nests under the parent if the members actually share the
+    // parent's folder. Otherwise the members live in a different folder (or
+    // are unfiled) and the stack must render as its own top-level entry
+    // there, not nested inside the parent's folder where it isn't visible.
+    const parentFolder = String(parent.folder_id ?? "");
+    if (members.some((member) => String(member.folder_id ?? "") !== parentFolder)) return "";
     return parentId;
 }
 // The full placement decision for the carousel's main list: which assets

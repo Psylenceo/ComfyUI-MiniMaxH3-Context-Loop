@@ -159,4 +159,46 @@ function slotSummary(plan) {
     assert.deepEqual(after, before);
 }
 
-console.log("H3 Asset Carousel placement: folder authority, tab scoping, stale/legacy family handling, and save/reload stability pass");
+// --- 8. Version stack whose members sit outside the parent's folder --------
+// A source in one folder with unfiled version-family children must still
+// nest a *single* child under the source (existing folder rule), but once a
+// second version joins to form a stack, the stack must surface at the top
+// level (outside the source's folder) rather than being hoisted-but-nested
+// inside it with no visible entry anywhere.
+{
+    const source = asset({id: "stack-source", folder_id: "references"});
+    const single = asset({
+        id: "hero-only", tag: "hero", parent_asset_id: "stack-source", folder_id: "",
+    });
+    const folders = [folder("references", "References")];
+
+    // Single unfiled child: nests under the source per the existing folder
+    // rule (child folder_id "" !== source folder_id "references" means it's
+    // actually its own root per isLineageRoot — confirm that baseline first).
+    const singlePlan = computeCarouselPlacement([source, single], [source, single], folders, "all");
+    assert.deepEqual(slotSummary(singlePlan), [
+        {type: "folder", folder: "references", members: ["stack-source"], totalCount: 1},
+        {type: "asset", id: "hero-only"},
+    ]);
+
+    // Add a second version to form a stack: the pair must render as a
+    // top-level family stack (folder_id "" !== the source's "references"),
+    // not silently disappear nested inside the References folder.
+    const heroV1 = asset({
+        id: "hero-v1", tag: "hero-v1", parent_asset_id: "stack-source", folder_id: "",
+    });
+    const stackAssets = [source, single, heroV1];
+    const stackPlan = computeCarouselPlacement(stackAssets, stackAssets, folders, "all");
+    assert.deepEqual(slotSummary(stackPlan), [
+        {type: "folder", folder: "references", members: ["stack-source"], totalCount: 1},
+        {type: "family", members: ["hero-only", "hero-v1"]},
+    ]);
+
+    // Save/reload round-trip must reproduce the same placement.
+    const reloaded = JSON.parse(JSON.stringify(stackAssets));
+    const reloadedFolders = JSON.parse(JSON.stringify(folders));
+    const after = slotSummary(computeCarouselPlacement(reloaded, reloaded, reloadedFolders, "all"));
+    assert.deepEqual(after, slotSummary(stackPlan));
+}
+
+console.log("H3 Asset Carousel placement: folder authority, tab scoping, stale/legacy family handling, version-stack folder scoping, and save/reload stability pass");
