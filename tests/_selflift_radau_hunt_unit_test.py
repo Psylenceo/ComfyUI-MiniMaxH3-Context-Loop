@@ -38,6 +38,26 @@ class RadauHuntTests(unittest.IsolatedAsyncioTestCase):
         kwargs.setdefault("sampler", self.sampler)
         return await hunt_tests.HuntTests.run_node(self, candidates, **kwargs)
 
+    async def test_gate_off_matches_ordinary_radau_and_reuses_finished_take(self):
+        with patch.object(hunt_tests.preview, "check_preview", side_effect=AssertionError("No decoder needed")), \
+             patch.object(hunt_tests.preview, "save_preview", side_effect=AssertionError("No preview needed")):
+            result = await asyncio.wait_for(self.run_node(4, review_enabled=False), 5)
+        self.assertEqual([v["shape"][-2:] for v in radau_tests.STAGES], [(4, 6), (8, 12)])
+        record = self.store.list()[0]
+        self.assertEqual((record["selected"], len(record["candidates"])), (1, 1))
+        self.assertIsNone(record["candidates"][0]["preview"])
+        middle = hunt_tests.store_module.load_bundle(self.store.locate(record["id"]) / "take_0001.safetensors")
+        self.assertEqual(middle["format"], radau_tests.radau.FORMAT)
+        expected = hunt_tests.runtime.progressive_sample(hunt_tests.Model(), self.positive, self.positive,
+            object(), self.latent, self.sampler, self.sigmas, 42, 1., 2, .5, 0., .5, 1., "nearest",
+            latent_lifter=hunt_tests.lift)
+        for a, b in zip(expected["samples"].unbind(), result["result"][0]["samples"].unbind()):
+            radau_tests.torch.testing.assert_close(a, b, rtol=0, atol=0)
+        radau_tests.STAGES.clear()
+        self.store = hunt_tests.HuntStore(self.root)
+        await asyncio.wait_for(self.run_node(4, review_enabled=False), 5)
+        self.assertEqual(radau_tests.STAGES, [], "Automatic Radau still recovers after downstream failure/reboot")
+
     async def test_preview_then_high_oom_recover_without_repeating_low_pass(self):
         with patch.object(hunt_tests.preview, "save_preview", side_effect=RuntimeError("preview OOM")):
             with self.assertRaisesRegex(RuntimeError, "preview OOM"):

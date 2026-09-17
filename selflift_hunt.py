@@ -92,6 +92,8 @@ def approve(store, key, ordinal):
     def change(record):
         if record.get("phase") == "high" and key in _ACTIVE:
             raise ValueError("The selected take is already being upscaled; wait for it to finish.")
+        if record.get("review_enabled", True) is False and key in _ACTIVE:
+            raise ValueError("Review gate is off for this running hunt; wait for it to finish.")
         take = next((v for v in record["candidates"] if v["ordinal"] == ordinal), None)
         if take is None or not take.get("preview"):
             raise ValueError("Choose a completed preview.")
@@ -157,6 +159,14 @@ class MiniMaxH3SelfLiftSeedHunt:
                        "successfully saves the chosen clip/checkpoint. Keep off to upscale multiple takes. "
                        "Requires selected_state connected to Segment Save. Failed runs keep recovery files.",
         })
+        # Append optional controls to preserve positional values in old workflows.
+        schema["optional"]["review_enabled"] = ("BOOLEAN", {
+            "default": True, "label_on": "Review gate on", "label_off": "Review gate off",
+            "tooltip": "On: generate candidates and wait for a choice. Off: upscale the saved chosen take, "
+                       "or run only the first/input seed automatically (ignores candidate count). "
+                       "Middle passes still save for recovery; no Tiny-VAE preview is required. "
+                       "Applies when queued; does not change an already running hunt or the final Review Gate.",
+        })
         schema["hidden"] = {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO",
                             "unique_id": "UNIQUE_ID", "dynprompt": "DYNPROMPT"}
         return schema
@@ -169,8 +179,9 @@ class MiniMaxH3SelfLiftSeedHunt:
         "Supports Euler or experimental RES4LYF Radau IA 2s (eta=0). "
         "Choose a take to run only its remaining high-resolution steps. Saved takes survive OOM/restart. "
         "Choose early to finish saving the current candidate, skip the rest and upscale your selection. "
+        "Turn Review gate off to run one take without a pause, retaining middle-pass recovery. "
         "Keep seed fixed to resume. Wire selected_state to Segment Save and Review Gate/Loop End. "
-        "Requires KJNodes' TAEH3 decoder; previews are silent and approximate, not final-quality renders.")
+        "Review previews require KJNodes' TAEH3 decoder and are silent and approximate, not final-quality renders.")
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
@@ -179,7 +190,7 @@ class MiniMaxH3SelfLiftSeedHunt:
     async def sample(self, state, model, positive, vae, latent, sampler, sigmas, seed,
                      cfg=1.0, negative=None, candidate_count=4, batch_name="hunt_1",
                      tiny_vae="taeh3.safetensors", prompt=None, extra_pnginfo=None,
-                     unique_id=None, dynprompt=None, auto_remove_saved_takes=False):
+                     unique_id=None, dynprompt=None, auto_remove_saved_takes=False, review_enabled=True):
         import folder_paths
         import torch
         import comfy.nested_tensor
@@ -232,7 +243,11 @@ class MiniMaxH3SelfLiftSeedHunt:
             record = await _work(store.create, {"id": key, "run_name": plan["run_name"],
                 "branch_id": contract["branch_id"], "scene": scene, "scene_name": shot.get("id", str(scene)),
                 "batch_name": str(batch_name), "base_seed": str(int(seed)), "phase": "saved",
-                "low_steps": total - high, "high_steps": high})
+                "low_steps": total - high, "high_steps": high, "review_enabled": bool(review_enabled)})
+            # Gate preference is not part of the sampling contract: switching
+            # it off must reuse a saved low pass/choice, not create a new hunt.
+            if record.get("review_enabled", True) != bool(review_enabled):
+                record = await _work(store.update, key, lambda r: r.update(review_enabled=bool(review_enabled)))
             folder = store.locate(key)
             def update(**values):
                 return store.update(key, lambda r: r.update(values))
@@ -271,8 +286,10 @@ class MiniMaxH3SelfLiftSeedHunt:
 
             # An already approved batch jumps directly to the selected high pass.
             if record.get("selected") is None:
-                await _work(check_preview, tiny_vae)
-                for ordinal in range(1, int(candidate_count) + 1):
+                if review_enabled:
+                    await _work(check_preview, tiny_vae)
+                count = int(candidate_count) if review_enabled else 1
+                for ordinal in range(1, count + 1):
                     throw_exception_if_processing_interrupted()
                     # Check approval and claim the next candidate under the same
                     # lock. A choice made after this claim waits for this candidate
@@ -294,22 +311,25 @@ class MiniMaxH3SelfLiftSeedHunt:
                     else:
                         middle = await _work(load_bundle, path)
                     preview = store.preview_path(record, ordinal)
-                    if not preview.is_file():
+                    if review_enabled and not preview.is_file():
                         await _work(update, phase="preview", current=ordinal)
                         raw = int(shot["raw_frames"])
                         trim = max(0, raw - int(shot.get("delivered_frames", raw)))
                         await _work(save_preview, middle["video_prediction"], preview, tiny_vae, raw, trim)
                     del middle
                     take = {"ordinal": ordinal, "seed": str(take_seed), "checkpoint": checkpoint,
-                            "preview": preview.relative_to(store.root).as_posix()}
+                            "preview": preview.relative_to(store.root).as_posix() if preview.is_file() else None}
                     def append(r):
                         r["candidates"] = [v for v in r["candidates"] if v["ordinal"] != ordinal] + [take]
+                        if not review_enabled and r.get("selected") is None:
+                            r["selected"] = ordinal
                     record = await _work(store.update, key, append)
                     notify()
                     if record.get("selected") is not None:
                         break
-                await _work(update, phase="waiting", current=None)
-                notify()
+                if record.get("selected") is None:
+                    await _work(update, phase="waiting", current=None)
+                    notify()
             while True:
                 throw_exception_if_processing_interrupted()
                 record = await _work(store.read, key)
@@ -339,6 +359,8 @@ class MiniMaxH3SelfLiftSeedHunt:
             notify()
             status = "SelfLift take %d; seed %s; %d low + %d high steps" % (
                 selected["ordinal"], selected["seed"], total-high, high)
+            if not review_enabled:
+                status += "; review gate off"
             if sampler_contract is not None:
                 status += "; experimental Radau IA 2s (+1 low-resolution boundary evaluation)"
             return {"ui": {"h3_selflift_hunt": [key]}, "result": (output,
@@ -369,7 +391,7 @@ def register_routes():
         rows = await asyncio.to_thread(store.list)
         # No prompts/conditioning, media probing, or tensor reads on UI requests.
         fields = ("id", "run_name", "branch_id", "scene", "scene_name", "batch_name", "created_at",
-                  "phase", "current", "selected", "candidates", "error", "low_steps", "high_steps")
+                  "phase", "current", "selected", "candidates", "error", "low_steps", "high_steps", "review_enabled")
         return web.json_response({"batches": [dict({k: row.get(k) for k in fields},
             active=row["id"] in _ACTIVE) for row in rows]}, headers={"Cache-Control": "no-store"})
 

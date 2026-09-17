@@ -7,7 +7,7 @@ workflows and the ordinary Review Gate are unchanged.
 1. Enable SelfLift Project and select its learned H3 upscaler. Use Euler
    (the default) or the experimental Radau setup below, with the same
    total/high-step split used by ordinary SelfLift.
-2. Install current KJNodes and select `taeh3.safetensors` from `models/vae_approx`.
+2. For review previews, install current KJNodes and select `taeh3.safetensors` from `models/vae_approx`.
    The decoder is the same one used by Model Preview Override KJ. The
    [Kijai H3 TAE weights](https://huggingface.co/Kijai/MiniMax-H3-TAE/blob/main/vae_approx/taeh3.safetensors)
    and the temporal TAEH3 format supported by KJNodes both work.
@@ -24,6 +24,27 @@ workflows and the ordinary Review Gate are unchanged.
    and Loop End. This records the chosen seed and carries it to later scenes.
    The example already does this. Keep the final Review Gate's candidate count
    at **1**; it reviews the finished result, not another set of expensive hunts.
+
+## Run without the review gate
+
+**Review gate** defaults to **on**, including in existing workflows. Turn it
+**off** to run automatically without stopping to choose a candidate:
+
+- If this matching batch already has a chosen take, resume/upscale that take.
+- Otherwise, generate or reuse just **take 1**, using the input seed. Candidate
+  count is ignored; the node does not generate a batch that nobody will review.
+- Tiny-VAE decoding is skipped, so the tiny model and KJNodes decoder are not
+  required for this mode. Existing previews are kept; new automatic takes show
+  their saved metadata without a video preview.
+
+The middle pass and finished high latent are still saved for OOM/reboot recovery.
+The switch does not change the batch identity or invalidate saved work. Turning
+it back on also keeps an already chosen take; use a new batch name for a fresh
+hunt. Auto-remove and manual cleanup work as before, with auto-remove deferred
+until Segment Save succeeds.
+
+This is a **queue-time** setting, not a way to interrupt a running hunt. It only
+disables the Seed Hunt selection pause, not the separate final Review Gate.
 
 ## Experimental Radau IA 2s
 

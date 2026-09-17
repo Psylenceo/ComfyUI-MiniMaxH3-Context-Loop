@@ -48,7 +48,10 @@ vm.runInNewContext(source,{app,api,document,URLSearchParams,queueMicrotask,bindN
     window:{confirm:()=>confirmClean},
     setInterval:fn=>{timers.set(++nextTimer,fn);return nextTimer;},clearInterval:id=>timers.delete(id)});
 class Node {
-    constructor(id) { this.id=id; this.graph=app.graph; this.size=[200,200]; this.properties={}; }
+    constructor(id) {
+        this.id=id; this.graph=app.graph; this.size=[200,200]; this.properties={};
+        this.widgets=[{name:"review_enabled",value:true,callback(value) { this.lastChange=value; }}];
+    }
     addDOMWidget(name,type,root,options) {
         this.root=root;
         assert.equal(options.serialize,false);
@@ -71,6 +74,9 @@ assert.equal(node.reviewHeight(),780,"review uses the node's spare height instea
 assert.equal(node.reviewWidget.options.getMinHeight(),440,"small nodes retain a usable scrollable minimum");
 assert.equal(timers.size,1);
 const part=(node, name)=>node.root.querySelectorAll("*").find(el=>el.className?.split(" ").includes(`h3sh-${name}`));
+const review=node.widgets[0];
+assert.equal(review.label,"Review gate");
+assert.equal(part(node,"gate-notice").hidden,true,"review remains enabled by default");
 assert.equal(node.root.querySelectorAll("video").length,1,"one focused player, not a wall of videos");
 assert.equal(part(node,"dots").children.length,3);
 assert.equal(part(node,"help").open,undefined,"help starts collapsed");
@@ -127,22 +133,54 @@ assert.equal(second.root.querySelectorAll("video").length,1,"refresh/recreate re
 assert.equal(second.properties.h3_selflift_preview.ordinal,2,"reopening defaults to the chosen take");
 assert.equal(head.children.length,1,"styles are shared, independent of normal gate mounting");
 const recovered=new Node(3);
+recovered.widgets=[];
 recovered.properties=structuredClone(node.properties);
 recovered.onNodeCreated();await settle();
+assert.equal(part(recovered,"gate-notice").hidden,true,"old workflows without the widget default to review on");
 assert.equal(recovered.properties.h3_selflift_preview.ordinal,1,"saved browsing position survives recreation without changing the approval");
 recovered.onRemoved();
 videos[0].listeners.error();
-assert.equal(part(node,"notice").hidden,false,"failed video loading has a readable retry hint");
+assert.equal(part(node,"media-notice").hidden,false,"failed video loading has a readable retry hint");
 videos[0].error={code:4};const loadsBeforeRetry=videos[0].loads;
 await node.root.querySelectorAll("button").find(b=>b.textContent==="Refresh saved takes").onclick();
 assert.equal(videos[0].loads,loadsBeforeRetry+1,"refresh retries a failed media load");
 videos[0].error=null;videos[0].listeners.loadeddata();
-assert.equal(part(node,"notice").hidden,true);
+assert.equal(part(node,"media-notice").hidden,true);
 batch.created_at=124;batch.selected=null;await tick();
 assert.ok(videos[0].src.includes("h3_hunt_created=124"),"recreated batches do not reuse cached media from a deleted hunt");
 assert.equal(node.properties.h3_selflift_preview.ordinal,1);
 document.hidden=true;const before=gets;await tick();assert.equal(gets,before);
 document.hidden=false;
+review.value=false;review.callback(false);
+assert.equal(review.lastChange,false,"the gate callback preserves the original widget handler");
+assert.equal(part(node,"gate-notice").hidden,false);
+assert.ok(part(node,"gate-notice").textContent.includes("next queue"),"widget changes do not claim to cancel an active review");
+assert.equal(posts.length,1,"changing the switch never approves, deletes or queues anything");
+const savedBatch=structuredClone(batch);
+Object.assign(batch,{review_enabled:false,active:true,phase:"high",selected:1,
+    candidates:[{ordinal:1,seed:"42",checkpoint:"take_0001.safetensors",preview:null}]});
+await tick();
+assert.equal(part(node,"player").hidden,true,"automatic takes have no empty video player");
+assert.equal(part(node,"candidates").hidden,false,"automatic take metadata stays available");
+assert.equal(videos[0].src,undefined,"previewless takes must not request a fabricated media URL");
+assert.equal(button.disabled,true);
+assert.equal(button.textContent,"Automatic take — no review required");
+assert.ok(node._h3SelfLiftHunt.status.textContent.includes("upscaling take 1 automatically"));
+const previewlessLoads=videos[0].loads;
+await tick();
+assert.equal(videos[0].loads,previewlessLoads,"polling a previewless take does not load video");
+batch.phase="low";await tick();
+assert.ok(node._h3SelfLiftHunt.status.textContent.includes("saving one low-resolution take"));
+assert.ok(!node._h3SelfLiftHunt.status.textContent.includes("skip remaining candidates"));
+batch.candidates=structuredClone(savedBatch.candidates);await tick();
+assert.equal(button.disabled,true,"existing previews cannot change selection during an automatic run");
+await button.onclick();assert.equal(posts.length,1);
+batch.active=false;await tick();
+assert.equal(button.disabled,false,"saved previews can still be selected when the automatic run is stopped");
+Object.assign(batch,savedBatch);delete batch.review_enabled;
+review.value=true;review.callback(true);await tick();
+assert.equal(part(node,"gate-notice").hidden,true);
+assert.equal(part(node,"player").hidden,false,"regular review still displays saved previews");
 assert.equal(clean.disabled,false,"offline batch can be cleaned");
 await clean.onclick();assert.equal(posts.length,1,"cancelled confirmation deletes nothing");
 confirmClean=true;cleanError=true;await clean.onclick();
@@ -156,6 +194,9 @@ assert.equal(part(node,"candidates").hidden,true);
 assert.equal(part(second,"candidates").hidden,true,"other panels refresh too");
 assert.equal(clean.disabled,true);
 assert.ok(node.root.querySelectorAll("p").some(p=>p.textContent?.includes("Saved scenes were kept")));
+review.value=false;review.callback(false);
+assert.ok(node._h3SelfLiftHunt.status.textContent.includes("middle pass will still be saved"));
+assert.equal(part(node,"badge").textContent,"Automatic upscale");
 node.onRemoved();second.onRemoved();assert.equal(timers.size,0);
 assert.equal(videos[0].src,undefined);
-console.log("SelfLift hunt UI: focused carousel, browse vs approve, early choice, high-pass lock, stable playback/new arrivals, restored view, media retry, uint64 seeds, shared/hidden polling and cleanup pass");
+console.log("SelfLift hunt UI: carousel, approval, gate toggle, previewless recovery, high-pass lock, stable playback, restored view, media retry, uint64 seeds, shared polling and cleanup pass");

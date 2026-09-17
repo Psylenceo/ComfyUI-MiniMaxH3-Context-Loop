@@ -169,7 +169,7 @@ function mount(node) {
     grip.setAttribute("aria-orientation", "horizontal");
     player.append(video, grip);
     resizablePlayer(node, player, grip);
-    const mediaStatus = text("p", "", "h3sh-notice");
+    const mediaStatus = text("p", "", "h3sh-notice h3sh-media-notice");
     mediaStatus.hidden = true;
     video.addEventListener("error", () => {
         if (!video.getAttribute("src")) return;
@@ -197,12 +197,14 @@ function mount(node) {
     const cleanupStatus = text("p", "", "h3sh-notice");
     cleanupStatus.hidden = true;
     cleanupStatus.setAttribute("role", "status");
+    const gateNotice = text("p", "Review gate off for the next queue: upscale the saved choice, or run just the first seed automatically. Middle-pass recovery stays enabled. This does not bypass the final Review Gate.", "h3sh-notice h3sh-gate-notice");
+    gateNotice.hidden = true;
     const help = text("details", "", "h3sh-help");
     help.append(text("summary", "Silent motion preview · Help & recovery"),
         text("p", "Tiny-VAE previews show approximate motion and composition, not final detail or sound. Browse with the arrows or dots, then choose a take. The current candidate finishes and saves before the rest are skipped."),
         text("p", "After OOM/restart, keep batch name, seed and settings fixed and queue the matching workflow again. Completed takes are reused; only the chosen take is upscaled."), recover);
     toolbar.append(select, reload, clean);
-    root.append(head, toolbar, player, empty, mediaStatus, candidates, status, cleanupStatus, help);
+    root.append(head, gateNotice, toolbar, player, empty, mediaStatus, candidates, status, cleanupStatus, help);
     let optionsKey = "";
     let dotsKey = "";
     let previewKey = "";
@@ -222,6 +224,8 @@ function mount(node) {
     }
     const panel = { root, node, status, render() {
         node.properties ||= {};
+        const reviewEnabled = node.widgets?.find(widget => widget.name === "review_enabled")?.value !== false;
+        gateNotice.hidden = reviewEnabled;
         let key = node.properties.h3_selflift_batch;
         if (!batches.some(b => b.id === key)) key = batches[0]?.id || "";
         const nextOptions = JSON.stringify(batches.map(b => [b.id, b.scene_name, b.batch_name]));
@@ -245,21 +249,28 @@ function mount(node) {
             currentTake = null;
             player.hidden = candidates.hidden = true;
             empty.hidden = false;
-            badge.textContent = "Tiny-VAE preview";
-            status.textContent = "No saved takes. Queue to start a new hunt.";
+            badge.textContent = reviewEnabled ? "Tiny-VAE preview" : "Automatic upscale";
+            empty.textContent = reviewEnabled ? "Completed motion previews will appear here."
+                : "Queue to run one take without waiting for review.";
+            status.textContent = reviewEnabled ? "No saved takes. Queue to start a new hunt."
+                : "Review gate off · the middle pass will still be saved for recovery.";
             return;
         }
         recover.hidden = false;
         recover.href = api.apiURL(`/h3/selflift/workflow?id=${encodeURIComponent(key)}`);
         badge.textContent = `${batch.low_steps} low + ${batch.high_steps} high steps`;
         const hunting = batch.active && ["low", "preview"].includes(batch.phase);
+        const automatic = batch.review_enabled === false;
         status.textContent = batch.error ? `Paused — ${batch.error}`
+            : batch.active && automatic ? batch.phase === "high"
+                ? `Review gate off · upscaling take ${batch.selected} automatically.`
+                : "Review gate off · saving one low-resolution take, then upscaling automatically."
             : hunting ? `Generating take ${batch.current || batch.candidates.length + 1} · ${batch.candidates.length} ready to review.`
             : batch.active && batch.phase === "high" ? `Upscaling take ${batch.selected}. You can still browse saved previews.`
             : batch.active ? "Choose a take to finish its upscale."
             : batch.phase === "finished" ? "Upscale finished. Saved takes are available for another version."
             : "Saved takes · queue the matching workflow to resume.";
-        if (hunting && batch.selected) {
+        if (hunting && batch.selected && !automatic) {
             status.textContent += ` · Finishing and saving take ${batch.current}; then upscale take ${batch.selected} and skip remaining candidates.`;
         }
         const remembered = node.properties.h3_selflift_preview;
@@ -267,8 +278,12 @@ function mount(node) {
             ? remembered.ordinal : batch.selected;
         const take = batch.candidates.find(c => c.ordinal === ordinal) || batch.candidates[0];
         currentTake = take;
-        player.hidden = candidates.hidden = !take;
-        empty.hidden = Boolean(take);
+        const hasPreview = Boolean(take?.preview);
+        player.hidden = !hasPreview;
+        candidates.hidden = !take;
+        empty.hidden = hasPreview;
+        empty.textContent = take ? "No Tiny-VAE preview was generated with the review gate off. The saved take can resume without a preview."
+            : "Completed motion previews will appear here.";
         if (!take) { clearVideo(); return; }
         node.properties.h3_selflift_preview = {id:key, created_at:batch.created_at, ordinal:take.ordinal};
         const position = batch.candidates.indexOf(take);
@@ -280,7 +295,9 @@ function mount(node) {
         // Only change the source when the viewed take changes. New candidates,
         // approvals and status polls must not reset the user's playback.
         const sourceKey = JSON.stringify([key, batch.created_at, take.ordinal, take.preview]);
-        if (sourceKey !== previewKey) {
+        if (!hasPreview) {
+            clearVideo();
+        } else if (sourceKey !== previewKey) {
             clearVideo();
             previewKey = sourceKey;
             const slash = take.preview.lastIndexOf("/");
@@ -306,8 +323,9 @@ function mount(node) {
             dot.setAttribute("aria-pressed", String(Number(dot.dataset.ordinal) === take.ordinal));
             dot.dataset.chosen = String(Number(dot.dataset.ordinal) === batch.selected);
         }
-        choose.disabled = cleaning || choosing || (batch.active && batch.phase === "high");
-        choose.textContent = hunting ? `Use take ${take.ordinal} now` : `Use take ${take.ordinal} — finish upscale`;
+        choose.disabled = cleaning || choosing || !hasPreview || (batch.active && (batch.phase === "high" || automatic));
+        choose.textContent = !hasPreview ? "Automatic take — no review required"
+            : hunting ? `Use take ${take.ordinal} now` : `Use take ${take.ordinal} — finish upscale`;
         choose.title = hunting ? "Finish and save the current candidate, skip the rest, then upscale this take."
             : "Select this take for upscale. If the hunt is stopped, queue its matching workflow to continue.";
     }};
@@ -366,6 +384,16 @@ function mount(node) {
     };
     const autoClean = node.widgets?.find(widget => widget.name === "auto_remove_saved_takes");
     if (autoClean) autoClean.label = "Auto-remove saved takes";
+    const review = node.widgets?.find(widget => widget.name === "review_enabled");
+    if (review) {
+        review.label = "Review gate";
+        const callback = review.callback;
+        review.callback = function () {
+            const result = callback?.apply(this, arguments);
+            panel.render();
+            return result;
+        };
+    }
     for (const event of ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick", "keydown"])
         root.addEventListener(event, e => e.stopPropagation());
     bindNodeWheel(root, node, app);

@@ -76,7 +76,10 @@ async function browserChecks() {
     try {
         await import("/web/h3_selflift_hunt.js");
         class Node {
-            constructor(size) { this.size = size; this.graph = graph; this.properties = {}; }
+            constructor(size) {
+                this.size = size; this.graph = graph; this.properties = {};
+                this.widgets = [{name:"review_enabled",value:true}];
+            }
             addDOMWidget(name, type, root, options) {
                 this.root = root; this.host = document.createElement("div"); this.host.className = "node";
                 const native = document.createElement("div"); native.className = "native";
@@ -153,8 +156,26 @@ async function browserChecks() {
         check(!Object.hasOwn(node.properties,"h3_selflift_preview_height") && player.style.height === "",
             "Double-click restores automatic node-fit height");
         node.host.style.transform = "";
+        const review = node.widgets[0];
+        check(review.label === "Review gate", "The gate toggle has a readable label");
+        review.value = false; review.callback();
+        check(root.querySelector('.h3sh-gate-notice').checkVisibility(), "Turning the gate off explains automatic mode");
+        batch.review_enabled = false;
+        batch.candidates = [{ordinal:1,seed:"1",preview:null}]; batch.selected = 1;
+        node._h3SelfLiftHunt.render();
+        check(!player.checkVisibility() && !video.getAttribute("src"), "Previewless automatic runs hide and release the video");
+        check(root.querySelector('.h3sh-empty').checkVisibility(), "Previewless recovery has an explanation");
+        check(root.querySelector('.h3sh-candidates').checkVisibility() && selected.disabled,
+            "Automatic take metadata is visible without inviting manual approval");
+        check(root.scrollHeight <= root.clientHeight, "Automatic mode fits the panel without empty video space");
+        check(root.querySelector('.h3sh-status').textContent.includes("upscaling take 1 automatically"),
+            "Automatic upscale reports progress without an approval request");
+        delete batch.review_enabled;
+        review.value = true; review.callback();
         batch.candidates = takes(2); batch.phase = "low"; batch.current = 3; batch.selected = null;
         node._h3SelfLiftHunt.render(); node.setSize([840, 1000]);
+        check(player.checkVisibility() && !root.querySelector('.h3sh-gate-notice').checkVisibility(),
+            "Turning review back on restores the normal preview layout");
         root.querySelector('button[data-ordinal="2"]').click();
         // Keep a separate mounted panel for the screenshot and test disposal on
         // another instance, leaving the primary player intact in the image.

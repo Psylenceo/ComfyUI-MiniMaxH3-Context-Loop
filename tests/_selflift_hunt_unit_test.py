@@ -109,6 +109,118 @@ class HuntTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.list(), [])
         self.assertFalse((self.root / "h3_chains").exists())
 
+    async def test_review_gate_schema_appends_default_on_for_old_workflows(self):
+        with patch.object(preview, "tiny_models", return_value=["taeh3.safetensors"]):
+            optional = hunt.MiniMaxH3SelfLiftSeedHunt.INPUT_TYPES()["optional"]
+        self.assertEqual(list(optional)[-2:], ["auto_remove_saved_takes", "review_enabled"])
+        self.assertIs(optional["review_enabled"][1]["default"], True)
+
+    async def test_gate_off_runs_one_take_without_preview_and_keeps_recovery(self):
+        with patch.object(preview, "check_preview", side_effect=AssertionError("No decoder needed")), \
+             patch.object(preview, "save_preview", side_effect=AssertionError("No preview needed")):
+            result = await asyncio.wait_for(self.run_node(4, review_enabled=False), 5)
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(4, 6), (8, 12)])
+        record = self.store.list()[0]
+        self.assertEqual((record["phase"], record["selected"], record["review_enabled"]), ("finished", 1, False))
+        self.assertEqual(len(record["candidates"]), 1)
+        self.assertIsNone(record["candidates"][0]["preview"])
+        folder = self.store.locate(record["id"])
+        for name in ("source.safetensors", "take_0001.safetensors", "finished_0001.safetensors", "recovery.json"):
+            self.assertTrue((folder / name).is_file(), name)
+        self.assertEqual(result["result"][2], self.state)
+        self.assertIn("review gate off", result["result"][1])
+        self.assertNotIn(hunt.CLEANUP_STATE, result["result"][2])
+        expected = runtime.progressive_sample(Model(), self.positive, self.positive, object(),
+            self.latent, Euler(), self.sigmas, 42, 1., 2, .5, 0., .5, 1., "nearest", latent_lifter=lift)
+        for a, b in zip(expected["samples"].unbind(), result["result"][0]["samples"].unbind()):
+            torch.testing.assert_close(a, b, rtol=0, atol=0)
+        CALLS.clear()
+        self.store = HuntStore(self.root)
+        await asyncio.wait_for(self.run_node(4, review_enabled=False), 5)
+        self.assertEqual(CALLS, [], "Reboot/downstream failure must reuse the finished take")
+        await asyncio.wait_for(self.run_node(4, review_enabled=True), 5)
+        self.assertEqual(CALLS, [], "Turning review on does not invalidate an existing chosen take")
+        self.assertEqual([r["id"] for r in self.store.list()], [record["id"]])
+
+    async def test_gate_off_resumes_saved_middle_after_failed_review_preview(self):
+        with patch.object(preview, "save_preview", side_effect=RuntimeError("preview OOM")):
+            with self.assertRaisesRegex(RuntimeError, "preview OOM"):
+                await self.run_node(3)
+        saved = self.store.list()[0]
+        CALLS.clear()
+        await asyncio.wait_for(self.run_node(3, review_enabled=False), 5)
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(8, 12)])
+        self.assertEqual([r["id"] for r in self.store.list()], [saved["id"]])
+
+    async def test_gate_off_respects_an_existing_chosen_take(self):
+        await self.select_when_ready(asyncio.create_task(self.run_node(2)))
+        saved = self.store.list()[0]
+        hunt.approve(self.store, saved["id"], 2)
+        CALLS.clear()
+        with patch.object(hunt, "selected_state", side_effect=lambda state, seed: dict(state)) as selected:
+            result = await asyncio.wait_for(self.run_node(4, review_enabled=False), 5)
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(8, 12)])
+        selected.assert_called_once_with(self.state, 43)
+        self.assertIn("take 2; seed 43", result["result"][1])
+        self.assertEqual(len(self.store.list()[0]["candidates"]), 2)
+        self.assertEqual(self.store.list()[0]["id"], saved["id"])
+
+    async def test_gate_off_high_oom_resumes_and_cleans_only_after_scene_save(self):
+        original = runtime.progressive_sample
+        def fail_high(*args, **kwargs):
+            if kwargs.get("handoff") is not None:
+                raise RuntimeError("automatic upscale OOM")
+            return original(*args, **kwargs)
+        with patch.object(runtime, "progressive_sample", side_effect=fail_high):
+            with self.assertRaisesRegex(RuntimeError, "automatic upscale OOM"):
+                await asyncio.wait_for(self.run_node(4, review_enabled=False, auto_remove_saved_takes=True), 5)
+        saved = self.store.list()[0]
+        self.assertEqual((saved["phase"], saved["selected"]), ("paused", 1))
+        folder = self.store.locate(saved["id"])
+        self.assertTrue((folder / "take_0001.safetensors").is_file())
+        self.assertNotIn(saved["id"], hunt._ACTIVE)
+        CALLS.clear()
+        self.store = HuntStore(self.root)
+        result = await asyncio.wait_for(self.run_node(4, review_enabled=False, auto_remove_saved_takes=True), 5)
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(8, 12)])
+        self.assertTrue(folder.exists(), "Decode/Segment Save have not succeeded yet")
+        removed = hunt.cleanup_after_segment_save(result["result"][2], self.root, logging.getLogger("hunt-test"))
+        self.assertGreaterEqual(removed["files"], 5)
+        self.assertFalse(folder.exists())
+
+    async def test_gate_on_recovers_unapproved_previewless_middle_without_resampling(self):
+        original = HuntStore.update
+        def fail_append(store, key, transform):
+            if transform.__name__ == "append":
+                raise RuntimeError("interrupted after durable low save")
+            return original(store, key, transform)
+        with patch.object(HuntStore, "update", fail_append):
+            with self.assertRaisesRegex(RuntimeError, "durable low save"):
+                await asyncio.wait_for(self.run_node(1, review_enabled=False), 5)
+        saved = self.store.list()[0]
+        self.assertIsNone(saved["selected"])
+        CALLS.clear()
+        await self.select_when_ready(asyncio.create_task(self.run_node(1)))
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(8, 12)])
+        self.assertTrue(self.store.list()[0]["candidates"][0]["preview"])
+        self.assertEqual(self.store.list()[0]["id"], saved["id"])
+
+    async def test_gate_off_locks_manual_choice_while_automatic_low_runs(self):
+        await self.select_when_ready(asyncio.create_task(self.run_node(2)))
+        saved = self.store.list()[0]
+        self.store.update(saved["id"], lambda r: r.update(selected=None))
+        original = HuntStore.update
+        def attempt_choice(store, key, transform):
+            if transform.__name__ == "begin_candidate":
+                with self.assertRaisesRegex(ValueError, "Review gate is off"):
+                    hunt.approve(store, key, 2)
+            return original(store, key, transform)
+        CALLS.clear()
+        with patch.object(HuntStore, "update", attempt_choice):
+            await asyncio.wait_for(self.run_node(4, review_enabled=False), 5)
+        self.assertEqual(self.store.list()[0]["selected"], 1)
+        self.assertEqual(CALLS, [], "Reuse the first saved take, including its finished high pass")
+
     async def test_auto_clean_waits_for_saved_scene_and_reuses_existing_hunt(self):
         # Default/off retains every candidate, including a completed high pass.
         first = await self.select_when_ready(asyncio.create_task(self.run_node(2)))
@@ -408,6 +520,7 @@ class HuntTests(unittest.IsolatedAsyncioTestCase):
                   "3": {"class_type": "Hunt", "inputs": {"model": ["2", 0], "candidate_count": 2}}}
         expected = hunt.source_recipe(prompt, "3")
         prompt["3"]["inputs"]["auto_remove_saved_takes"] = True
+        prompt["3"]["inputs"]["review_enabled"] = False
         self.assertEqual(hunt.source_recipe(prompt, "3"), expected)
         moved = {"v"+k: json.loads(json.dumps(v)) for k, v in prompt.items()}
         moved["v2"]["inputs"]["model"][0] = "v1"
