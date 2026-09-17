@@ -2,6 +2,7 @@
 import asyncio
 import importlib
 import json
+import math
 from pathlib import Path
 import tempfile
 import threading
@@ -60,9 +61,11 @@ class HuntTests(unittest.IsolatedAsyncioTestCase):
         store_module.atomic_json(path, {"fake_preview": True})
 
     async def run_node(self, candidates=2, **kwargs):
+        kwargs.setdefault("prompt", {})
+        kwargs.setdefault("extra_pnginfo", {"workflow": {"nodes": []}})
         return await hunt.MiniMaxH3SelfLiftSeedHunt().sample(
             self.state, Model(), self.positive, object(), self.latent, Euler(), self.sigmas,
-            42, candidate_count=candidates, prompt={}, extra_pnginfo={"workflow": {"nodes": []}}, **kwargs)
+            42, candidate_count=candidates, **kwargs)
 
     async def select_when_ready(self, task, ordinal=1):
         async with asyncio.timeout(5):
@@ -103,6 +106,65 @@ class HuntTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([v["steps"] for v in CALLS], [4])
         self.assertEqual(self.store.list(), [])
         self.assertFalse((self.root / "h3_chains").exists())
+
+    async def test_recovery_omits_runtime_cache_fingerprints_and_reuses_saved_batch(self):
+        prompt = {
+            "1": {"class_type": "Loader", "inputs": {"model": "h3"},
+                  "is_changed": [float("nan")]},
+            "2141": {"class_type": "MiniMaxH3SelfLiftSeedHunt", "inputs": {"model": ["1", 0]},
+                     "_meta": {"title": "My seed hunt"},
+                     "is_changed": [hunt.MiniMaxH3SelfLiftSeedHunt.IS_CHANGED()]},
+            "other:0": {"class_type": "OtherNode", "inputs": {"is_changed": "a real input"},
+                        "is_changed": float("nan")},
+        }
+        workflow = {"nodes": [{"id": 2141, "type": "MiniMaxH3SelfLiftSeedHunt",
+                               "pos": [200, 300], "widgets_values": [18446744073709551615]}],
+                    "links": [], "extra": {"note": "Keep the editable canvas"}}
+        expected_prompt = {key: {k: v for k, v in node.items() if k != "is_changed"}
+                           for key, node in prompt.items()}
+        recipe = hunt.source_recipe(prompt, "2141")
+        args = {"prompt": prompt, "unique_id": "2141", "extra_pnginfo": {"workflow": workflow}}
+        await self.select_when_ready(asyncio.create_task(self.run_node(1, **args)))
+        saved = self.store.list()[0]
+        def reject_nonfinite(value):
+            raise AssertionError("Recovery snapshot contains non-JSON constant " + value)
+        snapshot = json.loads((self.store.locate(saved["id"]) / "recovery.json").read_text(),
+                              parse_constant=reject_nonfinite)
+        self.assertEqual(snapshot["prompt"], expected_prompt)
+        self.assertEqual(snapshot["workflow"], workflow)
+        self.assertEqual(snapshot["plan"], self.state["plan"])
+        self.assertEqual(snapshot["contract"]["recipe"], recipe)
+        self.assertEqual(store_module.digest(snapshot["contract"]), saved["id"])
+        self.assertTrue(math.isnan(prompt["2141"]["is_changed"][0]), "do not mutate Comfy's cache")
+        self.assertTrue(math.isnan(prompt["other:0"]["is_changed"]))
+        prompt["1"]["is_changed"] = ["a different runtime fingerprint"]
+        prompt["2141"]["is_changed"] = [hunt.MiniMaxH3SelfLiftSeedHunt.IS_CHANGED()]
+        CALLS.clear()
+        await self.run_node(1, **args)
+        self.assertEqual(CALLS, [])
+        self.assertEqual([row["id"] for row in self.store.list()], [saved["id"]])
+
+    async def test_snapshot_keeps_real_nonfinite_inputs_invalid_and_atomic(self):
+        self.assertIsNone(hunt.recovery_prompt(None))
+        path = self.root / "recovery.json"
+        store_module.atomic_json(path, {"previous": "valid snapshot"})
+        before = path.read_bytes()
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value):
+                prompt = {"1": {"class_type": "Sampler", "inputs": {"cfg": value},
+                                "is_changed": [float("nan")]}}
+                snapshot = hunt.recovery_prompt(prompt)
+                self.assertNotIn("is_changed", snapshot["1"])
+                self.assertFalse(math.isfinite(snapshot["1"]["inputs"]["cfg"]))
+                with self.assertRaises(ValueError):
+                    store_module.atomic_json(path, {"prompt": snapshot})
+                with self.assertRaises(ValueError):
+                    store_module.digest({"cfg": value})
+                self.assertEqual(path.read_bytes(), before)
+                self.assertEqual(list(self.root.glob("*.tmp")), [])
+                snapshot["1"]["inputs"]["cfg"] = 1.0
+                self.assertFalse(math.isfinite(prompt["1"]["inputs"]["cfg"]),
+                                 "snapshot must be detached from the live prompt")
 
     async def test_all_candidates_low_only_high_runs_once_and_preserves_masks(self):
         result = await self.select_when_ready(asyncio.create_task(self.run_node(3)))

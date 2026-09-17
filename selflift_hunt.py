@@ -49,6 +49,19 @@ def source_recipe(prompt, unique_id, dynprompt=None):
             and isinstance(value, list) and len(value) == 2}
 
 
+def recovery_prompt(prompt):
+    """Copy the API prompt without Comfy's execution-only cache fingerprints.
+
+    Comfy adds node['is_changed'] during execution; our own IS_CHANGED returns
+    NaN to invalidate cached results. Those markers are neither JSON data nor
+    generation inputs. Do not mutate the live prompt or sanitize real inputs.
+    """
+    if prompt is None:
+        return None
+    return copy.deepcopy({node_id: {k: v for k, v in node.items() if k != "is_changed"}
+                          for node_id, node in prompt.items()})
+
+
 async def _work(function, *args, **kwargs):
     # Never leave a detached GPU worker behind if the owning execution cancels.
     task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
@@ -189,7 +202,7 @@ class MiniMaxH3SelfLiftSeedHunt:
                 source = {"latent": prepared, "positive": positive, "negative": positive if negative is None else negative}
                 # The large tensors are written once, never by polling/UI routes.
                 await _work(atomic_json, folder / "recovery.json", {"plan": plan, "contract": contract,
-                    "prompt": prompt, "workflow": (extra_pnginfo or {}).get("workflow")})
+                    "prompt": recovery_prompt(prompt), "workflow": (extra_pnginfo or {}).get("workflow")})
                 await _work(save_bundle, source_path, source)
                 del source, prepared
             source = await _work(load_bundle, source_path)
