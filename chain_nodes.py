@@ -22192,8 +22192,11 @@ class MiniMaxH3ChainReview:
                                "must reload the model stack."}),
                 "assemble_partial_on_stop": ("BOOLEAN", {
                     "default": True,
-                    "tooltip": "Approve & stop also joins every accepted segment "
-                               "through the current scene into a partial MP4."}),
+                    "tooltip": "Approve & stop also joins accepted segments "
+                               "through the current scene into a partial MP4. "
+                               "Follows the connected Chapter Delivery toggle: "
+                               "on exports the current chapter; off exports "
+                               "all accepted scenes."}),
                 "partial_audio_source": (["checkpointed", "source", "none"], {
                     "default": "checkpointed",
                     "tooltip": "Audio for the partial MP4 created by Approve "
@@ -22799,7 +22802,9 @@ class MiniMaxH3ChainReview:
                 try:
                     partial_path, partial_warning = _assemble_review_partial(
                         accepted_state, accepted_segment,
-                        partial_audio_source, source_audio)
+                        partial_audio_source, source_audio,
+                        export_current_chapter=_review_partial_current_chapter(
+                            dynprompt, unique_id))
                     partial_item = _video_output_item(partial_path)
                     status += "; partial video: %s" % partial_path
                     if partial_warning:
@@ -28262,19 +28267,83 @@ def _partial_boundary_tone_match_mode(manifest: dict[str, Any]) -> str:
     return "off"
 
 
+def _review_partial_current_chapter(
+        dynprompt: Any, unique_id: Any) -> bool | None:
+    """Read this gate's downstream delivery switch without executing exports.
+
+    Stop blocks Loop End, so Chapter Delivery cannot run normally. Recursive
+    retries have ephemeral IDs but share the visible gate's original delivery
+    route. The submitted API graph also has frontend subgraphs flattened.
+    None preserves legacy behavior when no Chapter Delivery is connected.
+    """
+    if dynprompt is None or unique_id is None:
+        return None
+    prompt = dynprompt.get_original_prompt()
+    gate_id = _review_display_id(unique_id, dynprompt)
+    consumers = {}
+    for node_id, node in prompt.items():
+        for name, value in node.get("inputs", {}).items():
+            if is_link(value) and value[1] == 0:
+                consumers.setdefault(str(value[0]), []).append((str(node_id), name))
+
+    def toggle(value):
+        visited = set()
+        while is_link(value) and value[1] == 0 and str(value[0]) not in visited:
+            node_id = str(value[0])
+            visited.add(node_id)
+            source = prompt.get(node_id, {})
+            inputs = source.get("inputs", {})
+            if source.get("class_type") == "PrimitiveBoolean":
+                value = inputs.get("value")
+            elif source.get("class_type") == "Reroute" and len(inputs) == 1:
+                value = next(iter(inputs.values()))
+            else:
+                break
+        if not isinstance(value, bool):
+            raise ValueError(
+                "Approve & Stop cannot read the connected Chapter Delivery "
+                "switch. Use its on/off widget or a Boolean primitive.")
+        return value
+
+    pending = [gate_id]
+    visited = set()
+    selections = set()
+    while pending:
+        parent = pending.pop()
+        if parent in visited:
+            continue
+        visited.add(parent)
+        for node_id, name in consumers.get(parent, []):
+            node = prompt[node_id]
+            kind = node.get("class_type")
+            if kind == "MiniMaxH3ChainChapterDelivery" and name == "manifest":
+                selections.add(toggle(node.get("inputs", {}).get("enabled", True)))
+            elif (kind == "Reroute" or
+                  (kind == "MiniMaxH3ChainLoopEnd" and name == "segment")):
+                pending.append(node_id)
+    if len(selections) > 1:
+        raise ValueError(
+            "Approve & Stop found conflicting Chapter Delivery switches on "
+            "this gate's output. Set them to the same export scope.")
+    return next(iter(selections), None)
+
+
 def _assemble_review_partial(
     state: dict[str, Any],
     segment: dict[str, Any],
     audio_source: str,
     source_audio: dict[str, Any] | None,
+    *, export_current_chapter: bool | None = None,
 ) -> tuple[str, str]:
     manifest = _partial_manifest(state, segment)
     sizes = {(size["width"], size["height"])
              for item in manifest["segments"]
              if (size := saved_resolution(item)) is not None}
-    if len(sizes) > 1:
-        # Review the current chapter without combining incompatible pictures.
-        # The execution state's full history remains untouched.
+    if (export_current_chapter is True or
+            (export_current_chapter is None and len(sizes) > 1)):
+        # Honor the same scope as normal delivery even at a shared resolution.
+        # With no delivery node, retain the legacy mixed-size preview fallback.
+        # The execution state's full history remains untouched in either case.
         manifest, _chapter_path = _chapter_manifest_from_manifest(manifest, 0)
     index = int(segment["index"])
     partial_dir = os.path.join(_run_dir(state["plan"]), "partial")
