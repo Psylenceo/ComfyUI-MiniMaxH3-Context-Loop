@@ -15,6 +15,15 @@ import {
     serializedProjectAssetCatalog,
     serializedProjectAssetIdentity,
 } from "./h3_project_asset_sync_core.mjs?v=0.6.10";
+import {
+    lineageChildren,
+    lineageFlatten,
+    familyKey,
+    familyGroupKey,
+    assetFamilies,
+    collectChildItems,
+    computeCarouselPlacement,
+} from "./h3_project_asset_carousel_core.mjs?v=0.6.10";
 
 const NODE_NAME = "MiniMaxH3ProjectAssetManager";
 const SEMANTIC_SETTING_WIDGETS = [
@@ -638,70 +647,11 @@ function mount(node) {
     function filteredAssets() {
         return allItems().filter((asset) => matchesTab(asset, state.filter));
     }
-    // Crops/edits are stored as new catalog entries carrying parent_asset_id
-    // (see project_assets.py register_derived_image); this indexes that
-    // backward pointer into a forward parent -> children lookup for the tree.
-    function lineageChildren(assets) {
-        const byParent = new Map();
-        for (const asset of assets) {
-            const parentId = String(asset.parent_asset_id ?? "");
-            if (!parentId) continue;
-            if (!byParent.has(parentId)) byParent.set(parentId, []);
-            byParent.get(parentId).push(asset);
-        }
-        return byParent;
-    }
-    function lineageFlatten(root, byParent) {
-        const ordered = [];
-        const visited = new Set();
-        (function walk(asset) {
-            if (!asset || visited.has(asset.id)) return;
-            visited.add(asset.id);
-            ordered.push(asset);
-            for (const child of byParent.get(String(asset.id)) ?? []) walk(child);
-        })(root);
-        return ordered;
-    }
     function setLineageExpanded(assetId, expanded) {
         const id = String(assetId ?? "");
         if (!id) return;
         if (expanded) state.expandedLineage.add(id);
         else state.expandedLineage.delete(id);
-    }
-    // Review Gate's frame capture re-uses a tag as an "updated take" of the
-    // same subject (see project_assets.py _capture_family_tag): @char_bob,
-    // @char_bob-v1, @char_bob-v2, ... The "-vN" delimiter (rather than a bare
-    // trailing digit) keeps this from misfiring on tags that just happen to
-    // end in a number or the letter v, e.g. @vehicle-van or @char-venessa.
-    const FAMILY_TAG_RE = /^(.*)-v(\d+)$/;
-    function familyKey(asset) {
-        const match = FAMILY_TAG_RE.exec(String(asset.tag ?? ""));
-        return match ? match[1] : String(asset.tag ?? "");
-    }
-    function familyOrdinal(asset) {
-        const match = FAMILY_TAG_RE.exec(String(asset.tag ?? ""));
-        return match ? Number(match[2]) : 0;
-    }
-    // A tag match alone isn't enough to call two assets versions of the same
-    // thing — @hero (an image) and @hero-v1 (an audio reference) sharing a
-    // base tag is a coincidence, not a relationship. Group (and look up
-    // groups) by base tag *and* media kind together so a family can never
-    // mix images/video/audio.
-    function familyGroupKey(asset) {
-        return `${familyKey(asset)} ${String(asset.kind ?? "")}`;
-    }
-    function assetFamilies(assets) {
-        const byKey = new Map();
-        for (const asset of assets) {
-            if (asset._unresolved || !asset.tag) continue;
-            const key = familyGroupKey(asset);
-            if (!byKey.has(key)) byKey.set(key, []);
-            byKey.get(key).push(asset);
-        }
-        for (const members of byKey.values()) {
-            members.sort((a, b) => familyOrdinal(a) - familyOrdinal(b));
-        }
-        return byKey;
     }
     function renderTabs() {
         tabs.replaceChildren();
@@ -1936,34 +1886,6 @@ function mount(node) {
         });
         return card;
     }
-    // Gathers what should render under one or more tree positions (an asset,
-    // or every member of a family sharing one stack): each position's plain
-    // (non-hoisted) crop children, plus any family stack that attaches at
-    // that exact position (see familyAttachPoint) — so a family nested
-    // entirely under some other asset renders in place there, rather than
-    // always being pulled up to the top of the tree.
-    function collectChildItems(nodes, byParent, hoisted, stacksByAttach) {
-        const items = [];
-        const seenFamilies = new Set();
-        for (const node of nodes) {
-            const nodeFolder = String(node.folder_id ?? "");
-            for (const child of byParent.get(String(node.id)) ?? []) {
-                if (hoisted.has(child.id)) continue;
-                // Folder placement is authoritative: a crop moved to a
-                // different folder than its parent is no longer "nested
-                // under" the parent for display — it surfaces as its own
-                // root item in its own folder instead (see isLineageRoot).
-                if (String(child.folder_id ?? "") !== nodeFolder) continue;
-                items.push({type: "asset", asset: child});
-            }
-            for (const [key, members] of stacksByAttach.get(String(node.id)) ?? []) {
-                if (seenFamilies.has(key)) continue;
-                seenFamilies.add(key);
-                items.push({type: "family", members});
-            }
-        }
-        return items;
-    }
     function renderChildItem(item, byParent, folderMember, hoisted, stacksByAttach) {
         return item.type === "family"
             ? familyStack(item.members, byParent, hoisted, stacksByAttach)
@@ -2025,126 +1947,37 @@ function mount(node) {
         ));
         return wrapper;
     }
-    // Where a family's stack should render: at the root of the tree, or
-    // nested under whichever ancestor isn't itself part of the family (e.g.
-    // two sibling crops of the same source that also happen to form a
-    // version family stay nested under that shared source, instead of being
-    // pulled up to the top of the tree).
-    function familyAttachPoint(members, byId) {
-        const memberIds = new Set(members.map((member) => member.id));
-        const base = members[0];
-        const parentId = String(base.parent_asset_id ?? "");
-        // A stale/out-of-scope parent (deleted, or filtered out of the
-        // current tab/role view) is not a usable attach point — fall back to
-        // the root rather than leaving the stack with nowhere to render.
-        if (!parentId || memberIds.has(parentId) || !byId.has(parentId)) return "";
-        return parentId;
-    }
     function renderCarousel() {
         carousel.replaceChildren();
         const assets = filteredAssets();
         if (!assets.some((asset) => asset.id === state.selected)) {
             state.selected = assets[0]?.id ?? "";
         }
-        // Built from the tab-filtered list, not the whole catalog: a child
-        // whose parent doesn't match the active role/kind filter (or isn't
-        // otherwise visible right now) must stand on its own rather than
-        // vanish because its parent is off-screen. The full-catalog view of
-        // this same relationship still drives the bottom detail row.
-        const byParent = lineageChildren(assets);
-        const byId = new Map(assets.map((item) => [String(item.id), item]));
-        const isLineageRoot = (asset) => {
-            const parentId = String(asset.parent_asset_id ?? "");
-            if (!parentId) return true;
-            const parent = byId.get(parentId);
-            if (!parent) return true;
-            // Folder placement is authoritative: a crop the user moved to a
-            // different folder than its parent is no longer "the parent's
-            // child" for display purposes, even though the crop lineage
-            // still exists (surfaced in the bottom detail row instead).
-            return String(asset.folder_id ?? "") !== String(parent.folder_id ?? "");
-        };
-        const folders = state.catalog.folders ?? [];
-        const folderById = new Map(folders.map(
-            (folder) => [String(folder.id), folder],
-        ));
-        const allMembers = new Map(folders.map(
-            (folder) => [String(folder.id), []],
-        ));
-        for (const asset of state.catalog.assets ?? []) {
-            const members = allMembers.get(String(asset.folder_id ?? ""));
-            if (members) members.push(asset);
-        }
-        const visibleMembers = new Map(folders.map(
-            (folder) => [String(folder.id), []],
-        ));
-        for (const asset of assets) {
-            const members = visibleMembers.get(String(asset.folder_id ?? ""));
-            if (members && !asset._unresolved) members.push(asset);
-        }
-        const families = assetFamilies(assets.filter((asset) => (
-            !asset._unresolved && !folderById.has(String(asset.folder_id ?? ""))
-        )));
-        const hoisted = new Set();
-        const stacksByAttach = new Map();
-        for (const [key, members] of families) {
-            if (members.length <= 1) continue;
-            for (const member of members) hoisted.add(member.id);
-            const attach = familyAttachPoint(members, byId);
-            if (!stacksByAttach.has(attach)) stacksByAttach.set(attach, new Map());
-            stacksByAttach.get(attach).set(key, members);
-        }
-        const rootFamilies = stacksByAttach.get("") ?? new Map();
-        const renderedFamilies = new Set();
-        const renderedFolders = new Set();
-        let renderedItems = 0;
-        for (const asset of assets) {
-            if (!asset._unresolved && hoisted.has(asset.id)) {
-                // Either rendered here (family attaches at the root) or it
-                // belongs under some other asset and surfaces there instead
-                // via collectChildItems — either way it's not a plain item.
-                const key = familyGroupKey(asset);
-                if (rootFamilies.has(key) && !renderedFamilies.has(key)) {
-                    renderedFamilies.add(key);
-                    carousel.append(familyStack(rootFamilies.get(key), byParent, hoisted, stacksByAttach));
-                    renderedItems += 1;
-                }
+        const plan = computeCarouselPlacement(
+            assets, state.catalog.assets ?? [], state.catalog.folders ?? [], state.filter,
+        );
+        for (const slot of plan.slots) {
+            if (slot.type === "family") {
+                carousel.append(familyStack(slot.members, plan.byParent, plan.hoisted, plan.stacksByAttach));
                 continue;
             }
-            if (!asset._unresolved && !isLineageRoot(asset)) continue;
-            const folder = !asset._unresolved
-                ? folderById.get(String(asset.folder_id ?? "")) : null;
-            if (!folder) {
-                carousel.append(renderTreeNode(asset, byParent, false, hoisted, stacksByAttach));
-                renderedItems += 1;
+            if (slot.type === "asset") {
+                carousel.append(renderTreeNode(slot.asset, plan.byParent, false, plan.hoisted, plan.stacksByAttach));
                 continue;
             }
-            const folderId = String(folder.id);
-            if (renderedFolders.has(folderId)) continue;
-            renderedFolders.add(folderId);
-            const members = (visibleMembers.get(folderId) ?? []).filter(isLineageRoot);
+            const folderId = String(slot.folder.id);
             const group = el("div", "h3pa-folder-group");
             const expanded = state.expandedFolders.has(folderId);
             group.classList.toggle("expanded", expanded);
-            group.append(folderCard(
-                folder, members, (allMembers.get(folderId) ?? []).length,
-            ));
+            group.append(folderCard(slot.folder, slot.members, slot.totalCount));
             if (expanded) {
-                for (const member of members) group.append(renderTreeNode(member, byParent, true, hoisted, stacksByAttach));
+                for (const member of slot.members) {
+                    group.append(renderTreeNode(member, plan.byParent, true, plan.hoisted, plan.stacksByAttach));
+                }
             }
             carousel.append(group);
-            renderedItems += 1;
         }
-        if (state.filter === "all") {
-            for (const folder of folders) {
-                if (renderedFolders.has(String(folder.id))) continue;
-                const group = el("div", "h3pa-folder-group");
-                group.append(folderCard(folder, [], 0));
-                carousel.append(group);
-                renderedItems += 1;
-            }
-        }
-        if (!renderedItems) {
+        if (!plan.slots.length) {
             carousel.append(el(
                 "div", "h3pa-carousel-empty",
                 "Drop image, video, or audio files here, or use Upload / Import.",
