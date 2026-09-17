@@ -195,6 +195,48 @@ class SelfLiftTests(unittest.TestCase):
         self.assertEqual(result[state.LOW_CARRY].shape, (1, 24, 17, 4, 6))
         torch.testing.assert_close(self.latent["samples"].unbind()[0], self.video)
 
+    def test_middle_pass_resumes_exactly_without_low_sampling(self):
+        # Include generated and feathered audio, not only a completely locked track.
+        self.am[..., :20] = .25
+        self.am[..., 20:] = 1
+        expected = self.run_runtime()
+        CALLS.clear()
+        args = (Model(), [], [], object(), self.latent, Euler(), self.sigmas,
+                42, 1., 2, .5, 0., .5, 1., "nearest")
+        with patch.object(runtime, "_pixel_anchor", side_effect=AssertionError("no decode"), create=True):
+            middle = runtime.progressive_sample(*args, stop_after_low=True,
+                latent_lifter=lambda *a, **kw: self.fail("low stage must not lift"))
+        self.assertEqual([v["steps"] for v in CALLS], [2])
+        CALLS.clear()
+        result = runtime.progressive_sample(*args, handoff=middle, latent_lifter=lift)
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(8, 12)])
+        self.assertEqual([v["steps"] for v in CALLS], [2])
+        for a, b in zip(expected["samples"].unbind(), result["samples"].unbind()):
+            torch.testing.assert_close(a, b, rtol=0, atol=0)
+        torch.testing.assert_close(expected[state.LOW_CARRY], result[state.LOW_CARRY])
+        with self.assertRaisesRegex(ValueError, "middle pass"):
+            runtime.progressive_sample(*args, handoff={**middle, "seed": 43}, latent_lifter=lift)
+
+    def test_middle_pass_resume_with_drift_control_and_native_low_carry(self):
+        drift = importlib.import_module(PACKAGE + ".drift_control")
+        original = Model()
+        original.model_options[drift._WRAPPER_KEY] = drift._DriftControlMaskState(
+            self.video.shape, 12, schedule_override=self.sigmas)
+        previous = {state.LOW_CARRY: torch.randn(1, 24, 17, 4, 6),
+                    state.SIGNATURE: state.settings_signature(self.settings)}
+        latent = state.prepare_previous_context(state.with_previous_context(self.latent, previous, 39), self.settings)
+        def run(**kwargs):
+            return runtime.progressive_sample(nodes._stage_model(original, latent, self.sigmas),
+                [], [], object(), latent, Euler(), self.sigmas, 42, 1., 2, .5, 0., .5, 1.,
+                "nearest", latent_lifter=lift, **kwargs)
+        expected = run()
+        middle = run(stop_after_low=True)
+        CALLS.clear()
+        result = run(handoff=middle)
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(8, 12)])
+        for a, b in zip(expected["samples"].unbind(), result["samples"].unbind()):
+            torch.testing.assert_close(a, b, rtol=0, atol=0)
+
     def test_feathered_audio_is_not_replaced_with_all_ones(self):
         self.am[..., :10] = .25
         self.am[..., 10:] = 1

@@ -38,6 +38,7 @@ SIZES = {
     'MiniMaxH3ChainLMSGuide': (540,420),
     'MiniMaxH3SelfLiftProject': (460,220),
     'MiniMaxH3ChainSelfLiftSampler': (480,330),
+    'MiniMaxH3SelfLiftSeedHunt': (760,900),
     'UltimateSDUpscaleNoUpscaleGuider': (500,720),
 }
 LABELS = {
@@ -55,6 +56,7 @@ LABELS = {
     'BasicScheduler':'Sampling Schedule', 'KSamplerSelect':'Sampler',
     'MiniMaxH3SelfLiftProject':'SelfLift Project • Experimental',
     'MiniMaxH3ChainSelfLiftSampler':'SelfLift AV Sampling • Experimental',
+    'MiniMaxH3SelfLiftSeedHunt':'SelfLift Seed Hunt • Experimental',
     'MinimaxH3LatentUpscaler3D':'LBH 3D Latent Upscaler', 'SeedVR2VideoPathUpscaler':'SeedVR2 Video Path Upscaler',
     'MMH3TemporalSplitParamsV10':'MMH3 Temporal Split Params',
     'MMH3SpatialSplitParamsV10':'MMH3 Spatial Split Params',

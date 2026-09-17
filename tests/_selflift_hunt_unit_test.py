@@ -1,0 +1,182 @@
+"""Isolated disk/OOM/requeue tests; no real project, model or GPU involved."""
+import asyncio
+import importlib
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+from _selflift_unit_test import (PACKAGE, Model, Euler, Nested, CALLS, lift,
+                                nodes, runtime, state as carry, stub, torch)
+
+folder_paths = stub("folder_paths", get_output_directory=lambda: "unused")
+import comfy.model_management
+comfy.model_management.throw_exception_if_processing_interrupted = lambda: None
+store_module = importlib.import_module(PACKAGE + ".selflift_hunt_store")
+hunt = importlib.import_module(PACKAGE + ".selflift_hunt")
+preview = importlib.import_module(PACKAGE + ".selflift_preview")
+layout = importlib.import_module(PACKAGE + ".chain_layout")
+HuntStore = store_module.HuntStore
+
+
+class HuntTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.store = HuntStore(self.root)
+        self.settings = {"enabled": True, "upscaler_model": "test.safetensors", "high_resolution_steps": 2}
+        self.shot = {"id": "walk", "seed": 42, "raw_frames": 56, "delivered_frames": 51,
+                     "scene_prompt": "A dog walks.", "prompt": "A dog walks."}
+        self.state = {"index": 1, "plan": {"run_name": "isolated_seed_hunt", "shots": [self.shot],
+                    "selflift_sampling": self.settings, "width": 192, "height": 128}, "segments": []}
+        self.video = torch.randn(1, 24, 17, 8, 12)
+        self.audio = torch.randn(1, 32, 2, 80)
+        vm = torch.ones(1, 1, 17, 8, 12); vm[:, :, :2] = 0; vm[:, :, 2:4] = .3
+        am = torch.ones(1, 1, 2, 80); am[..., :10] = 0; am[..., 10:20] = .4
+        self.latent = {"samples": Nested([self.video, self.audio]), "noise_mask": Nested([vm, am])}
+        self.sigmas = torch.tensor([1., .8, .6, .3, 0.])
+        self.positive = [[torch.randn(1, 4), {"minimax_keyframes": [{"latent": self.video, "frame_idx": 0}]}]]
+        self.patches = [
+            patch.object(folder_paths, "get_output_directory", return_value=str(self.root)),
+            patch.object(nodes, "upscaler_models", return_value=["test.safetensors"]),
+            patch.object(preview, "check_preview"),
+            patch.object(preview, "save_preview", side_effect=self.fake_preview),
+            patch.object(importlib.import_module(PACKAGE + ".selflift_runtime.h3_upscaler"),
+                "learned_latent_lift", side_effect=lambda z, hw, name, **kw: lift(z, hw, **kw), create=True),
+        ]
+        for p in self.patches:
+            p.start(); self.addCleanup(p.stop)
+        CALLS.clear()
+
+    def fake_preview(self, video, path, tiny, raw, trim):
+        # It must already be possible to restore the low stage if decode dies.
+        batch = self.store.list()[0]
+        candidate = self.store.locate(batch["id"]) / ("take_%04d.safetensors" % batch["current"])
+        self.assertTrue(candidate.is_file())
+        self.assertEqual((raw, trim), (56, 5))
+        store_module.atomic_json(path, {"fake_preview": True})
+
+    async def run_node(self, candidates=2, **kwargs):
+        return await hunt.MiniMaxH3SelfLiftSeedHunt().sample(
+            self.state, Model(), self.positive, object(), self.latent, Euler(), self.sigmas,
+            42, candidate_count=candidates, prompt={}, extra_pnginfo={"workflow": {"nodes": []}}, **kwargs)
+
+    async def select_when_ready(self, task, ordinal=1):
+        async with asyncio.timeout(5):
+            while not task.done():
+                rows = self.store.list()
+                if rows and rows[0].get("phase") == "waiting":
+                    hunt.approve(self.store, rows[0]["id"], ordinal)
+                    break
+                await asyncio.sleep(.01)
+            return await task
+
+    async def test_oom_during_preview_resumes_saved_middle_and_completed_high(self):
+        with patch.object(preview, "save_preview", side_effect=RuntimeError("simulated decode OOM")):
+            with self.assertRaisesRegex(RuntimeError, "simulated decode OOM"):
+                await self.run_node(1)
+        self.assertEqual([v["steps"] for v in CALLS], [2])
+        saved = self.store.list()[0]
+        self.assertEqual(saved["phase"], "paused")
+        self.assertNotIn(saved["id"], hunt._ACTIVE)
+        # New node/store instances simulate loss of all in-memory review state.
+        self.store = HuntStore(self.root)
+        CALLS.clear()
+        result = await self.select_when_ready(asyncio.create_task(self.run_node(1)))
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(8, 12)])
+        self.assertEqual(result["result"][2], self.state)
+        self.assertEqual(self.store.list()[0]["phase"], "finished")
+        CALLS.clear()
+        restored = await self.run_node(1)
+        self.assertEqual(CALLS, [])  # Downstream full VAE OOM doesn't repeat HIGH either.
+        for a, b in zip(result["result"][0]["samples"].unbind(), restored["result"][0]["samples"].unbind()):
+            torch.testing.assert_close(a, b, rtol=0, atol=0)
+
+    async def test_disabled_is_ordinary_sampling_without_saved_hunt(self):
+        self.settings["enabled"] = False
+        output, status, selected = await self.run_node(3)
+        self.assertIn("OFF", status)
+        self.assertIs(selected, self.state)
+        self.assertEqual([v["steps"] for v in CALLS], [4])
+        self.assertEqual(self.store.list(), [])
+        self.assertFalse((self.root / "h3_chains").exists())
+
+    async def test_all_candidates_low_only_high_runs_once_and_preserves_masks(self):
+        result = await self.select_when_ready(asyncio.create_task(self.run_node(3)))
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(4, 6)] * 3 + [(8, 12)])
+        record = self.store.list()[0]
+        self.assertEqual([c["seed"] for c in record["candidates"]], ["42", "43", "44"])
+        output = result["result"][0]
+        torch.testing.assert_close(output["samples"].unbind()[0][:, :, :2], self.video[:, :, :2], rtol=0, atol=0)
+        torch.testing.assert_close(output["samples"].unbind()[1][..., :10], self.audio[..., :10])
+        expected = runtime.progressive_sample(Model(), self.positive, self.positive, object(),
+            self.latent, Euler(), self.sigmas, 42, 1., 2, .5, 0., .5, 1., "nearest", latent_lifter=lift)
+        for a, b in zip(expected["samples"].unbind(), output["samples"].unbind()):
+            torch.testing.assert_close(a, b, rtol=0, atol=0)
+        self.assertIn(carry.LOW_CARRY, output)
+        self.assertTrue(layout.organized(self.root / "h3_chains" / "isolated_seed_hunt"))
+        self.assertIn("/processing/", record["candidates"][0]["preview"])
+        with patch.object(store_module, "load_bundle", side_effect=AssertionError("poll must not load tensors")):
+            self.assertEqual(len(HuntStore(self.root).list()), 1)
+
+    async def test_high_oom_keeps_approval_and_skips_all_low_work_on_retry(self):
+        original = runtime.progressive_sample
+        def fail_high(*args, **kwargs):
+            if kwargs.get("handoff") is not None:
+                raise RuntimeError("simulated upscale OOM")
+            return original(*args, **kwargs)
+        with patch.object(runtime, "progressive_sample", side_effect=fail_high):
+            with self.assertRaisesRegex(RuntimeError, "simulated upscale OOM"):
+                await self.select_when_ready(asyncio.create_task(self.run_node(1)))
+        self.assertEqual(self.store.list()[0]["selected"], 1)
+        CALLS.clear()
+        await self.run_node(1)
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(8, 12)])
+
+    async def test_bundle_roundtrip_and_interrupted_atomic_save(self):
+        path = self.root / "middle.safetensors"
+        value = {"latent": self.latent, "positive": self.positive, "sigmas": self.sigmas,
+                 "tuple": (1, None), "ints": {5: "five"}}
+        store_module.save_bundle(path, value)
+        before = path.read_bytes()
+        with patch.object(store_module.os, "replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                store_module.save_bundle(path, {"changed": torch.ones(5)})
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(list(self.root.glob("*.tmp")), [])
+        loaded = store_module.load_bundle(path)
+        self.assertEqual(loaded["tuple"], (1, None))
+        self.assertEqual(loaded["ints"], {5: "five"})
+        torch.testing.assert_close(loaded["latent"]["samples"].unbind()[0], self.video)
+        torch.testing.assert_close(loaded["positive"][0][1]["minimax_keyframes"][0]["latent"], self.video)
+        with self.assertRaises(TypeError):
+            store_module.save_bundle(path, {"unsafe": object()})
+        self.assertEqual(path.read_bytes(), before)
+
+    async def test_recipe_is_virtual_id_independent_but_tracks_lora_settings(self):
+        prompt = {"1": {"class_type": "Loader", "inputs": {"model": "h3"}},
+                  "2": {"class_type": "Lora", "inputs": {"model": ["1", 0], "strength": .8}},
+                  "3": {"class_type": "Hunt", "inputs": {"model": ["2", 0], "candidate_count": 2}}}
+        expected = hunt.source_recipe(prompt, "3")
+        moved = {"v"+k: json.loads(json.dumps(v)) for k, v in prompt.items()}
+        moved["v2"]["inputs"]["model"][0] = "v1"
+        moved["v3"]["inputs"]["model"][0] = "v2"
+        self.assertEqual(hunt.source_recipe(moved, "v3"), expected)
+        moved["v2"]["inputs"]["strength"] = .4
+        self.assertNotEqual(hunt.source_recipe(moved, "v3"), expected)
+
+    async def test_tiny_token_timing_and_no_full_clip_decode(self):
+        class Decoder:
+            latent_channels = 24
+            def decode(self, latent):
+                return torch.ones(1, 3, 8, 12) * float(latent[0, 0, 0, 0])
+        video = torch.arange(7).reshape(1, 1, 7, 1, 1).expand(1, 24, 7, 2, 2) / 10
+        frames = list(preview.preview_frames(Decoder(), video, 22))
+        self.assertEqual(len(frames), 22)
+        self.assertEqual([int(f[0, 0, 0]) for f in frames], [0] + [25]*4 + [51]*4 + [76]*4 + [102]*4 + [127] + [153]*4)
+
+
+if __name__ == "__main__":
+    unittest.main()

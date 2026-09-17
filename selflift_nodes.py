@@ -161,11 +161,17 @@ class MiniMaxH3ChainSelfLiftSampler:
         return output, status
 
 
+from .selflift_hunt import MiniMaxH3SelfLiftSeedHunt, register_routes
+
+register_routes()
+
 NODE_CLASS_MAPPINGS = {
     "MiniMaxH3SelfLiftProject": MiniMaxH3SelfLiftProject,
     "MiniMaxH3ChainSelfLiftSampler": MiniMaxH3ChainSelfLiftSampler,
+    "MiniMaxH3SelfLiftSeedHunt": MiniMaxH3SelfLiftSeedHunt,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3SelfLiftProject": "MiniMax H3 SelfLift Project — Experimental",
     "MiniMaxH3ChainSelfLiftSampler": "MiniMax H3 Chain SelfLift Sampler — Experimental",
+    "MiniMaxH3SelfLiftSeedHunt": "MiniMax H3 SelfLift Seed Hunt — Experimental",
 }

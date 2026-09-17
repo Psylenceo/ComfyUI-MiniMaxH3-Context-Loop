@@ -34,6 +34,20 @@ class CheckpointTests(unittest.TestCase):
         self.checkpoint = self.root / "checkpoint.safetensors"
         save_file(self.tensors, str(self.checkpoint))
 
+    def test_seed_hunt_selected_state_records_the_selected_seed(self):
+        hunt = importlib.import_module(PACKAGE + ".selflift_hunt")
+        plan = chain._normalize_plan(json.dumps({"shots": [
+            {"id": "walk", "prompt": "A dog walks.", "length": 90}]}),
+            "selflift_test", 64, 64, 5, "video", "head", "disabled", "generated_audio",
+            5, 1., 8, 11, 18, "test", 0, "latent_guide")
+        state = {"index": 1, "plan": plan, "segments": []}
+        selected = hunt.selected_state(state, 18446744073709551614)
+        self.assertEqual(selected["plan"]["shots"][0]["seed"], 18446744073709551614)
+        self.assertEqual(selected["plan"]["review_overrides"]["1"]["seed"], 18446744073709551614)
+        self.assertNotEqual(selected["plan"]["plan_hash"], plan["plan_hash"])
+        self.assertNotEqual(plan["shots"][0]["seed"], 18446744073709551614)
+        self.assertEqual(selected["plan"]["shots"][0]["prompt"], plan["shots"][0]["prompt"])
+
     def test_compact_and_editorial_trim_preserve_matching_time_axis(self):
         compact = chain._compact_latent(self.latent)
         self.assertNotEqual(compact[selflift.LOW_CARRY].data_ptr(), self.low.data_ptr())

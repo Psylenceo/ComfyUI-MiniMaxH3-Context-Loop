@@ -338,7 +338,7 @@ def _debug_dump(vae, latents):
 
 def progressive_sample(model, positive, negative, vae, latent_image, sampler, sigmas, seed, cfg,
                        transition_step, lowres_scale, rho, w_min, w_max, latent_upsample, latent_lifter=None,
-                       highres_tiling=False, model_hires=None):
+                       highres_tiling=False, model_hires=None, *, stop_after_low=False, handoff=None):
     _validate_schedule(sigmas, transition_step)
     if sigmas.numel() < 2:
         return latent_image
@@ -490,7 +490,8 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
         high_model = masked_model(high_model, video_anchor, m_full, auxiliary_masks)
     del source_video, low_video
     del streams
-    noise_low = comfy.sample.prepare_noise(low_latent, seed, latent_image.get("batch_index", None))
+    noise_low = (comfy.sample.prepare_noise(low_latent, seed, latent_image.get("batch_index", None))
+                 if handoff is None else None)
 
     total_steps = sigmas.shape[-1] - 1
     callback = latent_preview.prepare_callback(model, total_steps)
@@ -542,26 +543,48 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
         low_drift_state.configure_selflift_stage(
             (b, c, t, h, w), m_low, auxiliary_masks[0], hard_lock=False
         )
-    log_memory("low_resolution start", low_model.load_device)
-    comfy.samplers.sample(low_model, noise_low, positive_low, negative_low, cfg, low_model.load_device,
-                          sampler, sigmas[:transition_step + 1], low_model.model_options,
-                          latent_image=low_latent, denoise_mask=low_noise_mask,
-                          callback=callback_low,
-                          disable_pbar=disable_pbar, seed=seed)
-    if low_evaluations != transition_step:
-        raise RuntimeError(f"SelfLift: expected {transition_step} low-resolution callbacks, received {low_evaluations}; check sampler wrappers")
-    low_timer.finish()
-    log_memory("low_resolution end", model.load_device)
-    transition_timer = _StageTimer("transition", model.load_device, (H, W), resolution_scale)
-    low_streams, nested = _streams(transition.pop("state"))
-    x0_streams, _ = _streams(transition.pop("x0"))
     sigma_k = sigmas[transition_step - 1]
     sigma_next = sigmas[transition_step]
-    auxiliary_next = [_euler_step(state.to(device), denoised.to(device), sigma_k, sigma_next)
-                      for state, denoised in zip(low_streams[1:], x0_streams[1:])]
     latent_format = model.get_model_object("latent_format")
-    z0_low_vae = latent_format.process_out(x0_streams[0].float()).to(device)
-    del low_latent, noise_low, low_streams, x0_streams, positive_low, negative_low
+    if handoff is None:
+        log_memory("low_resolution start", low_model.load_device)
+        comfy.samplers.sample(low_model, noise_low, positive_low, negative_low, cfg, low_model.load_device,
+                              sampler, sigmas[:transition_step + 1], low_model.model_options,
+                              latent_image=low_latent, denoise_mask=low_noise_mask,
+                              callback=callback_low,
+                              disable_pbar=disable_pbar, seed=seed)
+        if low_evaluations != transition_step:
+            raise RuntimeError(f"SelfLift: expected {transition_step} low-resolution callbacks, received {low_evaluations}; check sampler wrappers")
+        low_timer.finish()
+        log_memory("low_resolution end", model.load_device)
+        low_streams, nested = _streams(transition.pop("state"))
+        x0_streams, _ = _streams(transition.pop("x0"))
+        auxiliary_next = [_euler_step(state.to(device), denoised.to(device), sigma_k, sigma_next)
+                          for state, denoised in zip(low_streams[1:], x0_streams[1:])]
+        z0_low_vae = latent_format.process_out(x0_streams[0].float()).to(device)
+        del low_streams, x0_streams
+    else:
+        if (handoff.get("format") != "h3_selflift_middle_v1"
+                or handoff.get("seed") != seed or handoff.get("cfg") != cfg
+                or handoff.get("transition_step") != transition_step
+                or handoff.get("target_shape") != list(video_anchor.shape)
+                or not torch.equal(handoff["sigmas"].cpu(), sigmas.cpu())):
+            raise ValueError("SelfLift middle pass does not match this sampling schedule/seed/grid.")
+        z0_low_vae = handoff["video_prediction"].to(device)
+        auxiliary_next = [value.to(device) for value in handoff["auxiliary_next"]]
+        if (tuple(z0_low_vae.shape) != low_shape
+                or [tuple(s.shape) for s in auxiliary_next] != [tuple(s.shape) for s in audio_streams]):
+            raise ValueError("SelfLift middle pass has incompatible video/audio shapes.")
+    del low_latent, noise_low, positive_low, negative_low
+    # This boundary is BEFORE loading the learned lifter or decoding a preview.
+    # The auxiliary stream is the noisy audio Euler state, not final audio/x0.
+    if stop_after_low:
+        return {"format": "h3_selflift_middle_v1", "seed": int(seed), "cfg": float(cfg),
+                "transition_step": int(transition_step), "target_shape": list(video_anchor.shape),
+                "sigmas": sigmas.detach().cpu().clone(),
+                "video_prediction": z0_low_vae.detach().cpu().contiguous().clone(),
+                "auxiliary_next": [value.detach().cpu().contiguous().clone() for value in auxiliary_next]}
+    transition_timer = _StageTimer("transition", model.load_device, (H, W), resolution_scale)
     transition_timer.mark("prepare_endpoint")
     log_memory("transition endpoint_ready", model.load_device)
 

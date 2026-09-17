@@ -44,3 +44,25 @@ for i, a in enumerate(workflow["nodes"]):
         bx, by = b["pos"]; bw, bh = b["size"]
         assert not (ax < bx+bw and bx < ax+aw and ay-30 < by+bh and by-30 < ay+ah), (a["type"], b["type"])
 print("SelfLift workflow: schema, opt-in switch, AV/LoRA/gate wiring and layout pass")
+
+workflow = json.loads((ROOT / "example_workflows/Ref2V Studio SelfLift Seed Hunt - EXPERIMENTAL - MiniMax H3 0.6.json").read_text())
+validate_workflow(workflow, load_schemas())
+nodes = {node["type"]: node for node in workflow["nodes"]}
+by_id = {node["id"]: node for node in workflow["nodes"]}
+links = {link[0]: link for link in workflow["links"]}
+hunt = "MiniMaxH3SelfLiftSeedHunt"
+assert sampler not in nodes
+assert origin(hunt, "state") == (current, "state")
+assert origin(hunt, "latent") == (context, "latent")
+assert origin(hunt, "seed") == (current, "noise_seed")
+for target in ("MiniMaxH3LoopTrim", "MiniMaxH3ChainSegmentSave", "MiniMaxH3ChainReview", "MiniMaxH3ChainLoopEnd"):
+    assert origin(target, "state") == (hunt, "selected_state")
+for target in ("MiniMaxH3ChainSegmentSave", "MiniMaxH3ChainLoopEnd"):
+    assert origin(target, "sampled_latent") == (hunt, "output")
+assert nodes[hunt]["widgets_values"] == [0, "fixed", 1, 4, "hunt_1", "taeh3.safetensors"]
+for i, a in enumerate(workflow["nodes"]):
+    ax, ay = a["pos"]; aw, ah = a["size"]
+    for b in workflow["nodes"][i+1:]:
+        bx, by = b["pos"]; bw, bh = b["size"]
+        assert not (ax < bx+bw and bx < ax+aw and ay-30 < by+bh and by-30 < ay+ah), (a["type"], b["type"])
+print("SelfLift Seed Hunt workflow: schema, chosen-state wiring, fixed seed and layout pass")
