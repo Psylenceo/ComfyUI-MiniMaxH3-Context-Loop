@@ -96,6 +96,22 @@ export function beginTrackingShotFields(shot) {
     editedFieldsSet(shot);
 }
 
+/** Retire edit tracking for a shot once its current field values have
+ * actually been serialized into the Plan JSON. markShotFieldEdited records
+ * intent to write; writePlan/commitPlan-style callers only ever rebase (and
+ * so only ever clear that tracking, inside rebaseScenePrompt) when the live
+ * Plan has diverged since the last write. An ordinary successful write with
+ * no such divergence never rebases, so without this call a field's "edited"
+ * mark would outlive the write itself - a later external push for that same
+ * field would then be wrongly treated as clobbering an in-progress local
+ * edit, and this shot's own stale value would be kept instead. Call this
+ * synchronously, right after the shot's fields are read into the Plan JSON
+ * that gets written to the widget, so nothing pending can be lost. */
+export function commitShotFields(shot) {
+    if (!shot || typeof shot !== "object") return;
+    if (shot.__h3EditedFields instanceof Set) shot.__h3EditedFields.clear();
+}
+
 /** Merge a dedicated editor's active prompt onto a freshly parsed Plan while
  * preserving the local Plan and active-shot object identities. DOM input
  * handlers commonly close over that shot object; replacing it after the first

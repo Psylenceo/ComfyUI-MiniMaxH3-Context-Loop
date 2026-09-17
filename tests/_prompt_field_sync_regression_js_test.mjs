@@ -25,7 +25,7 @@ import {
 } from "../web/h3_chain_plan_core.mjs";
 import {
     rebaseScenePrompt, planHasNonPromptChanges, markShotFieldEdited,
-    beginTrackingShotFields, publishCompanionPrompt,
+    beginTrackingShotFields, commitShotFields, publishCompanionPrompt,
 } from "../web/h3_prompt_companion_sync.mjs";
 import {PromptUndoHistory} from "../web/h3_rich_prompt_editor_core.mjs";
 
@@ -80,7 +80,8 @@ function buildEditorFixture(fileName, {planWidget, planNode, graph, initialPlanJ
     const factory = new Function(
         "parsePlanJson", "planToJson", "promptValueToText",
         "rebaseScenePrompt", "planHasNonPromptChanges", "markShotFieldEdited",
-        "beginTrackingShotFields", "publishCompanionPrompt", "PromptUndoHistory",
+        "beginTrackingShotFields", "commitShotFields", "publishCompanionPrompt",
+        "PromptUndoHistory",
         "node", "state", "root",
         body,
     );
@@ -95,7 +96,8 @@ function buildEditorFixture(fileName, {planWidget, planNode, graph, initialPlanJ
     const handle = factory(
         parsePlanJson, planToJson, promptValueToText,
         rebaseScenePrompt, planHasNonPromptChanges, markShotFieldEdited,
-        beginTrackingShotFields, publishCompanionPrompt, PromptUndoHistory,
+        beginTrackingShotFields, commitShotFields, publishCompanionPrompt,
+        PromptUndoHistory,
         node, state, root,
     );
     graph._nodes.push(node);
@@ -140,6 +142,64 @@ function runScenario(fileA, fileB) {
         "treating the live Plan as already in sync");
 }
 
+// Regression for: __h3EditedFields was only ever retired inside
+// rebaseScenePrompt, which an ordinary successful write/flush never calls
+// when the live Plan hasn't diverged since the writer's own last write.
+// A's field-edit mark therefore outlived the save that committed it. When
+// B later pushed a newer value for that SAME field, A's receiver correctly
+// adopted it - but the moment A saved an edit to the OTHER field, its own
+// still-"edited" (never retired) stale mark on the first field caused
+// rebaseScenePrompt to keep A's old value instead of B's newer one,
+// reverting B's already-saved change. commitShotFields (called right after
+// writePlan/commitPlan serializes the shot into the Plan JSON) fixes this
+// by retiring exactly the fields that were just committed.
+function runRepeatedEditScenario(fileA, fileB, field) {
+    const other = field === "prompt" ? "basic_prompt" : "prompt";
+    const initial = {shots: [
+        {id: "one", prompt: "Original H3 text.", basic_prompt: "old basic"},
+    ]};
+    const initialPlanJson = planToJson(initial);
+    const planWidget = {value: initialPlanJson};
+    const planNode = {};
+    const graph = {_nodes: []};
+
+    const editorA = buildEditorFixture(fileA, {planWidget, planNode, graph, initialPlanJson});
+    const editorB = buildEditorFixture(fileB, {planWidget, planNode, graph, initialPlanJson});
+
+    const valueOf = (v) => Array.isArray(v) ? v.join("\n") : v;
+    const firstByA = field === "prompt" ? ["First by A."] : "First by A.";
+    const newestByB = field === "prompt" ? ["Newest by B."] : "Newest by B.";
+    const otherByA = other === "prompt" ? ["Other field touched by A."] : "Other field touched by A.";
+
+    // Step 1: A saves the field first.
+    editorA.state.plan.shots[0][field] = firstByA;
+    markShotFieldEdited(editorA.state.plan.shots[0], field);
+    editorA.writePlan(`${field} first-saved by A`);
+    assert.equal(
+        valueOf(editorB.state.plan.shots[0][field]), valueOf(firstByA),
+        `${fileB}: companion push did not adopt A's first save of ${field}`);
+
+    // Step 2: B updates that SAME field to a newer value and saves.
+    editorB.state.plan.shots[0][field] = newestByB;
+    markShotFieldEdited(editorB.state.plan.shots[0], field);
+    editorB.writePlan(`${field} updated by B`);
+
+    // Step 3: back in A, edit only the OTHER field and save.
+    editorA.state.plan.shots[0][other] = otherByA;
+    markShotFieldEdited(editorA.state.plan.shots[0], other);
+    editorA.writePlan(`${other} edited by A`);
+
+    const finalPlan = parsePlanJson(planWidget.value);
+    assert.equal(
+        valueOf(finalPlan.shots[0][field]), valueOf(newestByB),
+        `${fileA} -> ${fileB}: A's edit of ${other} reverted B's already-saved ` +
+        `update to ${field} - a committed field mark on A must not outlive ` +
+        "the write that saved it");
+    assert.equal(
+        valueOf(finalPlan.shots[0][other]), valueOf(otherByA),
+        `${fileA} -> ${fileB}: A's own newer edit of ${other} was lost`);
+}
+
 const RICH = "web/h3_chain_rich_scene_prompt_editor.js";
 const SIMPLE = "web/h3_chain_scene_prompt_editor.js";
 
@@ -147,6 +207,8 @@ for (const [fileA, fileB] of [
     [RICH, RICH], [SIMPLE, SIMPLE], [RICH, SIMPLE], [SIMPLE, RICH],
 ]) {
     runScenario(fileA, fileB);
+    runRepeatedEditScenario(fileA, fileB, "prompt");
+    runRepeatedEditScenario(fileA, fileB, "basic_prompt");
 }
 
 console.log(

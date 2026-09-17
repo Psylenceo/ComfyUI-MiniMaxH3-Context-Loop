@@ -6,6 +6,7 @@ import {
     activeSceneIndexAfterRefresh,
     adjacentPlanCompanions,
     beginTrackingShotFields,
+    commitShotFields,
     connectedPlanStudios,
     connectedPromptEditors,
     markShotFieldEdited,
@@ -149,6 +150,29 @@ assert.equal(rebaseScenePrompt({shots:[{id:"gone",prompt:[]}]}, livePlan, 0), -1
         "a field already marked edited must survive beginTrackingShotFields");
     assert.equal(live.shots[0].basic_prompt, "live basic",
         "a field never touched must still adopt the live value");
+}
+{
+    // commitShotFields must retire tracking for fields already written into
+    // the Plan JSON, so an ordinary write that never rebases (because the
+    // live Plan had not diverged) does not leave a stale "edited" mark that
+    // a later external push for that same field would wrongly treat as an
+    // unsaved local edit still needing to win.
+    const committedShot = {id:"one", prompt:"saved H3", basic_prompt:"saved basic"};
+    markShotFieldEdited(committedShot, "prompt");
+    markShotFieldEdited(committedShot, "basic_prompt");
+    commitShotFields(committedShot);
+    const local = {shots:[committedShot]};
+    const live = {shots:[{id:"one", prompt:"newer H3 from elsewhere", basic_prompt:"newer basic from elsewhere"}]};
+    assert.equal(rebaseScenePrompt(local, live, 0), 0);
+    assert.equal(live.shots[0].prompt, "newer H3 from elsewhere",
+        "a committed field must adopt a later external value instead of clobbering it");
+    assert.equal(live.shots[0].basic_prompt, "newer basic from elsewhere",
+        "commitShotFields must retire tracking for both fields it commits");
+}
+{
+    // commitShotFields must be a no-op on a shot with no tracking Set yet.
+    commitShotFields({id:"one", prompt:"untracked"});
+    commitShotFields(null);
 }
 
 assert.equal(planHasNonPromptChanges(
