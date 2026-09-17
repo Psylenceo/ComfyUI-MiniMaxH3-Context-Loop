@@ -80,18 +80,26 @@ def save_bundle(path, value):
             return {"kind": "value", "value": item}
         raise TypeError("SelfLift handoff cannot persist %s; keep conditioning tensor-based." % type(item).__name__)
 
-    tree = json.dumps(encode(value), allow_nan=False, separators=(",", ":"))
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
+    temporary = None
     try:
+        tree = json.dumps(encode(value), allow_nan=False, separators=(",", ":"))
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
         save_file(tensors, str(temporary), metadata={"format": "h3_selflift_bundle_v1", "tree": tree})
         with temporary.open("rb") as handle:
             os.fsync(handle.fileno())
         os.replace(temporary, path)
         _sync_directory(path.parent)
     finally:
-        temporary.unlink(missing_ok=True)
+        # The recursive encoder closes over itself and the tensor table. Drop
+        # its CPU copies immediately, even if encoding failed or an exception
+        # traceback keeps this frame alive, rather than waiting for cyclic GC.
+        tensors.clear()
+        memo.clear()
+        encode = None
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def load_bundle(path):

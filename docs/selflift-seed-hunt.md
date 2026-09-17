@@ -133,6 +133,10 @@ space; rejected takes are **kept by default**. Model weights are
 not copied into a batch. Unsupported non-tensor conditioning objects fail
 before low-pass sampling rather than being pickled.
 
+Temporary CPU tensor copies used to write each bundle are released when the
+save finishes or fails, without waiting for cyclic garbage collection. This
+does not delete saved takes or flush ComfyUI's model/output caches.
+
 ### Cleanup
 
 - **Auto-remove saved takes** defaults to **off** (Keep saved takes). Leave it
