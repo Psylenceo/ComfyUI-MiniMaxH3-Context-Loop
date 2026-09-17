@@ -62,6 +62,7 @@ const {
     rebaseScenePrompt,
     markShotFieldEdited,
     beginTrackingShotFields,
+    commitShotFields,
 } = promptCompanionSync;
 const activeSceneIndexAfterRefresh =
     typeof promptCompanionSync.activeSceneIndexAfterRefresh === "function"
@@ -790,6 +791,7 @@ function mount(node) {
             return;
         }
         const value = planToJson(state.plan);
+        commitShotFields(state.plan.shots[state.active]);
         state.lastValue = value;
         state.planWidget.value = value;
         const pending = {
