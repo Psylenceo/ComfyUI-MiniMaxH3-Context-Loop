@@ -59,7 +59,7 @@ for target in ("MiniMaxH3LoopTrim", "MiniMaxH3ChainSegmentSave", "MiniMaxH3Chain
     assert origin(target, "state") == (hunt, "selected_state")
 for target in ("MiniMaxH3ChainSegmentSave", "MiniMaxH3ChainLoopEnd"):
     assert origin(target, "sampled_latent") == (hunt, "output")
-assert nodes[hunt]["widgets_values"] == [0, "fixed", 1, 4, "hunt_1", "taeh3.safetensors"]
+assert nodes[hunt]["widgets_values"] == [0, "fixed", 1, 4, "hunt_1", "taeh3.safetensors", False]
 for i, a in enumerate(workflow["nodes"]):
     ax, ay = a["pos"]; aw, ah = a["size"]
     for b in workflow["nodes"][i+1:]:

@@ -21408,6 +21408,10 @@ class MiniMaxH3ChainSegmentSave:
 
         cache_cleanup = confirm_saved_use(
             dynprompt, unique_id, published_metadata, _output_root(), _LOG)
+        hunt_cleanup = None
+        if state.get("_h3_selflift_hunt_cleanup"):
+            from .selflift_hunt import cleanup_after_segment_save
+            hunt_cleanup = cleanup_after_segment_save(state, _output_root(), _LOG)
         retained = (
             "; original generation checkpoint retained"
             if alternate_take is not None else
@@ -21425,6 +21429,8 @@ class MiniMaxH3ChainSegmentSave:
                    blend_status, retained))
         if cache_cleanup:
             status += "; retired %d verified legacy reference bundle(s)" % len(cache_cleanup)
+        if hunt_cleanup and hunt_cleanup["files"]:
+            status += "; cleaned %d SelfLift temporary file(s)" % hunt_cleanup["files"]
         _LOG.info("H3 Chain %s", status)
         ui = {"text": [status]}
         if not _has_downstream_review_gate(dynprompt, unique_id):

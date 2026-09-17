@@ -181,6 +181,55 @@ class HuntStore:
         return Path(resolve_path(working / "upscaled" / "selflift_seed_hunt" / "segments" /
                                  record["id"] / ("take_%04d.mp4" % ordinal)))
 
+    def remove(self, key, expected=None):
+        """Delete only this batch's scratch bundles/previews, never scene assets.
+
+        Callers exclude executing hunts. Preflight both flat directories before
+        deleting anything; never trust checkpoint/preview paths from batch JSON.
+        Leave the index until last so an interrupted cleanup can be retried.
+        """
+        entry = self._index().get(str(key))
+        if entry is None:
+            return {"files": 0, "bytes": 0}
+        run = _strict_run_name(entry["run_name"])
+        with checkpoint_run_lock(str(self.root), run):
+            if expected:
+                record = self.read(key)
+                if any(record.get(k) != v for k, v in expected.items()):
+                    raise ValueError("This saved hunt changed; refresh before cleaning it.")
+            folder = self.directory(entry)
+            previews = self.preview_path(entry, 1).parent
+            project = self.root / "h3_chains" / run
+            bundle_name = r"(?:batch\.json|recovery\.json|source\.safetensors|(?:take|finished)_\d{4,}\.safetensors)(?:\.[0-9a-f]{32}\.tmp)?"
+            preview_name = r"take_\d{4,}(?:\.[0-9a-f]{32}\.tmp)?\.mp4"
+            files = []
+            for directory, pattern in ((folder, bundle_name), (previews, preview_name)):
+                # Reject linked directories (including parents) and unknown
+                # contents instead of recursively deleting an arbitrary tree.
+                if (directory.name != str(key) or directory.resolve() != directory
+                        or not directory.is_relative_to(project)):
+                    raise ValueError("Unsafe SelfLift cleanup directory.")
+                if not directory.exists():
+                    continue
+                for path in directory.iterdir():
+                    if not re.fullmatch(pattern, path.name) or path.is_symlink() or not path.is_file():
+                        raise ValueError("Unexpected file in SelfLift cleanup directory: " + path.name)
+                    files.append(path)
+            result = {"files": 0, "bytes": 0}
+            for path in sorted(files, key=lambda p: p.name == "batch.json"):
+                size = path.stat().st_size
+                path.unlink()
+                result["files"] += 1
+                result["bytes"] += size
+            for directory in (previews, folder):
+                if directory.exists():
+                    directory.rmdir()
+            with checkpoint_run_lock(str(self.root), "selflift_review_index"):
+                index = self._index()
+                index.pop(str(key), None)
+                atomic_json(self.index_path, index)
+            return result
+
     def list(self):
         result = []
         for key in self._index():

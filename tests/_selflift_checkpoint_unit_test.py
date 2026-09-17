@@ -48,6 +48,66 @@ class CheckpointTests(unittest.TestCase):
         self.assertNotEqual(plan["shots"][0]["seed"], 18446744073709551614)
         self.assertEqual(selected["plan"]["shots"][0]["prompt"], plan["shots"][0]["prompt"])
 
+    def test_hunt_cleanup_only_after_real_segment_checkpoint_commit(self):
+        hunt = importlib.import_module(PACKAGE + ".selflift_hunt")
+        store = importlib.import_module(PACKAGE + ".selflift_hunt_store").HuntStore(self.root)
+        for enabled in (False, True):
+            with self.subTest(auto_remove=enabled):
+                plan = chain._normalize_plan(json.dumps({"shots": [
+                    {"id": "walk", "prompt": "A dog walks.", "length": 90}]}),
+                    "cleanup_%s" % enabled, 64, 64, 5, "video", "head", "disabled", "generated_audio",
+                    5, 1., 8, 11, 18, "test", 0, "latent_guide")
+                state = chain._initial_state(plan, 1)
+                record = store.create({"id": ("a" if enabled else "b") * 64,
+                    "run_name": plan["run_name"], "branch_id": "main", "scene": 1, "phase": "finished"})
+                store.update(record["id"], lambda r: r.update(selected=1))
+                folder = store.locate(record["id"])
+                for name in ("source.safetensors", "take_0001.safetensors", "finished_0001.safetensors"):
+                    (folder / name).write_bytes(b"hunt recovery fixture")
+                preview = store.preview_path(record, 1)
+                preview.parent.mkdir(parents=True)
+                preview.write_bytes(b"preview fixture")
+                if enabled:
+                    state[hunt.CLEANUP_STATE] = {"id": record["id"], "scene": 1,
+                        "selected": 1, "created_at": record["created_at"]}
+                images = torch.zeros(90, 64, 64, 3)
+                audio = {"sample_rate": 8000, "waveform": torch.zeros(1, 2, 30000)}
+                metadata_path = Path(chain._artifact_paths(plan, 1)["metadata"])
+                atomic_json = chain._atomic_json
+
+                def fail_commit(path, value):
+                    if Path(path) == metadata_path:
+                        raise OSError("synthetic commit failure")
+                    return atomic_json(path, value)
+
+                # Real Segment Save, checkpoint tensors and metadata; only the
+                # video encoder is a tiny fixture, so no model or GPU is used.
+                def video_fixture(_images, path, *_args, **_kwargs):
+                    Path(path).write_bytes(b"saved scene video fixture")
+
+                with patch.object(chain, "_write_segment_video", side_effect=video_fixture), \
+                        patch.object(hunt, "cleanup_after_segment_save", wraps=hunt.cleanup_after_segment_save) as cleanup:
+                    with patch.object(chain, "_atomic_json", side_effect=fail_commit):
+                        with self.assertRaisesRegex(OSError, "synthetic commit failure"):
+                            chain.MiniMaxH3ChainSegmentSave().save(state, images, self.latent, audio)
+                    cleanup.assert_not_called()
+                    self.assertTrue((folder / "finished_0001.safetensors").is_file())
+                    self.assertTrue(preview.is_file())
+                    result = chain.MiniMaxH3ChainSegmentSave().save(state, images, self.latent, audio)
+                    self.assertEqual(cleanup.call_count, int(enabled))
+                segment, status = result["result"]
+                metadata = json.loads(metadata_path.read_text())
+                self.assertEqual(metadata["segment"]["revision"], segment["revision"])
+                for key in ("segment", "checkpoint", "revision_metadata", "generated_audio"):
+                    if key in segment:
+                        self.assertTrue((self.root / segment[key]).is_file(), key)
+                from safetensors.torch import load_file
+                saved = load_file(str(self.root / segment["checkpoint"]))
+                torch.testing.assert_close(saved["selflift_low_resolution_carry"], self.low)
+                self.assertEqual(folder.exists(), not enabled)
+                self.assertEqual(preview.exists(), not enabled)
+                self.assertEqual("SelfLift temporary" in status, enabled)
+
     def test_compact_and_editorial_trim_preserve_matching_time_axis(self):
         compact = chain._compact_latent(self.latent)
         self.assertNotEqual(compact[selflift.LOW_CARRY].data_ptr(), self.low.data_ptr())

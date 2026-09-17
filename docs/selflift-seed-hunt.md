@@ -12,7 +12,9 @@ workflows and the ordinary Review Gate are unchanged.
    and the temporal TAEH3 format supported by KJNodes both work.
 3. Set candidate count and a batch name. Keep the base seed **fixed**. Queue.
    Candidate seeds are base seed, base seed + 1, etc., wrapping at uint64.
-4. Play the low-pass videos in the node, then click **Use take — finish upscale**.
+4. Browse the low-pass videos with the Review Gate-style arrows or dots, then
+   click **Use take — finish upscale**. The single player fills the node; drag
+   its lower handle to resize it, or double-click the handle to restore auto-fit.
    Only that candidate gets the learned lift and remaining high-resolution steps.
    These are silent, approximate motion/composition previews, not final-detail
    or audio-quality previews. Flat 2D TAE frames repeat at H3's token timing;
@@ -52,7 +54,10 @@ candidate must rerun that candidate; earlier completed candidates remain saved.
 This is boundary recovery, not per-denoising-step checkpointing.
 
 The saved-batch dropdown can review and select a take even without a running
-job. **Download saved workflow** provides the original canvas snapshot if
+job. Browsing is separate from choosing: changing previews never approves a
+take. Incoming candidates and ordinary polls do not interrupt playback, and
+you can still browse while the chosen take is being upscaled.
+**Download saved workflow**, under **Help & recovery**, provides the original canvas snapshot if
 needed. Selecting a saved take does not automatically queue a workflow or
 replace the current canvas. The matching workflow must still be queued.
 In a multi-scene run, set Loop Start to that saved batch's scene when recovering
@@ -75,9 +80,29 @@ One shared safetensors bundle stores masks, full-size context anchors and
 conditioning. Each take stores the low-resolution clean video prediction,
 the noisy audio handoff, seed, schedule and grid metadata. The selected final
 latent has its own bundle. These are real disk files and can use substantial
-space; rejected takes are **not automatically deleted**. Model weights are
+space; rejected takes are **kept by default**. Model weights are
 not copied into a batch. Unsupported non-tensor conditioning objects fail
 before low-pass sampling rather than being pickled.
+
+### Cleanup
+
+- **Auto-remove saved takes** defaults to **off** (Keep saved takes). Leave it
+  off to select and upscale another version from the same hunt later.
+- Turn it **on** (Clean after scene save) to remove that hunt's temporary
+  bundles, tiny previews and recovery snapshot after **Segment Save** commits
+  the chosen clip and its normal checkpoint. Keep `selected_state` connected
+  to Segment Save, as in the example. Choosing a take or finishing its high
+  pass alone does not delete anything: a decode/save OOM still has recovery.
+- **Clean saved takes**, beside Refresh, permanently removes only the batch
+  selected in the dropdown after confirmation. It is disabled while that hunt
+  is running; stop it first if you want to discard an unfinished batch.
+
+Both paths keep normal scene videos, checkpoints, project assets and other
+hunts. Cleanup cannot be undone: that batch can no longer resume or provide
+another version without rerunning its low passes. Cleanup errors leave the
+saved scene successful and are reported in the log/manual button response.
+The auto-clean choice does not change the hunt's identity; switching it on
+can reuse an existing saved hunt with otherwise matching settings.
 
 No migration, media scan, weight loading or tensor loading runs on workflow
 load. The browser requests only small saved-review manifests and loads video

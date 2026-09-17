@@ -252,7 +252,8 @@
         "cfg": 1,
         "candidate_count": 4,
         "batch_name": "hunt_1",
-        "tiny_vae": "taeh3.safetensors"
+        "tiny_vae": "taeh3.safetensors",
+        "auto_remove_saved_takes": false
       },
       "inputs": {
         "state": [

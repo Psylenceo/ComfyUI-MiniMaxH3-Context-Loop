@@ -6,7 +6,9 @@ import copy
 import threading
 
 _ACTIVE = set()
+_CLEANING = set()
 _ACTIVE_LOCK = threading.Lock()
+CLEANUP_STATE = "_h3_selflift_hunt_cleanup"
 
 
 def source_recipe(prompt, unique_id, dynprompt=None):
@@ -96,7 +98,45 @@ def approve(store, key, ordinal):
         if not (store.locate(key) / take["checkpoint"]).is_file():
             raise ValueError("This take's middle-pass file is missing.")
         record["selected"] = ordinal
-    return store.update(key, change)
+    with _ACTIVE_LOCK:
+        if key in _CLEANING:
+            raise ValueError("This saved hunt is being cleaned.")
+        return store.update(key, change)
+
+
+def clean_saved_hunt(store, key, expected=None):
+    with _ACTIVE_LOCK:
+        if key in _ACTIVE or key in _CLEANING:
+            raise ValueError("Stop the running hunt before cleaning its saved takes.")
+        _CLEANING.add(key)
+    try:
+        return store.remove(key, expected)
+    finally:
+        with _ACTIVE_LOCK:
+            _CLEANING.discard(key)
+
+
+def cleanup_after_segment_save(state, output_root, logger):
+    """Called only after Segment Save commits a durable normal checkpoint.
+
+    A decode/save OOM leaves the full hunt intact. A stale state from another
+    scene, selection or recreated batch cannot delete a newer saved hunt.
+    Cleanup failure is advisory: never fail an already saved scene.
+    """
+    marker = state.get(CLEANUP_STATE)
+    if not isinstance(marker, dict) or marker.get("scene") != state.get("index"):
+        return None
+    from .selflift_hunt_store import HuntStore
+    plan = state["plan"]
+    try:
+        return clean_saved_hunt(HuntStore(output_root), marker["id"], {
+            "created_at": marker["created_at"], "selected": marker["selected"], "phase": "finished",
+            "run_name": plan["run_name"], "branch_id": plan.get("_branch_id", "main"),
+            "scene": state["index"],
+        })
+    except (OSError, ValueError, KeyError) as exc:
+        logger.warning("H3 SelfLift scene saved; temporary hunt cleanup skipped: %s", exc)
+        return None
 
 
 class MiniMaxH3SelfLiftSeedHunt:
@@ -110,6 +150,12 @@ class MiniMaxH3SelfLiftSeedHunt:
             "batch_name": ("STRING", {"default": "hunt_1", "tooltip":
                 "Keep this and the seed unchanged to resume saved takes. Change it for a fresh hunt."}),
             "tiny_vae": (tiny_models(),),
+        })
+        schema.setdefault("optional", {})["auto_remove_saved_takes"] = ("BOOLEAN", {
+            "default": False, "label_on": "Clean after scene save", "label_off": "Keep saved takes",
+            "tooltip": "Delete this hunt's temporary latents and previews only after Segment Save "
+                       "successfully saves the chosen clip/checkpoint. Keep off to upscale multiple takes. "
+                       "Requires selected_state connected to Segment Save. Failed runs keep recovery files.",
         })
         schema["hidden"] = {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO",
                             "unique_id": "UNIQUE_ID", "dynprompt": "DYNPROMPT"}
@@ -132,7 +178,7 @@ class MiniMaxH3SelfLiftSeedHunt:
     async def sample(self, state, model, positive, vae, latent, sampler, sigmas, seed,
                      cfg=1.0, negative=None, candidate_count=4, batch_name="hunt_1",
                      tiny_vae="taeh3.safetensors", prompt=None, extra_pnginfo=None,
-                     unique_id=None, dynprompt=None):
+                     unique_id=None, dynprompt=None, auto_remove_saved_takes=False):
         import folder_paths
         import torch
         import comfy.nested_tensor
@@ -175,7 +221,7 @@ class MiniMaxH3SelfLiftSeedHunt:
             "sigmas": sigmas.detach().cpu().tolist(), "batch_name": str(batch_name)}
         key = digest(contract)
         with _ACTIVE_LOCK:
-            if key in _ACTIVE:
+            if key in _ACTIVE or key in _CLEANING:
                 raise ValueError("This SelfLift hunt is already running.")
             _ACTIVE.add(key)
         try:
@@ -281,6 +327,10 @@ class MiniMaxH3SelfLiftSeedHunt:
                 output[SIGNATURE] = settings_signature(settings)
                 await _work(save_bundle, finished_path, output)
             chosen_state = selected_state(state, int(selected["seed"]))
+            chosen_state.pop(CLEANUP_STATE, None)
+            if auto_remove_saved_takes:
+                chosen_state[CLEANUP_STATE] = {"id": key, "created_at": record["created_at"],
+                    "selected": selected["ordinal"], "scene": scene}
             await _work(update, phase="finished")
             notify()
             return {"ui": {"h3_selflift_hunt": [key]}, "result": (output,
@@ -340,6 +390,19 @@ def register_routes():
                 "Content-Disposition": 'attachment; filename="SelfLift-hunt-recovery.json"'})
         except (ValueError, FileNotFoundError) as exc:
             return web.json_response({"error": str(exc)}, status=400)
+
+    async def clean(request):
+        try:
+            body = await request.json()
+            if body.get("confirm") is not True or "created_at" not in body:
+                raise ValueError("Confirm cleanup of the selected saved hunt.")
+            result = await asyncio.to_thread(clean_saved_hunt,
+                HuntStore(folder_paths.get_output_directory()), str(body.get("id", "")),
+                {"created_at": body["created_at"]})
+            return web.json_response({"ok": True, **result})
+        except (OSError, ValueError, KeyError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
     routes.get("/h3/selflift/hunts")(listing)
     routes.post("/h3/selflift/choose")(choose)
     routes.get("/h3/selflift/workflow")(workflow)
+    routes.post("/h3/selflift/clean")(clean)

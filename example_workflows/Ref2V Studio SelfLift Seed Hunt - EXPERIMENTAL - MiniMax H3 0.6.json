@@ -879,7 +879,8 @@
         1,
         4,
         "hunt_1",
-        "taeh3.safetensors"
+        "taeh3.safetensors",
+        false
       ]
     },
     {

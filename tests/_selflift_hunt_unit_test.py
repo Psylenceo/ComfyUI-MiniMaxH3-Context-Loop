@@ -3,6 +3,7 @@ import asyncio
 import importlib
 import json
 import math
+import logging
 from pathlib import Path
 import tempfile
 import threading
@@ -107,6 +108,78 @@ class HuntTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.list(), [])
         self.assertFalse((self.root / "h3_chains").exists())
 
+    async def test_auto_clean_waits_for_saved_scene_and_reuses_existing_hunt(self):
+        # Default/off retains every candidate, including a completed high pass.
+        first = await self.select_when_ready(asyncio.create_task(self.run_node(2)))
+        self.assertNotIn(hunt.CLEANUP_STATE, first["result"][2])
+        record = self.store.list()[0]
+        folder = self.store.locate(record["id"])
+        before = {path: path.read_bytes() for path in folder.iterdir()}
+        CALLS.clear()
+        result = await self.run_node(2, auto_remove_saved_takes=True)
+        chosen = result["result"][2]
+        self.assertEqual(CALLS, [], "changing cleanup preference must not start a new hunt")
+        self.assertNotIn(hunt.CLEANUP_STATE, self.state)
+        self.assertEqual({path: path.read_bytes() for path in folder.iterdir()}, before)
+        # A downstream decode failure has not called the save hook: rerun
+        # still reuses the finished high latent without doing any sampling.
+        await self.run_node(2, auto_remove_saved_takes=True)
+        self.assertEqual(CALLS, [])
+        logger = logging.getLogger("hunt-test")
+        self.assertIsNone(hunt.cleanup_after_segment_save(dict(chosen, index=2), self.root, logger))
+        self.assertTrue(folder.exists(), "old cleanup marker cannot affect the next scene")
+        removed = hunt.cleanup_after_segment_save(chosen, self.root, logger)
+        self.assertGreater(removed["files"], 4)
+        self.assertFalse(folder.exists())
+        self.assertEqual(self.store.list(), [])
+        self.assertTrue(all(not (self.root / take["preview"]).exists() for take in record["candidates"]))
+
+    async def test_cleanup_disabled_allows_upscaling_second_version(self):
+        await self.select_when_ready(asyncio.create_task(self.run_node(2)))
+        record = self.store.list()[0]
+        hunt.approve(self.store, record["id"], 2)
+        CALLS.clear()
+        # Use a same-seed shot here: selected_state's real plan revision behavior
+        # is covered by the checkpoint suite with the complete Chain schema.
+        with patch.object(hunt, "selected_state", side_effect=lambda state, seed: dict(state)):
+            await self.run_node(2)
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(8, 12)])
+        folder = self.store.locate(record["id"])
+        self.assertTrue((folder / "finished_0001.safetensors").is_file())
+        self.assertTrue((folder / "finished_0002.safetensors").is_file())
+        self.assertEqual(len(self.store.list()[0]["candidates"]), 2)
+
+    async def test_cleanup_refuses_active_hunt_and_fences_sampling_while_deleting(self):
+        await self.select_when_ready(asyncio.create_task(self.run_node(1)))
+        record = self.store.list()[0]
+        key = record["id"]
+        hunt._ACTIVE.add(key)
+        try:
+            with self.assertRaisesRegex(ValueError, "running hunt"):
+                hunt.clean_saved_hunt(self.store, key)
+        finally:
+            hunt._ACTIVE.discard(key)
+        original = self.store.remove
+        def deleting(*args):
+            self.assertIn(key, hunt._CLEANING)
+            with self.assertRaisesRegex(ValueError, "being cleaned"):
+                hunt.approve(self.store, key, 1)
+            with self.assertRaisesRegex(ValueError, "running hunt"):
+                hunt.clean_saved_hunt(self.store, key)
+            return original(*args)
+        with patch.object(self.store, "remove", side_effect=deleting):
+            hunt.clean_saved_hunt(self.store, key, {"created_at": record["created_at"]})
+        self.assertNotIn(key, hunt._CLEANING)
+
+    async def test_cleanup_failure_does_not_fail_the_saved_scene(self):
+        result = await self.select_when_ready(asyncio.create_task(self.run_node(1, auto_remove_saved_takes=True)))
+        with patch.object(HuntStore, "remove", side_effect=OSError("read-only disk")):
+            with self.assertLogs("cleanup-test", level="WARNING"):
+                self.assertIsNone(hunt.cleanup_after_segment_save(result["result"][2], self.root,
+                    logging.getLogger("cleanup-test")))
+        self.assertEqual(self.store.list()[0]["phase"], "finished")
+        self.assertEqual(hunt._CLEANING, set())
+
     async def test_recovery_omits_runtime_cache_fingerprints_and_reuses_saved_batch(self):
         prompt = {
             "1": {"class_type": "Loader", "inputs": {"model": "h3"},
@@ -192,7 +265,7 @@ class HuntTests(unittest.IsolatedAsyncioTestCase):
             return original(*args, **kwargs)
         with patch.object(runtime, "progressive_sample", side_effect=fail_high):
             with self.assertRaisesRegex(RuntimeError, "simulated upscale OOM"):
-                await self.select_when_ready(asyncio.create_task(self.run_node(1)))
+                await self.select_when_ready(asyncio.create_task(self.run_node(1, auto_remove_saved_takes=True)))
         self.assertEqual(self.store.list()[0]["selected"], 1)
         CALLS.clear()
         await self.run_node(1)
@@ -333,6 +406,8 @@ class HuntTests(unittest.IsolatedAsyncioTestCase):
                   "2": {"class_type": "Lora", "inputs": {"model": ["1", 0], "strength": .8}},
                   "3": {"class_type": "Hunt", "inputs": {"model": ["2", 0], "candidate_count": 2}}}
         expected = hunt.source_recipe(prompt, "3")
+        prompt["3"]["inputs"]["auto_remove_saved_takes"] = True
+        self.assertEqual(hunt.source_recipe(prompt, "3"), expected)
         moved = {"v"+k: json.loads(json.dumps(v)) for k, v in prompt.items()}
         moved["v2"]["inputs"]["model"][0] = "v1"
         moved["v3"]["inputs"]["model"][0] = "v2"
