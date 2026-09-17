@@ -61,6 +61,7 @@ const {
     publishCompanionScene,
     rebaseScenePrompt,
     markShotFieldEdited,
+    beginTrackingShotFields,
 } = promptCompanionSync;
 const activeSceneIndexAfterRefresh =
     typeof promptCompanionSync.activeSceneIndexAfterRefresh === "function"
@@ -1723,7 +1724,7 @@ function mount(node) {
                     state.optimizer.origins.set(meta.sceneKey, {source:meta.source, result});
                     writePlan("Optimized prompt saved to Plan");
                     if (state.active === meta.sceneIndex) {
-                        refreshTaggedReferencesForShot(shot, result);
+                        refreshTaggedReferencesForShot(result);
                         renderEditorText(result);
                         scheduleHistoryDraft(meta.sceneId, result, shot.basic_prompt);
                         void flushHistoryDraft();
@@ -1772,7 +1773,7 @@ function mount(node) {
         state.optimizer.message = "Changed source replaced explicitly; result saved as a new revision.";
         writePlan("Optimized prompt saved to Plan");
         if (state.active === pending.sceneIndex) {
-            refreshTaggedReferencesForShot(shot, pending.result);
+            refreshTaggedReferencesForShot(pending.result);
             renderEditorText(pending.result);
             scheduleHistoryDraft(pending.sceneId, pending.result, shot.basic_prompt);
             void flushHistoryDraft();
@@ -1780,19 +1781,26 @@ function mount(node) {
         refreshOptimizerUi();
     }
 
-    // A tag can appear only in the basic prompt, not yet in the H3 prompt
-    // text an applied optimizer result replaces. Refresh the reference
-    // tray/highlighting against the shot's current basic_prompt as well as
-    // the new H3 text before redrawing, or a tag that Optimize just turned
-    // into real content stays shown "inactive" until an unrelated manual
-    // edit happens to trigger a refresh.
-    function refreshTaggedReferencesForShot(shot, text) {
+    // A tag introduced by Optimize needs the reference tray/highlighting
+    // refreshed against the resulting H3 text before redrawing, or it stays
+    // shown "inactive" until an unrelated manual edit happens to trigger a
+    // refresh.
+    function refreshTaggedReferencesForShot(text) {
         if (state.referenceMode !== "tagged") return;
+        // Deliberately scans the shared prompt plus the resulting H3 text
+        // only, not basic_prompt: this refresh runs AFTER an optimizer
+        // result has been applied, and it must reflect what generation will
+        // actually compile from (_active_reference_bindings, server-side,
+        // never looks at basic_prompt). A tag present only in the basic
+        // draft and omitted from the rewrite must show inactive here even
+        // though it was legitimately included when preparing the optimizer
+        // request itself (see optimizePrompt()'s own reference scan, which
+        // does include basic_prompt for that separate purpose).
         const refreshed = availableReferenceRecords(
             node, state.active + 1, {
                 includeInactive:true,
-                prompt:[sharedPrompt(state.plan).text.trim(), String(text ?? "").trim(),
-                    String(shot?.basic_prompt ?? "").trim()].filter(Boolean).join("\n\n"),
+                prompt:[sharedPrompt(state.plan).text.trim(), String(text ?? "").trim()]
+                    .filter(Boolean).join("\n\n"),
             },
         );
         state.records = refreshed.records;
@@ -1845,7 +1853,7 @@ function mount(node) {
         state.optimizer.origins.set(meta.sceneKey, {source:meta.source, result});
         writePlan("Optimized prompt saved to Plan");
         if (state.active === meta.sceneIndex) {
-            refreshTaggedReferencesForShot(shot, result);
+            refreshTaggedReferencesForShot(result);
             renderEditorText(result);
             scheduleHistoryDraft(meta.sceneId, result, shot.basic_prompt);
             void flushHistoryDraft();
@@ -2494,6 +2502,7 @@ function mount(node) {
         if (planNode !== state.planNode || !state.plan?.shots?.[index]) return false;
         const liveValue = String(state.planWidget?.value ?? "");
         let livePlanParsed = false;
+        let targetIndex = index;
         try {
             const livePlan = parsePlanJson(liveValue);
             livePlanParsed = true;
@@ -2501,26 +2510,46 @@ function mount(node) {
                 loadPlan(true);
                 return true;
             }
+            // Merge every live field onto the local shot (prompt,
+            // basic_prompt, ...), preserving only a field this editor has
+            // itself edited but not yet flushed (tracked via
+            // markShotFieldEdited). Patching only `prompt` here would still
+            // mark the live text "already synced" via state.lastValue below
+            // while leaving an unrelated local field (e.g. a stale basic
+            // draft) untouched - the next save would then silently
+            // republish that stale value over whatever changed elsewhere.
+            // A shot with no tracking at all is treated by rebaseScenePrompt
+            // as "assume both fields may have been locally edited" (correct
+            // for an editor about to write its own change). This receiver
+            // has not edited anything itself, so force empty-but-present
+            // tracking first: an untouched field then correctly adopts the
+            // live value, while a field genuinely mid-edit here (already
+            // marked via markShotFieldEdited) still wins.
+            beginTrackingShotFields(state.plan.shots[index]);
+            const rebased = rebaseScenePrompt(state.plan, livePlan, index);
+            if (rebased >= 0) targetIndex = rebased;
         } catch (_error) {
             // Leave lastValue untouched so normal polling reports invalid JSON.
         }
-        state.plan.shots[index].prompt = promptTextToLines(text);
-        const shotId = String(
-            state.plan.shots[index].id
-            || `clip_${String(index + 1).padStart(4, "0")}`,
-        );
-        const promptUndo = promptUndoForScene(shotId, text, {external:true});
-        if (index === state.active) state.promptUndo = promptUndo;
-        if (index === state.active && state.editor) {
+        const shot = state.plan.shots[targetIndex];
+        if (!shot) return false;
+        const mergedText = promptValueToText(shot.prompt);
+        const shotId = String(shot.id || `clip_${String(targetIndex + 1).padStart(4, "0")}`);
+        const promptUndo = promptUndoForScene(shotId, mergedText, {external:true});
+        if (targetIndex === state.active) state.promptUndo = promptUndo;
+        if (targetIndex === state.active && state.editor) {
             const current = editorPlainText(state.editor);
-            if (current !== text) {
+            if (current !== mergedText) {
                 const caret = document.activeElement === state.editor
                     ? selectionTextOffset(state.editor) : null;
-                renderEditorText(text, caret == null ? null : Math.min(caret, text.length));
-                scheduleHistoryDraft(
-                    String(state.plan.shots[index].id || `clip_${String(index + 1).padStart(4, "0")}`),
-                    text);
+                renderEditorText(mergedText, caret == null ? null : Math.min(caret, mergedText.length));
+                scheduleHistoryDraft(shotId, mergedText);
                 state.schema?.refresh();
+            }
+            const basicPromptTextarea = root.querySelector(".h3rp-basic-prompt");
+            const mergedBasicPrompt = String(shot.basic_prompt ?? "");
+            if (basicPromptTextarea && basicPromptTextarea.value !== mergedBasicPrompt) {
+                basicPromptTextarea.value = mergedBasicPrompt;
             }
         }
         if (livePlanParsed) state.lastValue = liveValue;
@@ -2528,13 +2557,44 @@ function mount(node) {
     };
     node._h3PromptCompanionSetBasicPrompt = (planNode, index, text) => {
         if (planNode !== state.planNode || !state.plan?.shots?.[index]) return false;
-        state.plan.shots[index].basic_prompt = text;
-        if (index === state.active) {
+        const liveValue = String(state.planWidget?.value ?? "");
+        let livePlanParsed = false;
+        let targetIndex = index;
+        try {
+            const livePlan = parsePlanJson(liveValue);
+            livePlanParsed = true;
+            if (planHasNonPromptChanges(state.plan, livePlan)) {
+                loadPlan(true);
+                return true;
+            }
+            // Same field-level merge as _h3PromptCompanionSetScenePrompt:
+            // preserve any locally edited-but-unflushed field, adopt
+            // everything else (including the pushed basic_prompt) from the
+            // live Plan, so this editor's own in-progress H3 edit is never
+            // silently discarded by an unrelated basic-draft push.
+            // A shot with no tracking at all is treated by rebaseScenePrompt
+            // as "assume both fields may have been locally edited" (correct
+            // for an editor about to write its own change). This receiver
+            // has not edited anything itself, so force empty-but-present
+            // tracking first: an untouched field then correctly adopts the
+            // live value, while a field genuinely mid-edit here (already
+            // marked via markShotFieldEdited) still wins.
+            beginTrackingShotFields(state.plan.shots[index]);
+            const rebased = rebaseScenePrompt(state.plan, livePlan, index);
+            if (rebased >= 0) targetIndex = rebased;
+        } catch (_error) {
+            // Leave lastValue untouched so normal polling reports invalid JSON.
+        }
+        const shot = state.plan.shots[targetIndex];
+        if (!shot) return false;
+        if (targetIndex === state.active) {
             const basicPromptTextarea = root.querySelector(".h3rp-basic-prompt");
-            if (basicPromptTextarea && basicPromptTextarea.value !== text) {
-                basicPromptTextarea.value = text;
+            const mergedBasicPrompt = String(shot.basic_prompt ?? "");
+            if (basicPromptTextarea && basicPromptTextarea.value !== mergedBasicPrompt) {
+                basicPromptTextarea.value = mergedBasicPrompt;
             }
         }
+        if (livePlanParsed) state.lastValue = liveValue;
         return true;
     };
     node._h3RichPromptRefresh = () => loadPlan(true);

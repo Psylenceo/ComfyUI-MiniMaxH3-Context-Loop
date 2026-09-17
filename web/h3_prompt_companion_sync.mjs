@@ -61,6 +61,15 @@ export function connectedPlanStudios(node) {
     );
 }
 
+function editedFieldsSet(shot) {
+    if (!(shot.__h3EditedFields instanceof Set)) {
+        Object.defineProperty(shot, "__h3EditedFields", {
+            value: new Set(), enumerable: false, configurable: true, writable: true,
+        });
+    }
+    return shot.__h3EditedFields;
+}
+
 /** Mark a single field of an in-memory shot as having been edited locally
  * since the last successful rebase. Stored as a non-enumerable property so
  * it never leaks into the Plan JSON that gets serialized into the widget.
@@ -69,12 +78,22 @@ export function connectedPlanStudios(node) {
  * changed here, instead of assuming both did. */
 export function markShotFieldEdited(shot, field) {
     if (!shot || typeof shot !== "object") return;
-    if (!(shot.__h3EditedFields instanceof Set)) {
-        Object.defineProperty(shot, "__h3EditedFields", {
-            value: new Set(), enumerable: false, configurable: true, writable: true,
-        });
-    }
-    shot.__h3EditedFields.add(field);
+    editedFieldsSet(shot).add(field);
+}
+
+/** Ensure a shot carries edited-field tracking without marking any field
+ * touched, leaving any already-recorded touches untouched. rebaseScenePrompt
+ * treats a shot with NO tracking at all as "assume both fields may have
+ * been locally edited" (the right default for an editor about to write its
+ * own change, via rebaseActivePromptOntoLivePlan). A companion receiver
+ * adopting an external push is the opposite case: it has not edited
+ * anything itself, and must not let a field it never touched silently keep
+ * clobbering whatever the live Plan carries. Call this before rebasing in a
+ * receiver, so an untouched field correctly adopts the live value while any
+ * field genuinely mid-edit (already marked) still wins. */
+export function beginTrackingShotFields(shot) {
+    if (!shot || typeof shot !== "object") return;
+    editedFieldsSet(shot);
 }
 
 /** Merge a dedicated editor's active prompt onto a freshly parsed Plan while

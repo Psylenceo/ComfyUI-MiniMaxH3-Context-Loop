@@ -133,7 +133,7 @@ assert.match(source, /activeSceneIndexAfterRefresh/);
 assert.match(source, /ownsPromptHistoryTarget/);
 assert.match(source, /stopImmediatePropagation\(\)/);
 assert.match(source, /event\.inputType \|\| state\.richInputType/);
-assert.match(source, /promptUndoForScene\(shotId, text, \{external:true\}\)/);
+assert.match(source, /promptUndoForScene\(shotId, mergedText, \{external:true\}\)/);
 assert.match(source, /window\.setInterval\(\(\) => loadPlan\(false\), 500\)/);
 assert.match(source, /h3_prompt_history_core\.mjs/);
 assert.match(source, /promptRevisionNavigation/);
