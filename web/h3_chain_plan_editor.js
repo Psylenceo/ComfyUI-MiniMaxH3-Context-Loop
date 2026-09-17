@@ -395,10 +395,17 @@ function collapseModernBackingWidgets(node) {
     if ((node.comfyClass ?? node.type) !== MODERN_NODE_NAME) return;
     for (const name of MODERN_BACKING_WIDGETS) {
         const widget = node.widgets?.find((item) => item.name === name);
-        if (widget && node.inputs?.some((input) => input.widget?.name === name)) {
-            // A converted widget owns a real socket. Hiding it also hides or
-            // mispositions that socket in the frontend (notably fingerprints).
-            const original = widget._h3PlanWidgetOriginal;
+        const input = node.inputs?.find((item) => item.widget?.name === name);
+        const original = widget?._h3PlanWidgetOriginal;
+        // Newer ComfyUI creates an automatic socket for every native widget.
+        // Only a real link or an older explicit conversion needs its native
+        // layout kept alive; socket presence alone would restore every row
+        // AND the invisible plan_json textarea's large blank allocation.
+        const converted = [widget?.type, original?.type].some(
+            (type) => typeof type === "string" && type.startsWith("converted-widget"));
+        if (widget && input && (input.link != null || converted)) {
+            // Hiding an active/converted widget hides or mispositions its
+            // socket in the frontend (notably connected fingerprints).
             if (widget.type === "hidden") {
                 widget.type = original?.type ?? "converted-widget";
                 widget.computeSize = original?.computeSize;

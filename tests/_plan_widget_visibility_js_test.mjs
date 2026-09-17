@@ -30,10 +30,21 @@ assert.deepEqual(node.widgets.map(widget => widget.callback), callbacks);
 node.widgets.forEach((widget, index) => assert.equal(widget.options, originalOptions[index], "Preserve shared widget-store options"));
 assert.deepEqual(node.size, [1100, 1600], "Keep the user-selected viewport size");
 
+// Recent ComfyUI creates a socket for EVERY ordinary widget; its presence is
+// not evidence of an explicit conversion. This was missing from the old test
+// and let the JSON textarea's blank space and all native settings reappear.
+node.inputs = MODERN_PLAN_WIDGET_NAMES.map(name => ({name, widget:{name}, link:null}));
+const autoInputs = [...node.inputs];
+for (let i = 0; i < 3; i++) context.collapseModernBackingWidgets(node);
+assert.deepEqual(canvasWidgets(node), [editor], "Automatic sockets must not unhide native controls or the JSON spacer");
+assert.deepEqual(vueWidgets(node), [editor], "Automatic sockets must not leave Vue rows behind");
+assert.deepEqual(node.inputs, autoInputs, "Keep core's automatic inputs available for existing links");
+
 // Turning a backing control into a socket must restore it, including when the
 // original computeSize/draw were undefined and several refreshes have occurred.
 const width = node.widgets.find(widget => widget.name === "width");
-node.inputs.push({name:"width", widget:{name:"width"}, link:42});
+const widthInput = node.inputs.find(input => input.name === "width");
+widthInput.link = 42;
 context.collapseModernBackingWidgets(node);
 assert.equal(width.hidden, false);
 assert.equal(width.options.hidden, undefined);
@@ -41,18 +52,39 @@ assert.equal(width.type, "number");
 assert.equal(width.computeSize, undefined);
 assert.equal(width.draw, undefined);
 assert.deepEqual(vueWidgets(node), [width, editor]);
-node.inputs = [];
+assert.deepEqual(canvasWidgets(node), [width, editor]);
+assert.equal(widthInput.link, 42, "Do not disturb a real connection");
+widthInput.link = null;
 context.collapseModernBackingWidgets(node);
-assert.deepEqual(vueWidgets(node), [editor]);
+assert.deepEqual(vueWidgets(node), [editor], "Disconnect must hide the now ordinary automatic socket again");
+assert.deepEqual(canvasWidgets(node), [editor]);
 width.type = "converted-widget";
 const convertedSize = () => [0, -4];
 width.computeSize = convertedSize;
-node.inputs.push({name:"width", widget:{name:"width"}, link:null});
 context.collapseModernBackingWidgets(node);
 assert.equal(width.options.hidden, undefined, "Core conversion cannot leave our Vue hiding flag behind");
 assert.equal(width.computeSize, convertedSize, "Do not overwrite core's converted socket layout");
 assert.equal(width.type, "converted-widget");
 assert.equal(width.hidden, false);
+
+// A legacy conversion may be collapsed before workflow configuration restores
+// its input. Recover the original conversion, not a duplicate native control.
+node.inputs = [];
+const converted = makeWidget("generation_fingerprint", "keep-fingerprint");
+converted.type = "converted-widget";
+converted.computeSize = convertedSize;
+context.collapseWidget(converted);
+const convertedNode = {type:MODERN_PLAN_NODE, widgets:[converted],
+    inputs:[{name:converted.name, widget:{name:converted.name}, link:null}]};
+context.collapseModernBackingWidgets(convertedNode);
+assert.equal(converted.hidden, false);
+assert.equal(converted.type, "converted-widget");
+assert.equal(converted.computeSize, convertedSize);
+
+const legacy = {type:"MiniMaxH3ChainPlan", widgets:[makeWidget("width", 960)],
+    inputs:[{name:"width", widget:{name:"width"}, link:null}]};
+context.collapseModernBackingWidgets(legacy);
+assert.deepEqual(canvasWidgets(legacy), legacy.widgets, "Legacy Plan keeps its native settings");
 
 // The shared legacy Plan path must restore editable identity controls when
 // Project Assets is disconnected, without unhiding Modern Plan backing ones.
