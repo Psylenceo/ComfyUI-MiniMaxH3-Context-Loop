@@ -103,6 +103,8 @@ def assert_extended_selection_resume(chain, upscale, chapter_source, frames):
     # frame clock, prompt, seed and steps are sufficient for this migration.
     legacy = copy.deepcopy(metadata)
     legacy.pop("source_scene_contract")
+    protected_source = {**chapter_source["segments"][0], "pixel_continuity": {"version": 1}}
+    fails(lambda: upscale._verify_upscale_source(legacy, protected_source, 8), "predates continuity")
     chain._atomic_json(metadata_path, legacy)
     assert resume()["segments"][0]["revision"] == saved["revision"]
     changed = copy.deepcopy(chapter_source)
@@ -412,6 +414,17 @@ def main():
             "output_mode": "workflow_local"}))[0]
         assert pinned == manifest, "local pin must preserve the source recipe and manifests"
         manifest = pinned
+        marked = chain.MiniMaxH3ChainCheckpointManager().passthrough(json.dumps({
+            "run_name": "pixel_test", "lineage": lineage, "pixel_continuity": [
+                {"scene": 2, "revision": lineage[1]["revision"],
+                 "previous_revision": lineage[0]["revision"]}]}))[0]
+        resolved = upscale._verified_source_manifest(marked)
+        assert "pixel_continuity" not in resolved["segments"][0]
+        assert resolved["segments"][1]["pixel_continuity"]["previous_revision"] == lineage[0]["revision"]
+        assert upscale._upscale_source_contract(resolved["segments"][0]) == upscale._upscale_source_contract(manifest["segments"][0])
+        assert upscale._upscale_source_contract(resolved["segments"][1]) != upscale._upscale_source_contract(manifest["segments"][1])
+        assert upscale._verified_source_manifest(marked, "latent") == upscale._verified_source_manifest(manifest, "latent"), "pixel mark must not change latent/DeRoPE recipe"
+        assert all(path.read_bytes() == data for path, data in original_files.items()), "marking must not rewrite projects"
         assert_loop_releases_pixels(package, chain, upscale, manifest)
         assert_loop_releases_pixels(package, chain, upscale, manifest, ram_cache=True)
         assert_loop_releases_pixels(package, chain, upscale, manifest, ram_cache=True, png_export=True)

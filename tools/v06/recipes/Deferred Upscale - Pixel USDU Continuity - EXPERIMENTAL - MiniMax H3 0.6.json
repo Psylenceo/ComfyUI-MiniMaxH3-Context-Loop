@@ -1,0 +1,374 @@
+{
+  "compatibility_note": "For **nightly**: experimental file-backed USDU continuity. Mark only direct continuations in Checkpoint Manager; hard cuts remain independent.\n\nLocal validation (2026-09-17): real USDU GPU runs on a duplicated masked-AV dog continuation reduced the boundary frame-difference metric by about 16%. This is not a perceptual quality score. The 2-scene save/assembly loop retained all 209 delivered frames and bit-identical checkpoint audio. Fresh DLSS worker startup stalled locally, including after releasing H3 models; the successful loop used saved DLSS outputs from the earlier research. Fresh DLSS-through-assembly execution is therefore NOT validated. See [test notes](../../docs/pixel-continuity-research.md) and the limits below.",
+  "nodes": [
+    {
+      "key": "manager",
+      "type": "MiniMaxH3ChainCheckpointManager",
+      "settings": {
+        "selection_json": ""
+      },
+      "inputs": {}
+    },
+    {
+      "key": "adapter",
+      "type": "MiniMaxH3ChainUpscaleAdapter",
+      "settings": {
+        "profile": "h3_pixel_continuity_v1",
+        "backend": "pixel",
+        "recipe_json": "{\"upscaler\":\"DLSS5 2x\",\"refiner\":\"USDU H3 VIDEO\",\"continuity\":\"marked_saved_hq_tail_v1\",\"tone_strength\":1,\"fade_frames\":39,\"audio\":\"preserve_source\",\"steps\":3,\"denoise\":0.2,\"canvas_storage\":\"disk\"}",
+        "start_clip": 1,
+        "end_clip": 0,
+        "save_latent": false,
+        "segment_crf": 18,
+        "start_mode": "resume"
+      },
+      "inputs": {
+        "source_manifest": [
+          "manager",
+          "selected_manifest"
+        ]
+      }
+    },
+    {
+      "key": "video_vae",
+      "type": "VAELoader",
+      "settings": {
+        "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+      },
+      "inputs": {}
+    },
+    {
+      "key": "current",
+      "type": "CATH3UpscaleVideoCurrent",
+      "settings": {},
+      "inputs": {
+        "state": [
+          "adapter",
+          "state"
+        ],
+        "video_vae": [
+          "video_vae",
+          "VAE"
+        ]
+      }
+    },
+    {
+      "key": "model",
+      "type": "UNETLoader",
+      "settings": {
+        "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+        "weight_dtype": "default"
+      },
+      "inputs": {}
+    },
+    {
+      "key": "turbo",
+      "type": "LoraLoaderModelOnly",
+      "settings": {
+        "lora_name": "minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors",
+        "strength_model": 0.75
+      },
+      "inputs": {
+        "model": [
+          "model",
+          "MODEL"
+        ]
+      }
+    },
+    {
+      "key": "clip",
+      "type": "CLIPLoader",
+      "settings": {
+        "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+        "type": "minimax",
+        "device": "default"
+      },
+      "inputs": {}
+    },
+    {
+      "key": "dlss_settings",
+      "type": "DLSS5Settings",
+      "settings": {
+        "upscaling_mode": "2x (Performance)",
+        "nr_preset": "Default",
+        "nr_style": "Default",
+        "nr_intensity": 0,
+        "local_tone_strength": 0,
+        "local_structure_strength": 0,
+        "skin_structure_strength": 0,
+        "automatic_mask": true,
+        "dlss_model_preset": "L",
+        "motion": "auto",
+        "scene_change_threshold": 0.12,
+        "warmup_frames": 0,
+        "runtime_dir": ""
+      },
+      "inputs": {}
+    },
+    {
+      "key": "dlss",
+      "type": "CATDLSS5EnhanceVideo",
+      "settings": {
+        "verify_neural_rendering": true
+      },
+      "inputs": {
+        "settings": [
+          "dlss_settings",
+          "settings"
+        ],
+        "video": [
+          "current",
+          "video"
+        ]
+      }
+    },
+    {
+      "key": "override",
+      "type": "MiniMaxH3UpscaleReferencePromptOverride",
+      "settings": {
+        "prompt_override": "",
+        "disabled_tags": ""
+      },
+      "inputs": {}
+    },
+    {
+      "key": "protect",
+      "type": "MiniMaxH3PixelContinuityPrepare",
+      "settings": {},
+      "inputs": {
+        "state": [
+          "current",
+          "state"
+        ],
+        "video": [
+          "dlss",
+          "video"
+        ]
+      }
+    },
+    {
+      "key": "conditioning",
+      "type": "CATH3UpscaleVideoConditioning",
+      "settings": {
+        "missing_cache": "text_only",
+        "motion_ref_mode": "exclude_video_keep_audio",
+        "method": "bilinear",
+        "prompt_override": "",
+        "override_ref_image_size": "inherit",
+        "override_reference_policy": "strict",
+        "conditioning_width": 0,
+        "conditioning_height": 0,
+        "override_semantic_anchor_size": "inherit",
+        "override_semantic_anchor_mode": "inherit"
+      },
+      "inputs": {
+        "state": [
+          "current",
+          "state"
+        ],
+        "clip": [
+          "clip",
+          "CLIP"
+        ],
+        "video_vae": [
+          "video_vae",
+          "VAE"
+        ],
+        "prompt_override": [
+          "override",
+          "prompt_override"
+        ],
+        "tagged_references": [
+          "override",
+          "references"
+        ],
+        "video": [
+          "protect",
+          "video"
+        ]
+      }
+    },
+    {
+      "key": "guider",
+      "type": "BasicGuider",
+      "settings": {},
+      "inputs": {
+        "model": [
+          "turbo",
+          "MODEL"
+        ],
+        "conditioning": [
+          "conditioning",
+          "positive"
+        ]
+      }
+    },
+    {
+      "key": "schedule",
+      "type": "BasicScheduler",
+      "settings": {
+        "scheduler": "beta",
+        "steps": 3,
+        "denoise": 0.2
+      },
+      "inputs": {
+        "model": [
+          "turbo",
+          "MODEL"
+        ]
+      }
+    },
+    {
+      "key": "sampler",
+      "type": "KSamplerSelect",
+      "settings": {
+        "sampler_name": "er_sde"
+      },
+      "inputs": {}
+    },
+    {
+      "key": "refine",
+      "type": "UltimateSDUpscaleNoUpscaleGuiderVideo",
+      "settings": {
+        "seed": 0,
+        "control_after_generate": "fixed",
+        "mode_type": "Linear",
+        "tile_width": 512,
+        "tile_height": 288,
+        "mask_blur": 8,
+        "tile_padding": 64,
+        "seam_fix_mode": "None",
+        "seam_fix_denoise": 0.15,
+        "seam_fix_width": 32,
+        "seam_fix_mask_blur": 4,
+        "seam_fix_padding": 16,
+        "tile_overlap_mode": "Reprocess Overlap",
+        "tiled_decode": false,
+        "batch_size": 1,
+        "anchor_context": false,
+        "canvas_storage": "disk",
+        "canvas_directory": ""
+      },
+      "inputs": {
+        "guider": [
+          "guider",
+          "GUIDER"
+        ],
+        "sampler": [
+          "sampler",
+          "SAMPLER"
+        ],
+        "sigmas": [
+          "schedule",
+          "SIGMAS"
+        ],
+        "vae": [
+          "video_vae",
+          "VAE"
+        ],
+        "seed": [
+          "current",
+          "seed"
+        ],
+        "video": [
+          "conditioning",
+          "video"
+        ],
+        "mask": [
+          "protect",
+          "mask"
+        ],
+        "anchor_context": [
+          "protect",
+          "anchor_context"
+        ]
+      }
+    },
+    {
+      "key": "finish",
+      "type": "MiniMaxH3PixelContinuityFinish",
+      "settings": {
+        "tone_strength": 1,
+        "fade_frames": 39
+      },
+      "inputs": {
+        "video": [
+          "refine",
+          "video"
+        ],
+        "continuity": [
+          "protect",
+          "continuity"
+        ]
+      }
+    },
+    {
+      "key": "save",
+      "type": "CATH3UpscaleVideoSegmentSave",
+      "settings": {},
+      "inputs": {
+        "state": [
+          "current",
+          "state"
+        ],
+        "video": [
+          "finish",
+          "video"
+        ]
+      }
+    },
+    {
+      "key": "end",
+      "type": "CATH3UpscaleVideoLoopEnd",
+      "settings": {},
+      "inputs": {
+        "flow": [
+          "adapter",
+          "flow"
+        ],
+        "state": [
+          "current",
+          "state"
+        ],
+        "segment": [
+          "save",
+          "segment"
+        ],
+        "video": [
+          "finish",
+          "video"
+        ]
+      }
+    },
+    {
+      "key": "assemble",
+      "type": "MiniMaxH3ChainAssemble",
+      "settings": {
+        "audio_source": "plan",
+        "filename": "h3_pixel_continuity_%date:yyyy-MM-dd%",
+        "audio_bitrate": 256,
+        "copy_to_output": false,
+        "output_subfolder": "",
+        "blend_schedule": "plan",
+        "boundary_tone_match": "off",
+        "color_stabilization": "off",
+        "delete_checkpoints_after_assembly": false
+      },
+      "inputs": {
+        "manifest": [
+          "end",
+          "manifest"
+        ]
+      }
+    },
+    {
+      "key": "guide",
+      "type": "Note",
+      "settings": {
+        "text": "PIXEL CONTINUITY — NIGHTLY EXPERIMENTAL\n\nChoose the complete saved branch in Checkpoint Manager. In the Original scene inspector, tick “Continue previous shot (pixel upscale)” on each incoming continuous-shot boundary. This is a workflow-local export choice, saved with selection_json. It does not change generation, the Plan, audio, or project files. Both adjacent revision identities must still match. Picture-only ALTs do not inherit a base take's mark. Unmarked shots use independent USDU even when they were generated with masked AV context.\n\nCurrent Scene -> DLSS VIDEO -> Protect Tail -> VIDEO Conditioning -> USDU VIDEO -> Finish -> Save + Loop End -> Assemble.\n\nProtect Tail reads the previous saved HQ segment from this same upscale profile, including when resuming. It replaces the current RAW repeated head with the exact matching HQ tail, outputs a black-head/white-future mask, and enables USDU anchor_context. Only a single immediate previous-tail visual window is supported. Multiple reference blocks, non-tail windows and differing visual/trim lengths need independent processing. If the previous HQ scene is missing, start earlier instead of silently substituting unrelated footage.\n\nFinish restores the protected prefix exactly after USDU and can correct a small RGB tone bias at the start of the new footage. It compares corresponding source/refined frames, caps each channel shift to 0.03, and smoothly fades it over 39 frames. No optical flow, duplicated delivery frames, image crossfade or smoothing of detail is used. Set tone_strength=0 to disable this experimental correction. Source lighting changes can still make automatic matching inappropriate; inspect your join.\n\nSave and Loop End receive the SAME final RAW VIDEO. Existing save logic removes the repeated head once and preserves checkpoint audio. Plan editorial trims still apply at final assembly. Protection uses the generated overlap, never shortened presentation trims. The previous saved HQ file is used consistently in live and resumed runs, so its export compression is also the carry quality; choose your segment CRF accordingly.\n\nStart with a NEW profile, backend=pixel and save_latent=false. Resume the same profile at the first unfinished scene. If a continuity mark changes on an already-upscaled scene, reprocess from there; generation does not need to run again. The recipe_json describes the settings but cannot track arbitrary edits to external nodes: use a new profile or update the recipe when changing model, DLSS, USDU or tone controls.\n\nFile-backed VIDEO and disk canvas avoid full-scene float RGB tensors between nodes. Decoding, disk I/O, per-frame masks and model tile tensors still cost memory and time. Set canvas_directory to a fast local SSD, not tmpfs/network storage. The helper performs no project scanning or work during workflow loading.\n\nDependencies: ComfyUI-DLSS5-Enhancer; ComfyUI_UltimateSDUpscaleGuider_H3; ComfyUI-ContextAnchoredTile-videopath. The latter supplies file-backed transport; CAT refinement is NOT used. Choose your installed H3 model, Qwen encoder, video VAE and Turbo v4 LoRA. Ref2VA is included for source reference recovery; the small dog mechanism test used FL2VA. Use the model/LoRA setup appropriate to your original generation.\n\nVALIDATION\n\nCPU/JS coverage checks selection persistence, revision isolation, hard-cut bypass, protected frames, unchanged RAW counts and resume contracts. GPU research uses a real 2-part masked-AV dog continuation (512x288 -> 1024x576), not an artificial cut of one clip. This is a limited mechanism test, not proof of seamless production-resolution results. Start with a short representative range. The independent pixel workflow remains available unchanged."
+      },
+      "inputs": {}
+    }
+  ],
+  "setup_steps": "1. Install DLSS5, the H3 USDU Guider fork and ContextAnchoredTile-videopath (VIDEO transport only).\n2. Select your saved output branch in Checkpoint Manager. Preview each continuing scene and tick Continue previous shot (pixel upscale). Leave hard cuts off.\n3. Choose installed models and a NEW upscale profile. Start before the first marked boundary, or resume the same profile with a saved previous HQ scene.\n4. Keep disk canvas storage. Queue a short range first; compare the join. Tone strength 0 disables tone correction.\n5. Use the guide for resume, recipe changes and limitations. Source generation and audio are preserved."
+}

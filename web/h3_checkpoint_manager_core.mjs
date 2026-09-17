@@ -335,6 +335,40 @@ export function checkpointSelectionJson(payload, runName, selected, range = null
         : "";
 }
 
+// Processing choices belong to the saved workflow output, not the project or
+// preview cursor. Keep marks only while both adjacent takes remain selected.
+export function checkpointContinuitySelection(value, previousValue = value) {
+    try {
+        const selection = JSON.parse(value);
+        const previous = JSON.parse(previousValue || "null");
+        if (!selection?.lineage) return value;
+        const marks = selection.pixel_continuity ??
+            (previous?.run_name === selection.run_name ? previous.pixel_continuity : []) ?? [];
+        const kept = Array.isArray(marks) ? marks.filter(mark => {
+            const position = selection.lineage.findIndex(item => Number(item.scene) === Number(mark.scene));
+            return position > 0 && selection.lineage[position].revision === mark.revision
+                && selection.lineage[position - 1].revision === mark.previous_revision;
+        }) : [];
+        delete selection.pixel_continuity;
+        if (kept.length) selection.pixel_continuity = kept;
+        return JSON.stringify(selection);
+    } catch { return value; }
+}
+
+export function checkpointSetContinuity(value, record, enabled) {
+    const selection = JSON.parse(checkpointContinuitySelection(value));
+    const position = selection.lineage.findIndex(item => Number(item.scene) === Number(record.scene)
+        && item.revision === record.revision);
+    if (position <= 0) throw new Error("Select this scene's output branch first; its previous scene must be present.");
+    const marks = (selection.pixel_continuity ?? []).filter(mark => Number(mark.scene) !== Number(record.scene));
+    if (enabled) marks.push({scene:Number(record.scene), revision:record.revision,
+        previous_revision:selection.lineage[position - 1].revision});
+    selection.pixel_continuity = marks;
+    // Keep [] until the writer normalizes it, so disabling the final mark does
+    // not inherit the old value while merging unrelated selection settings.
+    return JSON.stringify(selection);
+}
+
 // Keep the pinned output in the execution widget itself: one serialized source
 // of truth survives save/load, duplication and node reconfiguration.
 export function checkpointLocalSelection(value) {
@@ -395,8 +429,12 @@ export function checkpointOutputSummary(value) {
     }
     const scope = chapterOnly ? "selected chapter only" : "selected branch + earlier chapters";
     const mode = saved.output_mode === "workflow_local" ? "pinned to this workflow" : "follows branch selection";
+    const continuous = (Array.isArray(saved.pixel_continuity) ? saved.pixel_continuity : [])
+        .filter(mark => clips.some(item => Number(item.scene) === Number(mark.scene) && item.revision === mark.revision))
+        .map(mark => Number(mark.scene));
     return `Will send to connected nodes: ${source} · ${saved.run_name} · saved path through scene ${tip.scene} / ${String(tip.revision).slice(0, 8)}`
         + ` · scenes ${first}–${tip.scene} (${clips.length} ${clips.length === 1 ? "clip" : "clips"}; ${scope}) · ${mode}.`
+        + (continuous.length ? ` Marked for continuous-shot pixel upscale: ${checkpointSceneRanges(continuous)}.` : "")
         + " Clip and tab previews do not change this output. Set the processing range downstream.";
 }
 

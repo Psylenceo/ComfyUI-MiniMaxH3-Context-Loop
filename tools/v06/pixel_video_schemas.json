@@ -1,0 +1,606 @@
+{
+  "nodes": {
+    "CATH3UpscaleVideoCurrent": {
+      "input": {
+        "required": {
+          "state": [
+            "H3_CHAIN_UPSCALE_STATE",
+            {
+              "tooltip": "Upscale Adapter state with backend=pixel. Source checkpoints and scene clocks remain unchanged."
+            }
+          ],
+          "video_vae": [
+            "VAE",
+            {
+              "tooltip": "MiniMax H3 video VAE to decode one saved clean video latent, including its repeated RAW prefix."
+            }
+          ]
+        }
+      },
+      "output": [
+        "H3_CHAIN_UPSCALE_STATE",
+        "VIDEO",
+        "AUDIO",
+        "STRING",
+        "INT",
+        "INT",
+        "INT",
+        "INT",
+        "STRING",
+        "LATENT"
+      ],
+      "output_name": [
+        "state",
+        "video",
+        "source_audio",
+        "prompt",
+        "seed",
+        "clip_index",
+        "raw_frames",
+        "trim_frames",
+        "status",
+        "source_audio_latent"
+      ],
+      "output_is_list": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    "CATH3UpscaleVideoConditioning": {
+      "input": {
+        "required": {
+          "state": [
+            "H3_CHAIN_UPSCALE_STATE",
+            {
+              "tooltip": "Current Upscale state. The node uses only the selected source branch, scene, prompt, and generation fingerprint to discover refs."
+            }
+          ],
+          "clip": [
+            "CLIP",
+            {
+              "tooltip": "MiniMax H3 text encoder used to rebuild the cached Ref2VA presentation at pass 2."
+            }
+          ],
+          "missing_cache": [
+            [
+              "text_only",
+              "error"
+            ],
+            {
+              "default": "text_only",
+              "tooltip": "Missing caches are first rebuilt from saved reference identities and archived media, using the connected VAEs. If recovery is unavailable, text_only falls back to text; error reports the missing source or VAE without dropping refs."
+            }
+          ],
+          "motion_ref_mode": [
+            [
+              "exclude_video_keep_audio",
+              "keep_video_native",
+              "resize_video"
+            ],
+            {
+              "default": "exclude_video_keep_audio",
+              "tooltip": "Pass-2 motion-reference policy. The default removes both native video-ref latents and their Qwen presentation, while keeping paired audio."
+            }
+          ],
+          "video_vae": [
+            "VAE",
+            {
+              "tooltip": "Original MiniMax H3 video VAE used to re-encode match-sized picture references at the pass-2 canvas. Never use the audio VAE."
+            }
+          ],
+          "video": [
+            "VIDEO",
+            {
+              "tooltip": "Actual upscaled RAW images BEFORE USDU/refinement. Their width/height drive automatic reference sizing. Connect the same images to the image refiner; no latent encode or guessed scale multiplier is needed."
+            }
+          ],
+          "method": [
+            [
+              "nearest",
+              "nearest-exact",
+              "bilinear",
+              "bicubic"
+            ],
+            {
+              "default": "bilinear",
+              "tooltip": "Interpolation for eligible cached video/keyframe latents. Match picture refs are rebuilt from RGB masters; max pictures and audio remain unchanged."
+            }
+          ]
+        },
+        "optional": {
+          "prompt_override": [
+            "STRING",
+            {
+              "default": "",
+              "multiline": true,
+              "tooltip": "Optional pass-2 text prompt. Blank reuses the exact compiled generation prompt. Use a concise appearance/detail prompt to avoid repeating source motion or camera instructions."
+            }
+          ],
+          "tagged_references": [
+            "H3_TAGGED_REFERENCES",
+            {
+              "tooltip": "Optional pass-2 Tagged Ref line from Upscale Reference + Prompt Override. When connected, it replaces the cached reference payload and is compiled with prompt_override."
+            }
+          ],
+          "audio_vae": [
+            "VAE",
+            {
+              "tooltip": "MiniMax H3 audio VAE. It is needed only when the connected override registry activates standalone or paired reference audio."
+            }
+          ],
+          "override_ref_image_size": [
+            [
+              "inherit",
+              "match",
+              "max"
+            ],
+            {
+              "default": "inherit",
+              "tooltip": "Picture sizing for cached, rebuilt, or connected refs. inherit preserves the saved match/max policy. Reconstruction defaults to max when no saved policy is available. match/max explicitly overrides it. Changing cached sizing requires video_vae."
+            }
+          ],
+          "override_reference_policy": [
+            [
+              "strict",
+              "soft",
+              "disabled"
+            ],
+            {
+              "default": "strict",
+              "tooltip": "Prompt/tag validation for connected pass-2 Tagged refs."
+            }
+          ],
+          "conditioning_width": [
+            "INT",
+            {
+              "default": 0,
+              "min": 0,
+              "max": 16384,
+              "step": 32,
+              "tooltip": "Reference-conditioning canvas width. 0 uses the actual image width; a positive multiple of 32 overrides only this axis. Sizes cached or connected match picture refs, not output images or keyframes. Max picture policy remains unchanged. Use a new upscale profile when changing this setting."
+            }
+          ],
+          "conditioning_height": [
+            "INT",
+            {
+              "default": 0,
+              "min": 0,
+              "max": 16384,
+              "step": 32,
+              "tooltip": "Reference-conditioning canvas height. 0 uses the actual image height; a positive multiple of 32 overrides only this axis. Sizes cached or connected match picture refs, not output images or keyframes. Max picture policy remains unchanged. Use a new upscale profile when changing this setting."
+            }
+          ],
+          "override_semantic_anchor_size": [
+            [
+              "inherit",
+              "384",
+              "512",
+              "768",
+              "1024",
+              "1280",
+              "source"
+            ],
+            {
+              "default": "inherit",
+              "tooltip": "Qwen semantic-anchor size, separate from native picture sizing. inherit keeps saved settings (or a connected anchor bundle). An explicit size rebuilds cached anchors from verified source media; source keeps their original size. Use a new upscale profile when changing this setting."
+            }
+          ],
+          "override_semantic_anchor_mode": [
+            [
+              "inherit",
+              "timestamped_video",
+              "picture_storyboard"
+            ],
+            {
+              "default": "inherit",
+              "tooltip": "Semantic-anchor presentation: timestamped video or picture storyboard, as in Tagged Scene Options. Explicit changes rebuild both presentation and prompt labels. Use a new upscale profile when changing this setting."
+            }
+          ]
+        }
+      },
+      "output": [
+        "CONDITIONING",
+        "VIDEO",
+        "INT",
+        "INT",
+        "STRING",
+        "BOOLEAN",
+        "STRING"
+      ],
+      "output_name": [
+        "positive",
+        "video",
+        "width",
+        "height",
+        "compiled_prompt",
+        "reference_cache_used",
+        "status"
+      ],
+      "output_is_list": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    "CATH3UpscaleVideoSegmentSave": {
+      "input": {
+        "required": {
+          "state": [
+            "H3_CHAIN_UPSCALE_STATE",
+            {
+              "tooltip": "Current child-run state from Upscale Current Scene."
+            }
+          ],
+          "video": [
+            "VIDEO",
+            {
+              "tooltip": "Decoded HQ RAW scene frames, including the source scene's repeated head. This node trims it exactly."
+            }
+          ]
+        },
+        "optional": {
+          "upscaled_latent": [
+            "LATENT",
+            {
+              "tooltip": "Final HQ latent. Required when save_latent is enabled and whenever a following Drift-Control scene needs its compact HQ context tail."
+            }
+          ],
+          "recovered_audio": [
+            "AUDIO",
+            {
+              "tooltip": "Optional RAW-clock audio from H3 Audio Recover. When connected, Segment Save applies the same repeated-head trim as video and replaces the source checkpoint audio."
+            }
+          ]
+        },
+        "hidden": {
+          "dynprompt": "DYNPROMPT",
+          "unique_id": "UNIQUE_ID"
+        }
+      },
+      "output": [
+        "H3_CHAIN_UPSCALE_SEGMENT",
+        "STRING"
+      ],
+      "output_name": [
+        "segment",
+        "status"
+      ],
+      "output_is_list": [
+        false,
+        false
+      ]
+    },
+    "CATH3UpscaleVideoLoopEnd": {
+      "input": {
+        "required": {
+          "flow": [
+            "H3_CHAIN_UPSCALE_FLOW",
+            {
+              "rawLink": true,
+              "lazy": true,
+              "tooltip": "Connect directly from Upscale Adapter; this raw link defines the recursive child-loop body."
+            }
+          ],
+          "state": [
+            "H3_CHAIN_UPSCALE_STATE",
+            {
+              "lazy": true,
+              "tooltip": "Current child-run state from Upscale Current Scene."
+            }
+          ],
+          "video": [
+            "VIDEO",
+            {
+              "lazy": true,
+              "tooltip": "Same RAW HQ frames sent to Upscale Segment Save."
+            }
+          ],
+          "segment": [
+            "H3_CHAIN_UPSCALE_SEGMENT",
+            {
+              "lazy": true,
+              "tooltip": "Persisted HQ scene record from Upscale Segment Save."
+            }
+          ]
+        },
+        "optional": {
+          "upscaled_latent": [
+            "LATENT",
+            {
+              "lazy": true,
+              "tooltip": "Optional transient HQ carry for the next scene. It is independent of save_latent."
+            }
+          ]
+        },
+        "hidden": {
+          "dynprompt": "DYNPROMPT",
+          "unique_id": "UNIQUE_ID"
+        }
+      },
+      "output": [
+        "H3_CHAIN_MANIFEST",
+        "STRING",
+        "IMAGE",
+        "LATENT"
+      ],
+      "output_name": [
+        "manifest",
+        "manifest_json",
+        "last_context_frames",
+        "last_context_latent"
+      ],
+      "output_is_list": [
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    "CATDLSS5EnhanceVideo": {
+      "input": {
+        "required": {
+          "video": [
+            "VIDEO"
+          ],
+          "settings": [
+            "DLSS5_SETTINGS"
+          ],
+          "verify_neural_rendering": [
+            "BOOLEAN",
+            {
+              "default": true
+            }
+          ]
+        }
+      },
+      "output": [
+        "VIDEO",
+        "STRING",
+        "INT"
+      ],
+      "output_name": [
+        "video",
+        "video_path",
+        "frames"
+      ],
+      "output_is_list": [
+        false,
+        false,
+        false
+      ]
+    },
+    "UltimateSDUpscaleNoUpscaleGuiderVideo": {
+      "input": {
+        "required": {
+          "video": [
+            "VIDEO",
+            {
+              "tooltip": "The image to upscale."
+            }
+          ],
+          "guider": [
+            "GUIDER",
+            {
+              "tooltip": "A guider that encapsulates the model, conditioning, and CFG. Use CFGGuider, PerpNegGuider, or other guider nodes."
+            }
+          ],
+          "sampler": [
+            "SAMPLER",
+            {
+              "tooltip": "The sampler to use. Use KSamplerSelect node to create this."
+            }
+          ],
+          "sigmas": [
+            "SIGMAS",
+            {
+              "tooltip": "The noise schedule. Use BasicScheduler or other scheduler nodes to create this. The denoise is configured in the scheduler."
+            }
+          ],
+          "vae": [
+            "VAE",
+            {
+              "tooltip": "The VAE model to use for tiles."
+            }
+          ],
+          "seed": [
+            "INT",
+            {
+              "default": 0,
+              "min": 0,
+              "max": 18446744073709552000,
+              "tooltip": "The seed to use for noise generation."
+            }
+          ],
+          "mode_type": [
+            [
+              "Linear",
+              "Chess",
+              "None"
+            ],
+            {
+              "tooltip": "The tiling order to use for the redraw step."
+            }
+          ],
+          "tile_width": [
+            "INT",
+            {
+              "default": 512,
+              "min": 64,
+              "max": 8192,
+              "step": 8,
+              "tooltip": "The width of each tile."
+            }
+          ],
+          "tile_height": [
+            "INT",
+            {
+              "default": 512,
+              "min": 64,
+              "max": 8192,
+              "step": 8,
+              "tooltip": "The height of each tile."
+            }
+          ],
+          "mask_blur": [
+            "INT",
+            {
+              "default": 8,
+              "min": 0,
+              "max": 64,
+              "step": 1,
+              "tooltip": "The blur radius for the mask."
+            }
+          ],
+          "tile_padding": [
+            "INT",
+            {
+              "default": 32,
+              "min": 0,
+              "max": 8192,
+              "step": 8,
+              "tooltip": "The padding to apply between tiles."
+            }
+          ],
+          "seam_fix_mode": [
+            [
+              "None",
+              "Band Pass",
+              "Half Tile",
+              "Half Tile + Intersections"
+            ],
+            {
+              "tooltip": "The seam fix mode to use."
+            }
+          ],
+          "seam_fix_denoise": [
+            "FLOAT",
+            {
+              "default": 1,
+              "min": 0,
+              "max": 1,
+              "step": 0.01,
+              "tooltip": "Legacy compatibility control; Guider sampling uses the main SIGMAS input for both tiles and seam repair."
+            }
+          ],
+          "seam_fix_width": [
+            "INT",
+            {
+              "default": 64,
+              "min": 0,
+              "max": 8192,
+              "step": 8,
+              "tooltip": "The width of the bands used for the Band Pass seam fix mode."
+            }
+          ],
+          "seam_fix_mask_blur": [
+            "INT",
+            {
+              "default": 8,
+              "min": 0,
+              "max": 64,
+              "step": 1,
+              "tooltip": "The blur radius for the seam fix mask."
+            }
+          ],
+          "seam_fix_padding": [
+            "INT",
+            {
+              "default": 16,
+              "min": 0,
+              "max": 8192,
+              "step": 8,
+              "tooltip": "The padding to apply for the seam fix tiles."
+            }
+          ],
+          "tile_overlap_mode": [
+            [
+              "Ignore Overlap",
+              "Reprocess Overlap",
+              "Context Only Overlap"
+            ],
+            {
+              "default": "Reprocess Overlap",
+              "tooltip": "How to handle tile overlap regions. 'Ignore Overlap' uses minimal tile sizes. 'Reprocess Overlap' uses uniform tiles with overlap regions potentially regenerated. 'Context Only Overlap' uses uniform tiles where overlap regions from previous tiles become read-only context."
+            }
+          ],
+          "tiled_decode": [
+            "BOOLEAN",
+            {
+              "default": false,
+              "tooltip": "Whether to use tiled decoding when decoding tiles."
+            }
+          ],
+          "batch_size": [
+            "INT",
+            {
+              "default": 1,
+              "min": 1,
+              "max": 4096,
+              "step": 1,
+              "tooltip": "The number of tiles to process in a batch. Higher values can reduce processing time but use more VRAM. Yields different results than individual tiles. Only affects the main redraw step, not the seam fix step."
+            }
+          ]
+        },
+        "optional": {
+          "mask": [
+            "MASK",
+            {
+              "tooltip": "Optional region mask. Only masked (white) areas are re-diffused; tiles that do not touch the mask are skipped entirely, which greatly speeds up small-region upscales. Sampling still sees the full tile for context, and blending uses the same mask_blur feathering as tile edges (the edit extends about mask_blur pixels past the mask). The mask may be any resolution and is resized to the upscaled canvas. Grayscale values give partial blending. With batched images, a single mask applies to every image, and a batch of masks maps one mask to each image. Not compatible with batch_size > 1 (tile batching)."
+            }
+          ],
+          "anchor_context": [
+            "BOOLEAN",
+            {
+              "default": false,
+              "tooltip": "Hold the areas a tile will not composite back to the original image at every sampling step, so the model sees the true surroundings instead of a re-diffused version that can drift. Keeps detail consistent between sections and blends seams into the real image. Takes effect when a mask is connected or tile_overlap_mode is 'Context Only Overlap'; otherwise it has no effect."
+            }
+          ],
+          "canvas_storage": [
+            [
+              "ram",
+              "disk"
+            ],
+            {
+              "default": "ram",
+              "tooltip": "Disk keeps RGB frames in temporary files and reads/writes tile regions. RAM keeps frames in memory. Sampling and pixels are identical; use fast local scratch storage for disk mode."
+            }
+          ],
+          "canvas_directory": [
+            "STRING",
+            {
+              "default": "",
+              "tooltip": "Disk mode only: scratch folder on a local SSD. Empty uses ComfyUI's temp folder. Avoid RAM-backed folders (tmpfs) to reduce system RAM use. Temporary canvas files are removed after execution."
+            }
+          ]
+        }
+      },
+      "output": [
+        "VIDEO",
+        "STRING",
+        "INT"
+      ],
+      "output_name": [
+        "video",
+        "video_path",
+        "frames"
+      ],
+      "output_is_list": [
+        false,
+        false,
+        false
+      ]
+    }
+  }
+}

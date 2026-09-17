@@ -121,7 +121,7 @@ def _profile_config(backend: str, recipe_json: str, save_latent: bool,
     return value
 
 
-def _verified_source_manifest(value: dict[str, Any]) -> dict[str, Any]:
+def _verified_source_manifest(value: dict[str, Any], backend: str = "pixel") -> dict[str, Any]:
     manifest = chain._json_document(value)
     if not isinstance(manifest, dict):
         raise ValueError(
@@ -129,6 +129,14 @@ def _verified_source_manifest(value: dict[str, Any]) -> dict[str, Any]:
             "from Checkpoint Manager.")
     from .deferred_checkpoint_source import editorial_source_manifest
     manifest = editorial_source_manifest(manifest, chain)
+    if backend == "pixel":
+        from .pixel_continuity import apply_selection
+        manifest = apply_selection(manifest)
+    else:
+        # Pixel-only workflow marks must not invalidate latent/DeRoPE resumes.
+        manifest.pop("pixel_continuity", None)
+        for segment in manifest.get("segments", []):
+            segment.pop("pixel_continuity", None)
     segments = chain._validate_manifest(manifest)
     if not manifest.get("processing_source"):
         chain.common_saved_resolution(segments, "Deferred upscale source")
@@ -1049,6 +1057,7 @@ def _upscale_source_contract(source: dict[str, Any]) -> str:
         "reference_cache", "generation_fingerprint",
         *(["presentation_source"] if source.get("presentation_source") else []),
         *(["processing_source"] if source.get("processing_source") else []),
+        *(["pixel_continuity"] if source.get("pixel_continuity") else []),
     )})
 
 
@@ -1069,6 +1078,9 @@ def _verify_upscale_source(metadata: dict[str, Any], source: dict[str, Any],
         if segment.get(key) != expected:
             raise ValueError("Upscale scene %d used different source timing or settings (%s)." % (index, key))
     saved_contract = metadata.get("source_scene_contract")
+    if source.get("pixel_continuity") and not saved_contract:
+        raise ValueError("Upscale scene %d predates continuity protection. Reprocess from that scene "
+                         "or use a new profile." % index)
     if saved_contract and saved_contract != _upscale_source_contract(source):
         raise ValueError("Upscale scene %d used different source scene settings." % index)
 
@@ -1249,7 +1261,7 @@ class MiniMaxH3ChainUpscaleAdapter:
         if initial_state is None:
             if start_mode not in ("resume", "fresh_range"):
                 raise ValueError("Unknown upscale start_mode %r." % start_mode)
-            manifest = _verified_source_manifest(source_manifest)
+            manifest = _verified_source_manifest(source_manifest, backend)
             if any(item.get("processing_source", {}).get("profile_path") ==
                    chain._relative_output_path(_profile_dir(
                        manifest["run_name"], chain._safe_name(profile, "upscale"), manifest))
@@ -1307,7 +1319,7 @@ class MiniMaxH3ChainUpscaleAdapter:
         else:
             state = dict(initial_state)
             manifest = state["source_manifest"]
-            if _source_hash(_verified_source_manifest(source_manifest)) != str(
+            if _source_hash(_verified_source_manifest(source_manifest, backend)) != str(
                     state["source_manifest_hash"]):
                 raise ValueError(
                     "Selected checkpoint branch changed during upscale recursion.")

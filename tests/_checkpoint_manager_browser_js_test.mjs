@@ -7,7 +7,7 @@ import {pathToFileURL} from "node:url";
 import {spawnSync} from "node:child_process";
 
 const read = name => readFileSync(new URL("../web/" + name, import.meta.url), "utf8");
-const modules = ["h3_chain_plan_core.mjs", "h3_checkpoint_manager_core.mjs", "h3_working_branches.mjs", "h3_checkpoint_graph.mjs", "h3_storage_inspector.mjs"]
+const modules = ["h3_dom_wheel.mjs", "h3_chain_plan_core.mjs", "h3_checkpoint_manager_core.mjs", "h3_working_branches.mjs", "h3_checkpoint_graph.mjs", "h3_storage_inspector.mjs"]
     .map(name => read(name).replace(/^import\s[\s\S]*?from\s+"[^"]+";\n/gm, "")
         .replace(/^export /gm, "")).join("\n");
 const extension = read("h3_chain_checkpoint_manager.js")

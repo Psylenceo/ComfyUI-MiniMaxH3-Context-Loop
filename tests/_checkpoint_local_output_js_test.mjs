@@ -204,6 +204,29 @@ const byClass = (node, name) => elements(node).find(item => item.className.split
 const select = (node, scene, revision) => byText(node, `S${scene} · ${revision.slice(0, 8)}`).click();
 const value = node => node.widgets[0].value;
 
+// Continuity is a workflow-local per-boundary processing choice. Exercise the
+// actual checkbox handler, redraw, serializer and reopening, not only helpers.
+const continuityNode = makeNode();
+await settle();
+select(continuityNode, 2, b); await settle();
+const continuityToggle = node => elements(node).find(item => item.tag === "label"
+    && item.children.some(child => child.textContent === "Continue previous shot (pixel upscale)"))?.children[0];
+const continuityBox = continuityToggle(continuityNode);
+assert.equal(continuityBox.disabled, false);
+continuityBox.checked = true; continuityBox.listeners.change();
+assert.equal(JSON.parse(value(continuityNode)).pixel_continuity[0].revision, b);
+select(continuityNode, 1, a); await settle();
+select(continuityNode, 2, b); await settle();
+assert.equal(continuityToggle(continuityNode).checked, true);
+const continuityReopened = makeNode(await continuityNode.widgets[0].serializeValue());
+await settle(); select(continuityReopened, 2, b); await settle();
+assert.equal(continuityToggle(continuityReopened).checked, true);
+continuityToggle(continuityReopened).checked = false;
+continuityToggle(continuityReopened).listeners.change();
+assert.equal(JSON.parse(value(continuityReopened)).pixel_continuity, undefined);
+assert.equal(mutations, 0, "marking must never send a project mutation");
+console.log("Pixel continuity UI: checkbox, scene browsing, save/reload, disable and project isolation pass");
+
 const scoped = makeNode(chapterOnlyPin);
 await settle();
 assert.equal(byClass(scoped, "h3cm-output-scope").value, "chapter");

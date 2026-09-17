@@ -29407,6 +29407,9 @@ def _checkpoint_selection_manifest(value: Any) -> dict[str, Any] | None:
             manifest, selection["processing_source"], sys.modules[__name__], upscale_nodes)
     if current_branch(run_name) != "main":
         manifest["_branch_id"] = current_branch(run_name)
+    if selection.get("pixel_continuity"):
+        # Workflow-local processing choices, never generation/project edits.
+        manifest["pixel_continuity"] = _json_document(selection["pixel_continuity"])
     return manifest
 
 

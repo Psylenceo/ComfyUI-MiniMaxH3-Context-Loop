@@ -18,6 +18,7 @@ WORKFLOWS = {
     "Deferred Upscale - H3 LBH 3D - MiniMax H3 0.6.json",
     "Deferred Upscale - H3 LBH 3D Split - EXPERIMENTAL - MiniMax H3 0.6.json",
     "Deferred Upscale - Pixel DLSS5 + USDU - EXPERIMENTAL - MiniMax H3 0.6.json",
+    "Deferred Upscale - Pixel USDU Continuity - EXPERIMENTAL - MiniMax H3 0.6.json",
     "Deferred Upscale - DLSS5 + LMS Guide - EXPERIMENTAL - MiniMax H3 0.6.json",
     "Deferred Upscale - SeedVR2 Full Chain - MiniMax H3 0.6.json",
     "FL2V Normal - MiniMax H3 0.6.json",
@@ -425,7 +426,8 @@ def main() -> None:
         guide = (EXAMPLES / "guides" / path.with_suffix(".md").name).read_text()
         assert "nightly" in guide and "not nightly" not in guide
         uuids.add(workflow["id"])
-        pixel = bool(nodes(workflow, "MiniMaxH3ChainUpscalePixelConditioning"))
+        pixel = bool(nodes(workflow, "MiniMaxH3ChainUpscalePixelConditioning")
+                     or nodes(workflow, "CATH3UpscaleVideoConditioning"))
         lms = bool(nodes(workflow, "MiniMaxH3ChainLMSGuide"))
         derope_fast = path.name == "Deferred De-Rope Only - Fast Turbo - MiniMax H3 0.6.json"
         for node in workflow["nodes"]:

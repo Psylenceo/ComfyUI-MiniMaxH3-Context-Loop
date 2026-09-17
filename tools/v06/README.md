@@ -45,6 +45,10 @@ installation-specific file inventories removed. It is not a snapshot of nightly
 H3 nodes. Update these external contracts deliberately when changing the
 documented dependency requirements; do not import an entire server inventory.
 
+`pixel_video_schemas.json` adds the six file-backed transport/USDU contracts
+used only by the nightly continuity example. It contains no model inventory.
+The Protect Tail and Finish definitions are read from local H3 code.
+
 ## Serialization rules
 
 - Name every widget explicitly. A new/missing field fails the build until its

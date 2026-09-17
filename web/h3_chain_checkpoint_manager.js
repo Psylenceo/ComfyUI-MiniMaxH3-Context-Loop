@@ -25,9 +25,11 @@ import {
     checkpointDeropeSelectionJson,
     checkpointOutputSelectionJson,
     checkpointOutputSummary,
+    checkpointContinuitySelection,
+    checkpointSetContinuity,
     formatCheckpointBytes,
     selectedCheckpointRevision,
-} from "./h3_checkpoint_manager_core.mjs?v=0.7.21";
+} from "./h3_checkpoint_manager_core.mjs?v=pixel-continuity-1";
 import {
     parsePlanJson,
     planToJson,
@@ -702,19 +704,17 @@ function mount(node) {
         // Scope is an explicit UI choice, not the range of the browsed branch.
         // Keep the exact pinned lineage; only repair a stale/missing scope flag.
         try {
-            const selection = JSON.parse(value);
+            const selection = JSON.parse(checkpointContinuitySelection(value, selectionWidget?.value));
             if (!selection || typeof selection !== "object" || Array.isArray(selection)) return value;
             if (selection.output_scope != null && !["project", "chapter"].includes(selection.output_scope)) return value;
-            let changed = false;
             if ((selection.output_scope ?? "project") !== outputScope.value) {
-                selection.output_scope = outputScope.value; changed = true;
+                selection.output_scope = outputScope.value;
             }
             if ((selection.final_cut_branch_id ?? "auto") !== state.finalCutBranch) {
                 if (state.finalCutBranch === "auto") delete selection.final_cut_branch_id;
                 else selection.final_cut_branch_id = state.finalCutBranch;
-                changed = true;
             }
-            return changed ? JSON.stringify(selection) : value;
+            return JSON.stringify(selection);
         } catch { return value; } // Invalid selections still fail backend validation.
     }
 
@@ -1572,6 +1572,34 @@ function mount(node) {
         addInspector("Frames", `${record.raw_frames} raw · ${record.delivered_frames} delivered`);
         addInspector("Sampling", `seed ${record.seed || "unknown"} · ${record.steps || "?"} steps`);
         addInspector("Incoming", `${record.continuation_mode} · Video ${record.context_length}f · Audio ${record.audio_context_length}f`);
+        if (!state.attribution && record.take_kind !== "editorial_alternate") {
+            let saved = {};
+            try { saved = JSON.parse(selectionWidget?.value || "{}"); } catch { /* No output yet. */ }
+            const position = (saved.lineage ?? []).findIndex(item =>
+                Number(item.scene) === Number(record.scene) && item.revision === record.revision);
+            const label = document.createElement("label");
+            label.style.cssText = "display:flex;gap:8px;align-items:center;margin:8px 0";
+            label.title = "For the new pixel USDU continuity workflow only. Protect this continuous shot with the previous upscaled tail. Leave hard cuts off. Saved in this workflow; generation and project files stay unchanged.";
+            const toggle = document.createElement("input");
+            toggle.type = "checkbox";
+            toggle.checked = (saved.pixel_continuity ?? []).some(mark =>
+                Number(mark.scene) === Number(record.scene) && mark.revision === record.revision);
+            toggle.disabled = state.busy || saved.run_name !== state.runName || position <= 0
+                || Number(record.raw_frames) <= Number(record.delivered_frames);
+            if (saved.run_name !== state.runName || position < 0) {
+                label.title = "Select this scene's branch for output first. This checkbox applies to the upscale workflow's selected path.";
+            } else if (position === 0 || Number(record.raw_frames) <= Number(record.delivered_frames)) {
+                label.title = "No preceding scene or repeated head is available for this scene. Use independent upscale.";
+            }
+            toggle.addEventListener("change", () => {
+                writeOutputSelection(checkpointSetContinuity(selectionWidget.value, record, toggle.checked));
+                renderOutputSelection();
+            });
+            const caption = document.createElement("span");
+            caption.textContent = "Continue previous shot (pixel upscale)";
+            label.append(toggle, caption);
+            inspector.append(label);
+        }
         if (record.inactive_reason) addInspector("Inactive", record.inactive_reason);
         addInspector("Parent", state.attribution
             ? `Will become Scene ${state.attribution.parent.scene} · ${state.attribution.parent.revision.slice(0, 8)}`

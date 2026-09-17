@@ -39,12 +39,14 @@ def load_schemas():
             ('nodes', 'NODE_CLASS_MAPPINGS'),
             ('chain_nodes', 'CHAIN_NODE_CLASS_MAPPINGS'),
             ('upscale_nodes', 'UPSCALE_NODE_CLASS_MAPPINGS'),
+            ('pixel_continuity', 'NODE_CLASS_MAPPINGS'),
             ('masking_nodes', 'NODE_CLASS_MAPPINGS'),
             ('masked_bridge', 'NODE_CLASS_MAPPINGS'),
             ('source_av_target', 'NODE_CLASS_MAPPINGS')):
         imported = importlib.import_module(package_name + '.' + module)
         classes.update(getattr(imported, mapping))
     schemas = json.loads((DATA / 'external_schemas.json').read_text())['nodes']
+    schemas.update(json.loads((DATA / 'pixel_video_schemas.json').read_text())['nodes'])
     for name, cls in classes.items():
         inputs = cls.INPUT_TYPES()
         schemas[name] = {
