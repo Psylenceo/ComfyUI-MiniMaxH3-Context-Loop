@@ -62,6 +62,11 @@ class Element {
     append(...items) { this.children.push(...items); }
     replaceChildren(...items) { this.children = items; }
     addEventListener(name, callback) { this.listeners[name] = callback; }
+    removeEventListener(name) { delete this.listeners[name]; }
+    querySelectorAll(selector) {
+        const all = this.children.flatMap(item => [item, ...item.querySelectorAll(selector)]);
+        return selector === '[data-bulk-key]' ? all.filter(item => item.dataset.bulkKey) : [];
+    }
     setAttribute(name, value) { this[name] = value; }
     removeAttribute(name) { delete this[name]; }
     load() {}
@@ -175,14 +180,17 @@ const context = vm.createContext({
         else { mutations++; throw new Error(`Unexpected request ${path}`); }
         return {ok:true, json:async () => data};
     }},
-    window:{setTimeout:callback => callback(), confirm:message => { confirmations.push(message); return confirms; }},
+    window:{setTimeout:callback => callback(), addEventListener(){}, removeEventListener(){},
+        confirm:message => { confirmations.push(message); return confirms; }},
+    clearTimeout, setTimeout,
     projectMutationOptions:(_node, _run, options) => {
         if (attachResponse || processingDeletion || snapshotRetirement || allowWorkingAssignment || obsoleteResponse) return options;
         mutations++; throw new Error("Local output attempted project mutation");
     },
     promptCompanionSync:{},
 });
-vm.runInContext(source, context);
+vm.runInContext(fs.readFileSync(new URL('../web/h3_checkpoint_multiselect.mjs', import.meta.url), 'utf8')
+    .replace(/^export /gm, '') + '\n' + source, context);
 class NodeType {}
 await extension.beforeRegisterNodeDef(NodeType, {name:"MiniMaxH3ChainCheckpointManager"});
 const settle = async () => { for (let i = 0; i < 12; i++) await new Promise(setImmediate); };
@@ -831,7 +839,9 @@ assert.equal(value(recovery),recoveryPin,"Selecting S7 previews without silently
 assert.match(byClass(recovery,"h3cm-assignment-context").textContent,/scenes 1–7 \(7 clips\)/);
 assert.ok(byClass(recovery,"h3cm-assignment-actions").children.includes(byText(recovery,"Assign path to Original")),
     "Assignment belongs to its own visible toolbar, not the deletion file list");
-assert.ok(byClass(recovery,"h3cm-delete").children[0].children.includes(byText(recovery,"Delete selected revision")),
+assert.ok(byClass(recovery,"h3cm-delete-actions").children.includes(byText(recovery,"Delete selected revision"))
+    && byClass(recovery,"h3cm-delete").children.indexOf(byClass(recovery,"h3cm-delete-actions"))
+        < byClass(recovery,"h3cm-delete").children.indexOf(byClass(recovery,"h3cm-delete-details")),
     "Delete stays ahead of the scrollable file inventory");
 confirms = false;
 const beforeAssignment = mutations;

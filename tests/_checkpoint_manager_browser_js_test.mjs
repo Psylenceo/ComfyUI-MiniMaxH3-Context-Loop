@@ -7,7 +7,7 @@ import {pathToFileURL} from "node:url";
 import {spawnSync} from "node:child_process";
 
 const read = name => readFileSync(new URL("../web/" + name, import.meta.url), "utf8");
-const modules = ["h3_dom_wheel.mjs", "h3_chain_plan_core.mjs", "h3_checkpoint_manager_core.mjs", "h3_working_branches.mjs", "h3_checkpoint_graph.mjs", "h3_storage_inspector.mjs"]
+const modules = ["h3_dom_wheel.mjs", "h3_chain_plan_core.mjs", "h3_checkpoint_manager_core.mjs", "h3_working_branches.mjs", "h3_checkpoint_graph.mjs", "h3_storage_inspector.mjs", "h3_checkpoint_multiselect.mjs"]
     .map(name => read(name).replace(/^import\s[\s\S]*?from\s+"[^"]+";\n/gm, "")
         .replace(/^export /gm, "")).join("\n");
 const extension = read("h3_chain_checkpoint_manager.js")
@@ -62,6 +62,10 @@ async function browserChecks(extensionSource, keepStorageOpen) {
             {name:"plan_json",value:'{"shots":[{"id":"one"}]}'},{name:"working_branch_id",value:named}]};
         const app = {registerExtension(){},graph:{setDirtyCanvas(){}}};
         let storageRequests = 0;
+        const bulkRequests = [];
+        let bulkAllowed = true;
+        let bulkDeletes = 0, bulkDeleteError = false;
+        const projectMutationOptions = async (_node, _run, options) => options;
         const storageReport = {format:"h3_storage_inventory_v1",run_name:"demo",scan_complete:true,
             totals:{files:61,logical_bytes:6100,allocated_bytes:8192,allocation_unknown_files:0},
             categories:{takes:{files:61,logical_bytes:6100,allocated_bytes:8192,allocation_unknown_files:0}},
@@ -74,6 +78,20 @@ async function browserChecks(extensionSource, keepStorageOpen) {
             if (path.endsWith("/runs")) data = {runs:[{run_name:"demo",checkpoint_count:7}]};
             else if (path.includes("/working-branches?")) data = {default_branch:"main",branches:[{id:"main",name:"Original"},{id:named,name:"960x544"}]};
             else if (path.includes("/checkpoints?")) data = payload;
+            else if (path.endsWith('/bulk-preview')) {
+                const body = JSON.parse(options.body);
+                bulkRequests.push(body);
+                data = {allowed:bulkAllowed, revisions:body.revisions, snapshot:'bulk-test', rollback_scenes:[],
+                    blockers:bulkAllowed ? [] : ['An unselected scene still uses this take.'],
+                    owned_file_count:2,reclaimed_bytes:2048,files:[],not_deleted:['Shared media']};
+            }
+            else if (path.includes('/bulk-delete')) {
+                const body = JSON.parse(options.body);
+                check(body.snapshot === 'bulk-test', 'Bulk confirmation sends the preview snapshot');
+                bulkDeletes++;
+                if (bulkDeleteError) return {ok:false,status:409,json:async()=>({error:'Preview changed; preview again.'})};
+                data = {ok:true,message:'Deleted selected fixture revisions; shared files kept.'};
+            }
             else if (path.includes("/storage-inventory?")) {
                 storageRequests++;
                 check(options.method === "GET", "Storage inspection only uses GET");
@@ -169,6 +187,55 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         await new Promise(resolve=>setTimeout(resolve,70));
         check(zoomInput.value==="100","Percentage button resets zoom to 100 percent");
         check(node.widgets[0].value===output,"Graph zoom cannot change source selection");
+        const bulkCard = scene => root.querySelector(`[data-bulk-key="${scene}:${String(scene).repeat(32)}"]`);
+        const modifiedClick = (scene, mods) => bulkCard(scene).dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true,...mods}));
+        const selectedKeys = () => [...root.querySelectorAll('.h3cm-bulk-selected')].map(card=>card.dataset.bulkKey);
+        const previewed = root.querySelector('.h3cm-revision-selected').dataset.bulkKey;
+        modifiedClick(2,{ctrlKey:true}); modifiedClick(4,{ctrlKey:true});
+        check(selectedKeys().length === 2, 'Ctrl-click adds two takes');
+        modifiedClick(2,{ctrlKey:true});
+        check(selectedKeys().length === 1 && selectedKeys()[0].startsWith('4:'), 'Ctrl-click toggles a take off');
+        modifiedClick(3,{metaKey:true});
+        check(selectedKeys().length === 2, 'Cmd-click also adds a take');
+        modifiedClick(5,{shiftKey:true});
+        check(selectedKeys().map(key=>key.split(':')[0]).join(',') === '3,4,5', 'Shift-click replaces selection with anchor range');
+        modifiedClick(7,{ctrlKey:true,shiftKey:true});
+        check(selectedKeys().length === 5, 'Ctrl-Shift-click adds a range');
+        check(node.widgets[0].value === output && root.querySelector('.h3cm-revision-selected').dataset.bulkKey === previewed,
+            'Modified clicks change neither output pin nor preview cursor');
+        bulkCard(2).click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(selectedKeys().length === 0, 'Normal click clears bulk selection and previews normally');
+        modifiedClick(4,{shiftKey:true});
+        check(selectedKeys().map(key=>key.split(':')[0]).join(',') === '2,3,4', 'Normal preview click establishes the range anchor');
+        root.querySelector('.h3cm-bulk-delete').click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(bulkRequests.length === 1 && bulkRequests[0].revisions.map(item=>item.scene).join(',') === '2,3,4',
+            'One bulk preview contains precisely the explicit selection');
+        check(root.querySelector('.h3cm-bulk-preview').textContent.includes('Confirm bulk deletion'), 'Allowed preview requires explicit confirmation');
+        modifiedClick(4,{ctrlKey:true});
+        check(root.querySelector('.h3cm-bulk-preview').hidden, 'Selection change invalidates the prior confirmation');
+        bulkAllowed = false;
+        root.querySelector('.h3cm-bulk-delete').click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(!root.querySelector('.h3cm-bulk-preview button') && root.querySelector('.h3cm-bulk-preview').textContent.includes('unselected scene'),
+            'Protected selection displays the reason without a confirm button');
+        root.querySelector('.h3cm-branches').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+        check(selectedKeys().length === 0, 'Escape clears selection');
+        await setZoom(50);
+        document.getElementById('host').style.transform='scale(0.7)';
+        document.getElementById('host').style.transformOrigin='top left';
+        const boxViewport = root.querySelector('.h3cm-fork-scroll'); boxViewport.scrollLeft = 0;
+        const r2 = bulkCard(2).getBoundingClientRect(), r3 = bulkCard(3).getBoundingClientRect();
+        const point = {pointerId:44,button:0,buttons:1,shiftKey:true,bubbles:true,cancelable:true};
+        const boxGraph = root.querySelector('.h3cm-fork-graph');
+        boxGraph.dispatchEvent(new PointerEvent('pointerdown',{...point,clientX:r2.left-2,clientY:r2.top-2}));
+        window.dispatchEvent(new PointerEvent('pointermove',{...point,clientX:r3.right+2,clientY:Math.max(r2.bottom,r3.bottom)+2}));
+        window.dispatchEvent(new PointerEvent('pointerup',{...point,buttons:0,clientX:r3.right+2,clientY:Math.max(r2.bottom,r3.bottom)+2}));
+        check(selectedKeys().map(key=>key.split(':')[0]).join(',') === '2,3', 'Shift rectangle selects exact cards under graph and canvas zoom');
+        check(!document.querySelector('.h3cm-selection-box'), 'Rectangle overlay is removed on pointerup');
+        check(node.widgets[0].value === output, 'Rectangle does not change the output pin');
+        await new Promise(resolve=>setTimeout(resolve,10));
+        root.querySelector('.h3cm-bulk-tools button').click();
+        document.getElementById('host').style.transform='';
+        await setZoom(100);
         check(root.querySelectorAll(".h3cm-alternate").length === 1,"Original graph shows ALT once under its base");
         const tab = label => [...root.querySelectorAll('[role="tab"]')].find(item=>item.textContent === label);
         check(tab("Original · 8")?.getAttribute("aria-selected") === "true","Original stage includes its ALT takes");
@@ -308,6 +375,29 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         lateCard().click();
         check(viewports()[0].scrollLeft === zoomedScroll, "Clip selection preserves scroll with graph zoom applied");
         check(node.widgets[0].value === output, "Scrolling, browsing chapters and previewing takes never change output selection");
+        const toggleLast = () => lateCard().dispatchEvent(new MouseEvent('click',{ctrlKey:true,bubbles:true}));
+        toggleLast();
+        check(selectedKeys().length === 1, 'Late chapter node supports bulk selection');
+        chapter('Chapter 1');
+        check(selectedKeys().length === 0, 'Changing chapter clears the old selection');
+        chapter('Chapter 2');
+        bulkAllowed = true;
+        toggleLast();
+        root.querySelector('.h3cm-bulk-delete').click(); await new Promise(resolve=>setTimeout(resolve,20));
+        window.confirm = () => false;
+        root.querySelector('.h3cm-bulk-preview button').click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(bulkDeletes === 0, 'Cancelled bulk confirmation sends no delete');
+        window.confirm = () => true;
+        bulkDeleteError = true;
+        root.querySelector('.h3cm-bulk-preview button').click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(bulkDeletes === 1 && root.querySelector('.h3cm-bulk-preview').hidden,
+            'Server conflict discards the old confirmation, retaining the selection');
+        check(selectedKeys().length === 1, 'A rejected deletion keeps the selection available for another preview');
+        bulkDeleteError = false;
+        root.querySelector('.h3cm-bulk-delete').click(); await new Promise(resolve=>setTimeout(resolve,20));
+        root.querySelector('.h3cm-bulk-preview button').click(); await new Promise(resolve=>setTimeout(resolve,50));
+        check(bulkDeletes === 2 && selectedKeys().length === 0, 'Successful bulk deletion clears selection and refreshes');
+        check(node.widgets[0].value === output, 'Bulk deletion never rewrites a pinned output');
         const host = document.getElementById("host"); host.style.width="1850px";host.style.height="1040px";
         root.querySelector(".h3cm-main").style.gridTemplateColumns="minmax(0,1fr)";
         root.querySelector(".h3cm-detail").style.display="none";

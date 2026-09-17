@@ -30033,6 +30033,40 @@ async def _chapter_snapshot_retirement(request):
     return web.json_response(payload)
 
 
+async def _bulk_checkpoint_deletion(request):
+    from .checkpoint_bulk_delete import BulkCheckpointManager
+
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("Bulk checkpoint deletion requires a JSON object.")
+        run_name = _strict_run_name(body.get("run_name", ""))
+        manager = BulkCheckpointManager(_output_root())
+        if request.path.endswith("/bulk-preview"):
+            payload = await asyncio.to_thread(manager.preview, run_name, body.get("revisions"))
+        else:
+            ownership_proof = _request_project_ownership(request)
+            rejection = _project_write_rejection(request, run_name, "delete selected checkpoints")
+            if rejection is not None:
+                return rejection
+
+            def delete_owned():
+                with checkpoint_run_lock(_output_root(), run_name), project_write_guard(
+                        _output_root(), run_name, ownership_proof, "delete selected checkpoints"):
+                    return manager.delete(run_name, body.get("revisions"), body.get("snapshot"))
+
+            payload = await asyncio.to_thread(delete_owned)
+    except ProjectOwnershipError as exc:
+        return web.json_response({"error":str(exc), "code":"h3_project_read_only"}, status=423)
+    except CheckpointDeleteBlocked as exc:
+        return web.json_response({"error":str(exc), "preview":exc.preview}, status=409)
+    except FileNotFoundError as exc:
+        return web.json_response({"error":str(exc)}, status=404)
+    except (OSError, TypeError, ValueError, KeyError) as exc:
+        return web.json_response({"error":str(exc)}, status=400)
+    return web.json_response(payload)
+
+
 async def _obsolete_checkpoint_path(request):
     from .obsolete_checkpoint_path import ObsoleteCheckpointPathManager
 
@@ -32204,7 +32238,7 @@ async def _working_branch_command(request):
 for _branch_route_name in (
         "_list_saved_checkpoints", "_restore_checkpoint_revisions",
         "_attribute_checkpoint_revision", "_preview_checkpoint_revision_deletion",
-        "_obsolete_checkpoint_path",
+        "_obsolete_checkpoint_path", "_bulk_checkpoint_deletion",
         "_delete_checkpoint_revision", "_update_run_editorial",
         "_get_prompt_history", "_update_prompt_history",
         "_plan_studio_presentation", "_plan_studio_checkpoint_thumbnail",
@@ -32271,6 +32305,12 @@ if (PromptServer is not None and web is not None and
     PromptServer.instance.routes.post(
         "/minimax_h3_context_loop/checkpoint-revisions/obsolete-preview")(
             _obsolete_checkpoint_path)
+    PromptServer.instance.routes.post(
+        "/minimax_h3_context_loop/checkpoint-revisions/bulk-preview")(
+            _bulk_checkpoint_deletion)
+    PromptServer.instance.routes.post(
+        "/minimax_h3_context_loop/checkpoint-revisions/bulk-delete")(
+            _bulk_checkpoint_deletion)
     PromptServer.instance.routes.post(
         "/minimax_h3_context_loop/checkpoint-revisions/obsolete-delete")(
             _obsolete_checkpoint_path)

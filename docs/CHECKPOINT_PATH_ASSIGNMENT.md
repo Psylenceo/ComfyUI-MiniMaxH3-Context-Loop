@@ -26,3 +26,31 @@ permanently removed; this is not an undoable action. A changed preview must be
 requested again before deletion.
 
 This is an explicit action, not a startup, polling or automatic storage cleanup.
+
+## Selecting several checkpoints for deletion (nightly)
+
+On the Checkpoint Manager's **Original** tab (including its ALT cards):
+
+- **Ctrl/Cmd-click** toggles an individual saved take.
+- **Shift-click** selects the visible range from the last clicked take; Ctrl/Cmd
+  plus Shift adds that range to the current selection.
+- **Shift-drag** draws a selection rectangle. Ctrl/Cmd plus Shift-drag adds to
+  the existing selection. The rectangle respects the graph and canvas zoom.
+- **Escape** or **Clear selection** clears the selection. Normal clicking still
+  previews a clip and establishes the next range anchor.
+
+The amber selection is only for bulk deletion: it does not assign a branch,
+change the preview cursor, or change the workflow's output pin. Changing the
+project, working branch, stage or chapter tab clears it; hidden or disappeared
+cards are dropped from the selection. It is not saved in the workflow.
+
+Choose **Delete selected…**, inspect the exact revisions and files, then choose
+**Confirm bulk deletion**. Only those revisions are proposed, never an implicit
+branch or all descendants. A connected selected group can be removed together;
+unselected dependents, retained working branches and sealed chapter snapshots
+still block unsafe deletion. Selected active-tail pointers are explicitly
+listed before removal. Shared files are kept, including files shared between
+selected revisions. A changed selection or stale preview requires a new preview.
+
+Bulk selection currently covers generated checkpoints and ALTs. Processed takes
+keep their existing separate single-take deletion controls.

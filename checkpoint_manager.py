@@ -1586,7 +1586,7 @@ class CheckpointGraphManager:
 
     def deletion_preview(self, run_name: Any, scene: Any,
                          revision: Any, *, _scan=None,
-                         _skip_dependency_check=False) -> dict[str, Any]:
+                         _skip_dependency_check=False, _deleting=()) -> dict[str, Any]:
         run_dir, run = self._run_dir(run_name)
         scene_number = int(scene)
         token = str(revision or "").strip().lower()
@@ -1607,6 +1607,9 @@ class CheckpointGraphManager:
                 scan, scene_number)
             descendant_keys = ([] if _skip_dependency_check else
                                self._descendant_keys(scan["records"], key))
+            # A previewed bulk transaction removes exactly this set together.
+            # Dependencies outside the set retain the ordinary protections.
+            descendant_keys = [key for key in descendant_keys if key not in _deleting]
             dependents = []
             for child_key in descendant_keys:
                 child = scan["records"][child_key]
@@ -1700,7 +1703,8 @@ class CheckpointGraphManager:
             later_active = sorted(
                 item["scene"] for item in scan["records"].values()
                 if (item["active"] and item["scene"] > scene_number and
-                    item["scene"] <= chapter_end))
+                    item["scene"] <= chapter_end and
+                    (item["scene"], item["revision"]) not in _deleting))
             if record.get("pointer_active") and not record["active"]:
                 blockers.append(
                     "This saved take has a stale active pointer. Make the desired "

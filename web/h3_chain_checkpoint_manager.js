@@ -4,6 +4,7 @@ import {api} from "/scripts/api.js";
 import {mountStorageInspector} from "./h3_storage_inspector.mjs?v=0.1.0";
 import {branchRequestPath, branchSelectionJson} from "./h3_working_branches.mjs?v=0.7.18";
 import {checkpointForkGraph, checkpointGraphKey, checkpointSaveOrder, checkpointGraphOutput, mountCheckpointGraphEdges} from "./h3_checkpoint_graph.mjs?v=0.7.20";
+import {mountCheckpointMultiSelect} from "./h3_checkpoint_multiselect.mjs?v=1";
 import {
     CHECKPOINT_STAGES,
     checkpointStageVariants,
@@ -281,7 +282,7 @@ function injectStyles() {
       div.h3cm-revision-empty { padding:5px 8px; border:1px dashed var(--h3cm-border); border-radius:6px; }
       .h3cm-revision-empty-selected { border-color:var(--h3cm-accent) !important;
         color:var(--h3cm-accent) !important; }
-      .h3cm-fork-scroll { overflow:auto; padding:5px 3px 10px; }
+      .h3cm-fork-scroll { overflow:auto; padding:5px 3px 10px; user-select:none; }
       .h3cm-fork-graph { display:grid; position:relative; width:max-content; gap:28px 48px; align-items:start; }
       .h3cm-fork-node,.h3cm-fork-slot { width:180px; min-width:0; position:relative; z-index:1; }
       .h3cm-fork-node > .h3cm-revision,.h3cm-fork-slot > .h3cm-revision { width:100%; min-height:74px; white-space:normal; overflow-wrap:anywhere; }
@@ -339,6 +340,13 @@ function injectStyles() {
       .h3cm-delete-actions { margin-top:7px; flex-wrap:wrap; }
       .h3cm-delete-actions .h3cm-status { flex:1 1 180px; min-width:120px; }
       .h3cm-delete-button { margin-left:auto; color:var(--h3cm-danger) !important; }
+      .h3cm-bulk-tools { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:5px 0; }
+      .h3cm-bulk-tools[hidden],.h3cm-bulk-preview[hidden] { display:none; }
+      .h3cm-bulk-selected { outline:3px solid #f3bd55 !important; outline-offset:1px;
+        background:color-mix(in srgb,var(--h3cm-panel) 75%,#f3bd55) !important; }
+      .h3cm-bulk-preview { border:1px solid var(--h3cm-border); padding:8px; }
+      .h3cm-selection-box { position:fixed; pointer-events:none; z-index:2147483647;
+        border:1px solid #f3bd55; background:#f3bd5533; }
       .h3cm-error { color:var(--h3cm-danger); }
       @media (max-width:760px) { .h3cm-main { grid-template-columns:1fr; }
         .h3cm-root { overflow:auto; } }
@@ -501,7 +509,90 @@ function mount(node) {
     graphTools.append(zoomOut, zoomLabel, zoomIn, zoomReset, zoomFit);
     const planContext = element("div", "h3cm-plan-context");
     const branches = element("div", "h3cm-branches");
-    branchesPanel.append(branchesTitle, graphTools, planContext, branches);
+    const bulkTools = element("div", "h3cm-bulk-tools");
+    const bulkCount = element("span", "h3cm-bulk-count", "0 selected");
+    const bulkClear = button("Clear selection", "Clear the bulk selection (Escape also works)", () => bulkSelection.clear());
+    const bulkDelete = button("Delete selected…", "Preview deletion of exactly the selected saved takes", () => void bulkDeleteAction(), "h3cm-bulk-delete");
+    const bulkHelp = element("small", "h3cm-muted", "Ctrl/Cmd-click: toggle · Shift-click: range · Shift-drag: rectangle");
+    bulkTools.append(bulkCount, bulkClear, bulkDelete, bulkHelp);
+    const bulkPanel = element("div", "h3cm-bulk-preview");
+    bulkPanel.hidden = true;
+    let bulkPreview = null, bulkEpoch = 0, bulkScope = "", bulkConfirm = null;
+    const bulkSelection = mountCheckpointMultiSelect(branches, {
+        enabled:() => !state.busy && state.stage === "original",
+        onChange:() => { invalidateBulkPreview(); updateBulkControls(); },
+    });
+    function invalidateBulkPreview() {
+        bulkEpoch++;
+        bulkPreview = null;
+        bulkConfirm = null;
+        bulkPanel.replaceChildren();
+        bulkPanel.hidden = true;
+    }
+    function updateBulkControls() {
+        const count = bulkSelection.keys().length;
+        bulkTools.hidden = state.stage !== "original";
+        bulkCount.textContent = `${count} selected`;
+        bulkClear.disabled = state.busy || !count;
+        bulkDelete.disabled = state.busy || !count;
+        if (bulkConfirm) bulkConfirm.disabled = state.busy;
+        remove.disabled = state.busy || count > 0 || Boolean(state.attribution) || !state.deletion?.allowed;
+        removeObsolete.disabled = state.busy || count > 0 || Boolean(state.attribution) || !obsoletePathIdentity();
+    }
+    async function bulkDeleteAction(confirm = false) {
+        if (state.busy || state.stage !== "original" || !bulkSelection.keys().length) return;
+        const records = new Map((state.payload?.revisions ?? []).flatMap(record => [record, ...(record.alternates ?? [])])
+            .map(record => [checkpointRevisionKey(record.scene, record.revision), record]));
+        const revisions = bulkSelection.keys().map(key => records.get(key)).filter(Boolean)
+            .map(({scene, revision}) => ({scene, revision}));
+        if (revisions.length !== bulkSelection.keys().length) { invalidateBulkPreview(); return; }
+        const preview = bulkPreview;
+        if (confirm && (!preview?.allowed || !window.confirm(
+            `Permanently delete these ${preview.revisions.length} selected checkpoint revisions?\n\n` +
+            preview.revisions.map(item => `S${item.scene} · ${item.revision.slice(0, 8)}`).join("\n") +
+            `\n\n${preview.owned_file_count} files · ${formatCheckpointBytes(preview.reclaimed_bytes)}. ` +
+            (preview.rollback_scenes.length ? `Active assignments for scenes ${preview.rollback_scenes.join(", ")} will be cleared. ` : "") +
+            "Unselected takes and shared files are kept. This cannot be undone."))) return;
+        if (!confirm) invalidateBulkPreview();
+        const epoch = bulkEpoch, run = state.runName, branch = selectedWorkingBranch();
+        setBusy(true, confirm ? "Deleting selected checkpoints…" : "Inspecting selected checkpoints…");
+        try {
+            const path = "/minimax_h3_context_loop/checkpoint-revisions/bulk-" + (confirm ? "delete" : "preview");
+            const options = {method:"POST", headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({run_name:run, branch_id:branch, revisions,
+                    ...(confirm ? {snapshot:preview.snapshot} : {})})};
+            const result = confirm ? await mutationRequest(node, run, path, options, branch) : await jsonRequest(path, options);
+            if (epoch !== bulkEpoch || run !== state.runName || branch !== selectedWorkingBranch()) return;
+            if (confirm) {
+                bulkSelection.clear();
+                await refreshCheckpoints();
+                status.textContent = result.message;
+            } else {
+                bulkPreview = result;
+                bulkPanel.replaceChildren(element("div", "h3cm-delete-title",
+                    `${result.revisions.length} selected revisions · ${result.owned_file_count} files · ${formatCheckpointBytes(result.reclaimed_bytes)}`));
+                bulkPanel.append(element("div", "", result.revisions.map(item => `S${item.scene} · ${item.revision.slice(0, 8)}`).join("; ")));
+                if (result.rollback_scenes.length) bulkPanel.append(element("div", "h3cm-error",
+                    `Clears active assignments: ${result.rollback_scenes.join(", ")}`));
+                for (const reason of result.blockers) bulkPanel.append(element("div", "h3cm-error", reason));
+                if (result.allowed) {
+                    bulkConfirm = button("Confirm bulk deletion", "Delete only the previewed selection", () => void bulkDeleteAction(true));
+                    bulkPanel.append(bulkConfirm);
+                }
+                const details = element("details", "h3cm-delete-details");
+                const inventory = element("div", "h3cm-delete-body");
+                for (const part of result.files) inventory.append(element("div", "",
+                    `${part.owned ? "Delete" : "Keep shared"}: ${part.path} · ${formatCheckpointBytes(part.size_bytes)}`));
+                details.append(element("summary", "", "Files to delete / keep"), inventory);
+                bulkPanel.append(details, element("div", "h3cm-muted", `Kept: ${result.not_deleted.join("; ")}`));
+                bulkPanel.hidden = false;
+                status.textContent = result.allowed ? "Bulk deletion preview ready; nothing deleted yet." : "Selection is protected; see the bulk preview for details.";
+            }
+        } catch (error) {
+            if (epoch === bulkEpoch) { invalidateBulkPreview(); status.textContent = error.message; }
+        } finally { setBusy(false); }
+    }
+    branchesPanel.append(branchesTitle, graphTools, bulkTools, planContext, branches);
 
     function updateGraphZoomControls() {
         zoomInput.value = String(state.graphZoom);
@@ -584,7 +675,7 @@ function mount(node) {
     assignmentActions.append(activate, assignPlan, load);
     assignmentPanel.append(assignmentContext, assignmentActions);
     deletionActions.append(remove, removeObsolete);
-    deletion.append(deletionActions, obsoletePanel, deletionTitle, deletionDetails);
+    deletion.append(bulkPanel, deletionActions, obsoletePanel, deletionTitle, deletionDetails);
     root.append(head, runRow, storagePanel, workingRow, workingHelp, finalCutRow, outputRow, stageTabs, stageNote, chapterTabs, scenes,
         assignmentPanel, status, main, deletion);
 
@@ -908,6 +999,7 @@ function mount(node) {
         }
         renderOutputSelection();
         renderStageTabs();
+        updateBulkControls();
         if (message) status.textContent = message;
     }
 
@@ -1235,6 +1327,7 @@ function mount(node) {
                 }
                 if (localKeys.has(item.key)) card.append(element("small", "h3cm-local-label", "local output"));
                 if (selected) card.classList.add("h3cm-revision-selected");
+                card.dataset.bulkKey = checkpointRevisionKey(revision.scene, revision.revision);
             } else if (revision) card = variantCard(revision, order);
             else {
                 card = element("div", "h3cm-revision h3cm-revision-empty",
@@ -1272,6 +1365,7 @@ function mount(node) {
                             "h3cm-alternate",
                         );
                         appendSaveOrder(alt, alternate, order);
+                        alt.dataset.bulkKey = checkpointRevisionKey(alternate.scene, alternate.revision);
                         if (alternateUsedInOutput(alternate)) {
                             alt.classList.add("h3cm-alternate-used");
                             alt.append(element("small", "", "used in final cut"));
@@ -1391,6 +1485,10 @@ function mount(node) {
                 }
             }
             branchesPanel.scrollTop = panelScrollTop;
+            const scope = JSON.stringify([state.runName, selectedWorkingBranch(), state.stage, state.chapterTab]);
+            if (scope !== bulkScope) { bulkScope = scope; bulkSelection.clear(); invalidateBulkPreview(); }
+            bulkSelection.reconcile();
+            updateBulkControls();
         };
         for (const cleanup of state.graphCleanups) cleanup();
         state.graphCleanups = [];
@@ -1775,6 +1873,7 @@ function mount(node) {
         renderBranches();
         renderDetail();
         renderDeletion();
+        updateBulkControls();
     }
 
     async function refreshDeletionPreview() {
@@ -1801,9 +1900,11 @@ function mount(node) {
             status.textContent = error.message;
         }
         renderDeletion();
+        updateBulkControls();
     }
 
     async function refreshCheckpoints() {
+        invalidateBulkPreview();
         if (!state.runName) {
             state.payload = null;
             selectRevision(null, false);
@@ -2556,10 +2657,12 @@ function mount(node) {
         // Read-only refresh: no selection serialization or server mutation.
         renderBranches();
         renderDeletion();
+        updateBulkControls();
     };
     node._h3CheckpointManagerPlanMarkerRefresh = refreshPlanMarker;
     const markerTimer = window.setInterval?.(refreshPlanMarker, 500);
     node.onRemoved = function () {
+        bulkSelection.destroy();
         storageInspector?.dismiss();
         if (markerTimer != null) window.clearInterval(markerTimer);
         for (const cleanup of state.graphCleanups) cleanup();
