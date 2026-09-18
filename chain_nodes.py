@@ -8624,6 +8624,41 @@ def _file_sha256(path: str) -> str:
     return digest.hexdigest()
 
 
+class _ResumeArtifactVerification:
+    """Reuse file hashes only within one preflight/resume invocation."""
+
+    def __init__(self):
+        self._hashes = {}
+        self.hashed_files = 0
+        self.hashed_bytes = 0
+        self.reused_files = 0
+
+    @staticmethod
+    def _stamp(path):
+        stat = os.stat(path)
+        return (stat.st_dev, stat.st_ino, stat.st_size,
+                stat.st_mtime_ns, stat.st_ctime_ns)
+
+    def sha256(self, path):
+        path = os.path.abspath(path)
+        before = self._stamp(path)
+        saved = self._hashes.get(path)
+        if saved is not None and saved[0] == before:
+            self.reused_files += 1
+            return saved[1]
+        # Never reuse an older entry if this read fails or the file changes.
+        self._hashes.pop(path, None)
+        digest = _file_sha256(path)
+        if self._stamp(path) != before:
+            raise ValueError(
+                "H3 resume artifact changed during integrity verification: "
+                "%s. Retry after the file has finished changing." % path)
+        self._hashes[path] = (before, digest)
+        self.hashed_files += 1
+        self.hashed_bytes += before[2]
+        return digest
+
+
 def _safe_unlink(path: str) -> None:
     try:
         os.unlink(path)
@@ -11297,7 +11332,10 @@ def _visual_context_state(
 
 
 def _verify_segment_artifacts(
-        segment: dict[str, Any], index: int, *, verify_hashes: bool = True) -> None:
+        segment: dict[str, Any], index: int, *, verify_hashes: bool = True,
+        artifact_verification: _ResumeArtifactVerification | None = None) -> None:
+    hash_file = (_file_sha256 if artifact_verification is None
+                 else artifact_verification.sha256)
     if int(segment.get("index", -1)) != int(index):
         raise ValueError(
             "H3 chain metadata slot %d points to segment index %r." %
@@ -11315,7 +11353,7 @@ def _verify_segment_artifacts(
             raise FileNotFoundError(
                 "H3 chain clip %d %s is missing: %s" %
                 (index, key, artifact))
-        if verify_hashes and _file_sha256(artifact) != expected_hash:
+        if verify_hashes and hash_file(artifact) != expected_hash:
             raise ValueError(
                 "H3 chain clip %d %s failed its SHA-256 integrity check." %
                 (index, key))
@@ -11332,7 +11370,7 @@ def _verify_segment_artifacts(
             raise FileNotFoundError(
                 "H3 chain clip %d blend segment is missing: %s" %
                 (index, artifact))
-        if verify_hashes and _file_sha256(artifact) != expected_hash:
+        if verify_hashes and hash_file(artifact) != expected_hash:
             raise ValueError(
                 "H3 chain clip %d blend segment failed its SHA-256 integrity "
                 "check." % index)
@@ -11348,7 +11386,7 @@ def _verify_segment_artifacts(
             raise FileNotFoundError(
                 "H3 chain clip %d generated-audio sidecar is missing: %s" %
                 (index, audio_path))
-        if verify_hashes and _file_sha256(audio_path) != expected_hash:
+        if verify_hashes and hash_file(audio_path) != expected_hash:
             raise ValueError(
                 "H3 chain clip %d generated-audio sidecar failed its SHA-256 "
                 "integrity check." % index)
@@ -11361,7 +11399,7 @@ def _verify_segment_artifacts(
                 (index, prompt_path))
         artifact_hash = str(segment.get("prompt_file_sha256") or "")
         if artifact_hash:
-            actual_hash = _file_sha256(prompt_path)
+            actual_hash = hash_file(prompt_path)
         else:
             # Records saved before prompt_file_sha256 used prompt_hash for this
             # check. Windows text-mode writes converted LF to CRLF, so compare
@@ -11492,7 +11530,9 @@ def _resume_dependency_diffs(
 def _load_resume_state(
         plan: dict[str, Any], start_clip: int,
         verify_history: bool = True, source_timeline: Any = None,
-        source_audio: Any = None) -> dict[str, Any]:
+        source_audio: Any = None,
+        artifact_verification: _ResumeArtifactVerification | None = None
+        ) -> dict[str, Any]:
     _recover_checkpoint_pointer_transactions(plan.get("run_name"))
     previous_index = start_clip - 1
     context_sources = _resume_context_predecessors(plan, int(start_clip))
@@ -11571,7 +11611,8 @@ def _load_resume_state(
             raise ValueError(
                 "Checkpoint segment record for clip %d has a mismatched history."
                 % index)
-        _verify_segment_artifacts(segment, index)
+        _verify_segment_artifacts(
+            segment, index, artifact_verification=artifact_verification)
         restored = _public_segment(segment)
         for key, value in _prompt_fields(plan, index).items():
             restored.setdefault(key, value)
@@ -11626,7 +11667,9 @@ def _initial_state(plan: dict[str, Any], start_clip: int,
                    external_context: dict[str, Any] | None = None,
                    source_timeline: dict[str, Any] | None = None,
                    source_audio: dict[str, Any] | None = None,
-                   verify_resume_history: bool = True) -> dict[str, Any]:
+                   verify_resume_history: bool = True,
+                   artifact_verification: _ResumeArtifactVerification | None = None
+                   ) -> dict[str, Any]:
     total = len(plan["shots"])
     start_clip = int(start_clip)
     if start_clip < 1 or start_clip > total:
@@ -11639,7 +11682,8 @@ def _initial_state(plan: dict[str, Any], start_clip: int,
     if start_clip > 1:
         state = _load_resume_state(
             plan, start_clip, verify_history=verify_resume_history,
-            source_timeline=source_timeline, source_audio=source_audio)
+            source_timeline=source_timeline, source_audio=source_audio,
+            artifact_verification=artifact_verification)
     else:
         state = {
             "plan": plan,
@@ -17243,7 +17287,9 @@ def _preflight_bind_source(
 def _preflight_resume(
         plan: dict[str, Any], start: int, verify_history: bool,
         report: dict[str, Any], source_timeline: Any = None,
-        source_audio: Any = None) -> dict[str, Any]:
+        source_audio: Any = None,
+        artifact_verification: _ResumeArtifactVerification | None = None
+        ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "requested_start": int(start), "verify_history": bool(verify_history),
         "eligible": True, "predecessors": [],
@@ -17268,6 +17314,7 @@ def _preflight_resume(
     result["context_predecessor"] = (
         max(consumed_predecessors) if consumed_predecessors else None)
     for index in range(1, int(start)):
+        checked_at = time.perf_counter()
         item: dict[str, Any] = {"scene": index, "ok": False}
         try:
             metadata_path = _artifact_paths(plan, index)["metadata"]
@@ -17322,7 +17369,12 @@ def _preflight_resume(
                 raise ValueError(
                     "Predecessor scene %d has inconsistent history metadata."
                     % index)
-            _verify_segment_artifacts(segment, index)
+            _verify_segment_artifacts(
+                segment, index, artifact_verification=artifact_verification)
+            if artifact_verification is not None:
+                _LOG.info(
+                    "H3 resume preflight: verified saved scene %d/%d in %.2fs.",
+                    index, int(start) - 1, time.perf_counter() - checked_at)
             item.update({"ok": True, "history_hash": accepted,
                          "revision": segment.get("revision")})
         except (OSError, TypeError, ValueError) as exc:
@@ -17414,7 +17466,9 @@ def _preflight_chain(
         plan: Any, *, source_timeline: Any = None, source_audio: Any = None,
         start_clip: int = 1, scene_range: Any = "",
         verify_resume_history: bool = True, tagged_references: Any = None,
-        reference_schedule: Any = None) -> tuple[dict[str, Any], dict[str, Any]]:
+        reference_schedule: Any = None,
+        artifact_verification: _ResumeArtifactVerification | None = None
+        ) -> tuple[dict[str, Any], dict[str, Any]]:
     report: dict[str, Any] = {
         "version": PREFLIGHT_VERSION, "ok": False, "status": "error",
         "errors": [], "warnings": [], "info": [], "scenes": [],
@@ -17809,7 +17863,7 @@ def _preflight_chain(
         stage = "resume"
         report["resume"] = _preflight_resume(
             prepared, start, verify_resume_history, report,
-            runtime_timeline, source_audio)
+            runtime_timeline, source_audio, artifact_verification)
     except Exception as exc:
         code, action, alternatives = _preflight_validation_recovery(stage)
         _preflight_issue(
@@ -19557,13 +19611,22 @@ class MiniMaxH3ChainLoopStart:
                 raise ValueError(
                     "H3 Chain Loop Start accepts one source-media route: "
                     "connect Source Timeline or legacy source_audio, not both.")
+            verification = _ResumeArtifactVerification()
+            preflight_started = time.perf_counter()
+            _LOG.info("H3 Loop Start: preflight and saved-artifact verification...")
             _dry_plan, preflight = _preflight_chain(
                 prepared_plan, source_timeline=source_timeline,
                 source_audio=source_audio, start_clip=start_clip,
                 scene_range=scene_range,
                 verify_resume_history=verify_resume_history,
                 tagged_references=tagged_references,
-                reference_schedule=reference_schedule)
+                reference_schedule=reference_schedule,
+                artifact_verification=verification)
+            _LOG.info(
+                "H3 Loop Start preflight finished in %.2fs; "
+                "hashed %d files (%.2f GiB).",
+                time.perf_counter() - preflight_started,
+                verification.hashed_files, verification.hashed_bytes / 1024**3)
             if not preflight["ok"]:
                 raise ValueError(_preflight_failure_text(preflight))
             for issue in preflight["warnings"]:
@@ -19571,6 +19634,9 @@ class MiniMaxH3ChainLoopStart:
                     "summary": "H3 preflight warning.",
                     "errors": [issue],
                 }))
+            restore_started = time.perf_counter()
+            verified_files = verification.hashed_files
+            _LOG.info("H3 Loop Start: preparing source media and resume context...")
             runtime_timeline = None
             create_project(os.path.join(_output_root(), "h3_chains", _strict_run_name(plan["run_name"])))
             if source_timeline is not None:
@@ -19587,7 +19653,13 @@ class MiniMaxH3ChainLoopStart:
                 external_context=external_context if range_start == 1 else None,
                 source_timeline=runtime_timeline,
                 source_audio=source_audio,
-                verify_resume_history=verify_resume_history)
+                verify_resume_history=verify_resume_history,
+                artifact_verification=verification)
+            _LOG.info(
+                "H3 Loop Start scene %d ready: source/resume state %.2fs; "
+                "reused %d unchanged file hashes, hashed %d additional files.",
+                range_start, time.perf_counter() - restore_started,
+                verification.reused_files, verification.hashed_files - verified_files)
         else:
             state = dict(initial_state)
             prepared_plan = state["plan"]

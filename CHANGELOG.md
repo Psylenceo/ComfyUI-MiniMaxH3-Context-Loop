@@ -4,6 +4,12 @@ Newest first. This file keeps release history out of the onboarding README.
 
 ## Unreleased — Deferred checkpoint upscaling
 
+- Avoid hashing unchanged saved artifacts twice during Loop Start resume.
+  Share verification results only within the current call, checking file
+  identity, size and timestamps before reuse. Changed or missing files,
+  mismatched hashes, invalid history and invalid context still block resume.
+  New queues verify afresh; add per-scene progress and phase timing logs.
+
 - Nightly: experimental SelfLift support for the connected RES4LYF ClownSampler
   **Radau IA 2s** with eta=0. Complete the low pass before lifting, evaluate its
   clean boundary once, and preserve the actual audio state. Use separate,

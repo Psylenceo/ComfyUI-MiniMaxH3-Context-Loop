@@ -145,6 +145,15 @@ validation, or metadata's own recorded-history consistency. Consequently, any
 new settings that describe the saved predecessor are not retroactively present
 in its pixels or AV latent.
 
+Loop Start hashes each saved artifact once per resume, sharing the result
+between preflight and state restoration only while its filesystem identity,
+size, modification time and change time remain unchanged. Changed files are
+rehashed; missing files, mismatched hashes and read errors still block resume.
+The verification cache is local to that one call, not persisted in the Plan,
+workflow or run. A new top-level queue performs fresh verification. Log messages
+show preflight progress per predecessor, bytes hashed, and source/context restore
+timing. Large projects on slow storage still require the first verification pass.
+
 Plan-wide continuation mode and context length are the exceptions: they choose
 how the next scene consumes its saved predecessor. Changing either does not
 alter completed frames or their saved AV latent, so it does not invalidate the
