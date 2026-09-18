@@ -4,6 +4,11 @@ Newest first. This file keeps release history out of the onboarding README.
 
 ## Unreleased — Deferred checkpoint upscaling
 
+- Nightly: fix SelfLift rejecting compatible finishing checkpoints when one
+  omits patch-size metadata or stores it as a list rather than a tuple. Compare
+  the loaded patch size (with H3's native default as fallback), retain genuine
+  mismatch checks, and include both sizes in the error.
+
 - Nightly: optional `model_hires` input on Chain SelfLift Sampler and Seed Hunt
   for a compatible H3 finishing checkpoint. Keep base sampling unchanged,
   preserve AV masks/continuity, validate the handoff's latent/audio contract,

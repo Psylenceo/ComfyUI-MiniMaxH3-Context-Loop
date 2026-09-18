@@ -120,6 +120,19 @@ def _validate_sampling(model_sampling, sampler):
                      "RES4LYF ClownSampler Radau IA 2s (eta=0).")
 
 
+def _effective_patch_size(model, config):
+    """Compare the loaded architecture, not optional checkpoint JSON fields."""
+    diffusion = getattr(model.model, "diffusion_model", None)
+    value = getattr(diffusion, "patch_size", None)
+    if value is None:
+        # Native H3 detection omits this key without transformer metadata;
+        # MiniMaxH3Model then uses its (1, 2, 2) constructor default. Keep
+        # explicit invalid values (including None) distinct from an omission.
+        default = (1, 2, 2) if config.get("image_model") == "minimax_h3" else None
+        value = config.get("patch_size", default)
+    return tuple(value) if isinstance(value, (list, tuple)) else value
+
+
 def _validate_hires_model(model, model_hires, sampler):
     """Reject incompatible coordinate/conditioning systems before sampling.
 
@@ -150,9 +163,15 @@ def _validate_hires_model(model, model_hires, sampler):
             raise ValueError(f"SelfLift model_hires has incompatible latent {name}.")
     configs = [getattr(getattr(m.model, "model_config", None), "unet_config", {})
                for m in (model, model_hires)]
-    for name in ("image_model", "latents_dim", "audio_latents_dim", "text_dim", "patch_size"):
+    for name in ("image_model", "latents_dim", "audio_latents_dim", "text_dim"):
         if configs[0].get(name) != configs[1].get(name):
             raise ValueError(f"SelfLift model_hires has incompatible {name}; both checkpoints must accept the same AV latents and conditioning.")
+    low_patch = _effective_patch_size(model, configs[0])
+    high_patch = _effective_patch_size(model_hires, configs[1])
+    if low_patch != high_patch:
+        raise ValueError(
+            f"SelfLift model_hires has incompatible patch_size (model={low_patch!r}, "
+            f"model_hires={high_patch!r}); both checkpoints must accept the same AV latents and conditioning.")
 
 
 def _stage_latent_transform(model, samples, direction):

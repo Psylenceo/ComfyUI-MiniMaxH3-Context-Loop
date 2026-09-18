@@ -94,6 +94,50 @@ class HiresTests(unittest.TestCase):
         high.sampling = type("ModelSampling", (Flow,), {})()
         runtime._validate_hires_model(low, high, Euler())
 
+    def test_equivalent_patch_size_metadata_keeps_stage_output(self):
+        baseline, _ = self.run_wrapper(Checkpoint("low"), Checkpoint("high"))
+        # Comfy detects H3's dimensions from weights but leaves patch_size at
+        # its constructor default unless checkpoint JSON metadata supplies it.
+        for low_value, high_value in ((None, [1, 2, 2]), ([1, 2, 2], None),
+                                      ((1, 2, 2), [1, 2, 2]), (None, None)):
+            with self.subTest(low=low_value, high=high_value):
+                low, high = Checkpoint("low"), Checkpoint("high")
+                for model, value in ((low, low_value), (high, high_value)):
+                    config = model.model.model_config.unet_config
+                    if value is None:
+                        config.pop("patch_size")
+                    else:
+                        config["patch_size"] = value
+                CALLS.clear()
+                result, _ = self.run_wrapper(low, high)
+                self.assertEqual([c["shape"][-2:] for c in CALLS], [(4, 6), (8, 12)])
+                for actual, expected in zip(result["samples"].unbind(), baseline["samples"].unbind()):
+                    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+    def test_effective_patch_size_uses_loaded_model_without_reading_weights(self):
+        low, high = Checkpoint("low"), Checkpoint("high")
+        low.model.model_config.unet_config.pop("patch_size")
+        low.model.diffusion_model = types.SimpleNamespace(patch_size=(1, 2, 2))
+        high.model.diffusion_model = types.SimpleNamespace(patch_size=[1, 2, 2])
+        runtime._validate_hires_model(low, high, Euler())
+        # The actual loaded architecture wins even if metadata is absent or
+        # stale. Never turn a genuine mismatch into a default-sized model.
+        high.model.diffusion_model.patch_size = (1, 4, 4)
+        with self.assertRaisesRegex(ValueError, r"patch_size.*model=\(1, 2, 2\).*model_hires=\(1, 4, 4\)"):
+            self.run_wrapper(low, high)
+        self.assertEqual(CALLS, [])
+
+    def test_different_patch_sizes_still_fail_before_sampling(self):
+        low = Checkpoint("low")
+        low.model.model_config.unet_config.pop("patch_size")
+        for value in ([1, 4, 4], [2, 2, 2], [2, 2], None):
+            with self.subTest(value=value):
+                high = Checkpoint("high")
+                high.model.model_config.unet_config["patch_size"] = value
+                with self.assertRaisesRegex(ValueError, "incompatible patch_size"):
+                    self.run_wrapper(low, high)
+                self.assertEqual(CALLS, [])
+
     def test_continuity_policy_inherited_without_copying_base_engine_or_loras(self):
         drift = importlib.import_module(PACKAGE + ".drift_control")
         low, high = Checkpoint("low"), Checkpoint("high")

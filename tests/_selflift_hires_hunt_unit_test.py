@@ -64,6 +64,22 @@ class HiresHuntTests(unittest.IsolatedAsyncioTestCase):
         await self.run_node()  # Disconnecting restores the original cached high.
         self.assertEqual(fixtures.CALLS, [])
 
+    async def test_missing_vs_explicit_patch_metadata_samples_and_reuses_hunt(self):
+        checkpoint_type = Checkpoint
+        def checkpoint(name):
+            model = checkpoint_type(name)
+            if name == "low":
+                model.model.model_config.unet_config.pop("patch_size")
+            return model
+        with patch(__name__ + ".Checkpoint", side_effect=checkpoint):
+            await self.run_node("A.safetensors")
+            self.assertEqual([c["shape"][-2:] for c in fixtures.CALLS], [(4, 6), (8, 12)])
+            record = self.store.list()[0]
+            fixtures.CALLS.clear()
+            await self.run_node("A.safetensors")
+            self.assertEqual(fixtures.CALLS, [])
+            self.assertEqual([r["id"] for r in self.store.list()], [record["id"]])
+
     async def test_high_oom_then_changed_checkpoint_recovers_only_high(self):
         original = fixtures.runtime.progressive_sample
         def fail(*args, **kwargs):
