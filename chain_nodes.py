@@ -22193,12 +22193,19 @@ def _release_loop_boundary_resources(
             resolved, int(scene_index), exc)
         return result
 
+    # Use the same full, synchronized retirement as SelfLift's stage switch.
+    # Do this while the loaded patchers are still alive, before cache eviction
+    # and GC can discard them. DynamicVRAM releases its host buffers as well as
+    # device weights; graph-owned model objects remain reloadable next scene.
+    from .selflift_runtime.memory import release_stage_models
+    result["dynamic_models"] = release_stage_models(
+        [entry.model for entry in model_management.current_loaded_models],
+        stage="loop scene %d" % int(scene_index))
+
     if resolved == "fresh_scene":
         # Execution outputs can retain complete loader branches, decoded
-        # videos, and patched model objects. Evict them before model unload so
-        # unloading cannot briefly coexist with all of those allocations in
-        # host RAM. This ordering is essential for workflows that switch two
-        # large H3 checkpoints inside one recursive scene body.
+        # videos, and patched model objects. Evict them before the remaining
+        # classic models unload into RAM. Dynamic models were retired above.
         try:
             import comfy.memory_management as memory_management
             release = getattr(memory_management, "extra_ram_release", None)
@@ -22253,10 +22260,11 @@ def _release_loop_boundary_resources(
                 "%d: %s", int(scene_index), exc)
 
     _LOG.info(
-        "H3 Chain scene %d boundary cleanup=%s: execution cache %.1f MB, "
+        "H3 Chain scene %d boundary cleanup=%s: retired %d dynamic models, "
+        "execution cache %.1f MB, "
         "pinned model pages %.1f MB, Python objects %d; the next scene "
         "reloads any evicted model or intermediate outputs.",
-        int(scene_index), resolved,
+        int(scene_index), resolved, result["dynamic_models"],
         int(result["cache_bytes"]) / float(1024 ** 2),
         int(result["pinned_bytes"]) / float(1024 ** 2),
         int(result["collected_objects"]))
@@ -23596,11 +23604,12 @@ class MiniMaxH3ChainLoopEnd:
                     "tooltip": "Runtime-only memory policy applied after a "
                                "scene is safely checkpointed and before the "
                                "next scene or retry starts. off keeps ComfyUI "
-                               "caches; unload_models releases loaded weights "
-                               "from VRAM; fresh_scene first requests active "
-                               "RAM-pressure-cache eviction and Python garbage "
-                               "collection, then releases remaining pinned "
-                               "model pages, unloads models, and empties the "
+                               "caches; both cleanup modes first fully retire "
+                               "DynamicVRAM models, releasing host buffers "
+                               "and device weights. fresh_scene also requests "
+                               "active RAM-pressure-cache eviction, Python "
+                               "garbage collection and pinned-page release. "
+                               "Both unload remaining models and empty the "
                                "CUDA allocator. fresh_scene may "
                                "reload model/reference nodes and is best for "
                                "model-switching chains. ComfyUI has no safe "

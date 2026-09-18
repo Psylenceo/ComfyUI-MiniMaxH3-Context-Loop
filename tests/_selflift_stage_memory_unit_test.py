@@ -1,4 +1,5 @@
 """Stage retirement safety and ordering; CPU fixtures, no live ComfyUI/files."""
+import ast
 import importlib
 import importlib.util
 import sys
@@ -212,6 +213,73 @@ class StageTests(unittest.TestCase):
                 model_hires=Checkpoint("high"))
         release.assert_called_once()
         lift.assert_called_once()
+
+
+class LoopBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        # Exercise the actual boundary function without importing the UI/routes.
+        source = ast.parse((fixtures.ROOT / "chain_nodes.py").read_text())
+        function = next(n for n in source.body if isinstance(n, ast.FunctionDef)
+                        and n.name == "_release_loop_boundary_resources")
+        self.events, self.registry = [], []
+        namespace = {"__package__": fixtures.PACKAGE, "sys": sys,
+                     "LOOP_MEMORY_POLICIES": ("off", "unload_models", "fresh_scene"),
+                     "_LOG": Mock(), "gc": types.SimpleNamespace(collect=Mock(return_value=0))}
+        exec(compile(ast.Module(body=[function], type_ignores=[]), "chain_nodes.py", "exec"), namespace)
+        self.cleanup = namespace[function.name]
+        self.ram = Mock(side_effect=lambda *a, **k: self.events.append("cache") or 0)
+        self.generic = Mock(side_effect=lambda: self.events.append("generic"))
+        for p in (
+            patch.object(memory.mm, "current_loaded_models", self.registry, create=True),
+            patch.object(memory.mm, "throw_exception_if_processing_interrupted", create=True),
+            patch.object(memory.mm, "unload_all_models", self.generic, create=True),
+            patch.object(memory.mm, "soft_empty_cache", create=True),
+            patch.object(memory.mm, "cleanup_models_gc", create=True),
+            patch.object(memory.mm, "free_pins", return_value=0, create=True),
+            patch.dict(sys.modules, {"comfy.memory_management": types.SimpleNamespace(extra_ram_release=self.ram)}),
+            patch.object(memory, "log_memory"),
+            patch.object(memory.torch.cuda, "synchronize"),
+        ):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_dynamic_release_before_cache_eviction_and_classic_fallback(self):
+        dynamic, classic = loaded(Checkpoint("vae")), loaded(Checkpoint("classic"), dynamic=False)
+        dynamic.model_unload.side_effect = lambda: self.events.append("dynamic") or True
+        self.registry.extend([dynamic, classic])
+        result = self.cleanup("fresh_scene", 3)
+        self.assertEqual(self.events, ["dynamic", "cache", "generic"])
+        dynamic.model_unload.assert_called_once_with()  # full detach, no memory budget
+        classic.model_unload.assert_not_called()
+        self.assertEqual(self.registry, [classic])
+        self.assertEqual(result["dynamic_models"], 1)
+
+    def test_unload_policy_uses_stage_release_without_evicting_outputs(self):
+        record = loaded(Checkpoint("high"))
+        self.registry.append(record)
+        self.cleanup("unload_models", 1)
+        record.model_unload.assert_called_once_with()
+        self.ram.assert_not_called()
+        self.assertEqual(self.registry, [])
+
+    def test_off_does_not_touch_models_or_caches(self):
+        self.cleanup("off", 1)
+        memory.mm.throw_exception_if_processing_interrupted.assert_not_called()
+        self.generic.assert_not_called()
+        self.ram.assert_not_called()
+
+    def test_cancel_or_cuda_failure_stops_before_cache_eviction(self):
+        record = loaded(Checkpoint("high"))
+        record.model.load_device = "cuda:0"
+        self.registry.append(record)
+        for error in (Interrupted(), RuntimeError("CUDA sync failed")):
+            with self.subTest(error=type(error)):
+                memory.torch.cuda.synchronize.side_effect = error
+                with self.assertRaises(type(error)):
+                    self.cleanup("fresh_scene", 1)
+                record.model_unload.assert_not_called()
+                self.generic.assert_not_called()
+                self.ram.assert_not_called()
 
 
 class UpscalerRetirementTests(unittest.TestCase):
