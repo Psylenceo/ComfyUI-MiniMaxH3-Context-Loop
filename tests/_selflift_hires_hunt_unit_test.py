@@ -1,5 +1,6 @@
 """Finishing-model cache identity/recovery; no production files or GPU."""
 import copy
+import importlib
 import json
 import logging
 import unittest
@@ -96,6 +97,48 @@ class HiresHuntTests(unittest.IsolatedAsyncioTestCase):
         await self.run_node("B.safetensors")
         self.assertEqual([c["shape"][-2:] for c in fixtures.CALLS], [(8, 12)])
         self.assertEqual([r["id"] for r in self.store.list()], [record["id"]])
+
+    async def test_cleanup_toggle_keeps_legacy_completed_hunt_identity(self):
+        await self.run_node("A.safetensors")
+        record = self.store.list()[0]
+        fixtures.CALLS.clear()
+        memory = importlib.import_module(fixtures.PACKAGE + ".selflift_runtime.memory")
+        with patch.object(memory, "release_stage_models") as release:
+            for enabled in (False, True, False):
+                self.settings["cleanup_between_stages"] = enabled
+                await self.run_node("A.safetensors")
+                self.assertEqual([r["id"] for r in self.store.list()], [record["id"]])
+                self.assertEqual(fixtures.CALLS, [])
+            release.assert_not_called()
+
+    async def test_cleanup_failure_preserves_saved_take_then_resume_only_high(self):
+        self.settings["cleanup_between_stages"] = True
+        memory = importlib.import_module(fixtures.PACKAGE + ".selflift_runtime.memory")
+        upscaler = importlib.import_module(fixtures.PACKAGE + ".selflift_runtime.h3_upscaler")
+        class Interrupted(Exception):
+            pass
+        with patch.object(memory, "release_stage_models", side_effect=Interrupted("cancel before unload")) as release:
+            with self.assertRaises(Interrupted):
+                await self.run_node("A.safetensors")
+            # No cleanup during the candidate; exactly one during finishing.
+            release.assert_called_once()
+        record = self.store.list()[0]
+        self.assertEqual((record["phase"], record["selected"]), ("paused", 1))
+        folder = self.store.locate(record["id"])
+        before = (folder / "take_0001.safetensors").read_bytes()
+        self.assertEqual(list(folder.glob("finished*")), [])
+        fixtures.CALLS.clear()
+        def lift(z, hw, name, **kwargs):
+            self.assertTrue(kwargs.pop("cleanup_after"))
+            return fixtures.lift(z, hw, **kwargs)
+        with patch.object(memory, "release_stage_models") as release, \
+                patch.object(upscaler, "learned_latent_lift", side_effect=lift) as lifter:
+            await self.run_node("A.safetensors")
+            release.assert_called_once()
+            lifter.assert_called_once()
+        self.assertEqual([c["shape"][-2:] for c in fixtures.CALLS], [(8, 12)])
+        self.assertEqual([r["id"] for r in self.store.list()], [record["id"]])
+        self.assertEqual((folder / "take_0001.safetensors").read_bytes(), before)
 
     async def test_subgraph_recipe_independent_of_virtual_ids(self):
         prompt = self.prompt("A.safetensors")

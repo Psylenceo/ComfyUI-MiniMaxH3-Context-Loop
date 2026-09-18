@@ -36,6 +36,9 @@ class MiniMaxH3SelfLiftProject:
                 "tooltip": "H3 3D-convolution learned latent-upscaler checkpoint under models/latent_upscale_models. Required only when enabled; not compatible with H3 2D or generic image/LTX upscalers."}),
             "high_resolution_steps": ("INT", {"default": 2, "min": 1, "max": 10000,
                 "tooltip": "Final steps at the Plan's full resolution. Must be lower than each generated scene's total steps (e.g. 6 low + 2 high out of 8)."}),
+        }, "optional": {
+            "cleanup_between_stages": ("BOOLEAN", {"default": False,
+                "tooltip": "Release the retired checkpoint's DynamicVRAM buffers before lifting, and unload the learned upscaler after use. Logs RAM before/after. Preserves shared models and saved takes; can slow next-scene reloads. Classic/non-dynamic models are skipped."}),
         }}
 
     RETURN_TYPES = (PLAN_TYPE, "STRING")
@@ -46,14 +49,18 @@ class MiniMaxH3SelfLiftProject:
                    "Plan width/height are the final size; the first stage uses half-size spatial latents. "
                    "Does not patch ComfyUI or change any other workflow.")
 
-    def configure(self, plan, enabled=False, upscaler_model="none", high_resolution_steps=2):
+    def configure(self, plan, enabled=False, upscaler_model="none", high_resolution_steps=2,
+                  cleanup_between_stages=False):
         result = dict(plan)
         result[SETTINGS_KEY] = {"enabled": bool(enabled),
                                "upscaler_model": str(upscaler_model),
-                               "high_resolution_steps": int(high_resolution_steps)}
+                               "high_resolution_steps": int(high_resolution_steps),
+                               "cleanup_between_stages": bool(cleanup_between_stages)}
         status = ("SelfLift ON; half-resolution base; %d full-resolution steps; %s" %
                   (int(high_resolution_steps), upscaler_model) if enabled else
                   "SelfLift OFF; ordinary single-stage sampling")
+        if enabled and cleanup_between_stages:
+            status += "; targeted stage cleanup ON (DynamicVRAM)"
         return result, status
 
 
@@ -168,12 +175,15 @@ class MiniMaxH3ChainSelfLiftSampler:
         staged_model = _stage_model(model, prepared, sigmas)
         staged_hires = (_stage_model(model_hires, prepared, sigmas, continuity_model=model)
                         if model_hires is not None else None)
+        cleanup = bool(settings.get("cleanup_between_stages", False))
         def lifter(z, hw, temporal_split=None):
-            return learned_latent_lift(z, hw, name, temporal_split=temporal_split)
+            options = {"cleanup_after": True} if cleanup else {}
+            return learned_latent_lift(z, hw, name, temporal_split=temporal_split, **options)
         output = progressive_sample(
             staged_model, positive, negative, vae, prepared, sampler, sigmas,
             int(seed), float(cfg), total_steps - high_steps, 0.5,
-            0.0, 0.5, 1.0, "nearest", latent_lifter=lifter, model_hires=staged_hires)
+            0.0, 0.5, 1.0, "nearest", latent_lifter=lifter, model_hires=staged_hires,
+            cleanup_between_stages=cleanup)
         output[SIGNATURE] = settings_signature(settings)
         status = "SelfLift: %d low-resolution + %d full-resolution steps; native AV masks" % (
             total_steps - high_steps, high_steps)

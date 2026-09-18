@@ -96,6 +96,32 @@ policy, and native video/audio masks and source-audio locks remain in use.
 ComfyUI manages each stage's model loading; a second checkpoint can still add
 considerable CPU RAM use and model-swap time.
 
+### Optional stage memory cleanup
+
+Enable **cleanup_between_stages** on **SelfLift Project** to retire the distinct
+low-pass checkpoint before the learned lift, then unload the learned upscaler
+after it succeeds. This applies to both SelfLift samplers and is **off by
+default**. It uses ComfyUI's managed DynamicVRAM unload to release reloadable
+host/pinned buffers and GPU allocations. Shared checkpoints (including clones
+used by the finishing model), its model dependencies, and unrelated loaded
+models are protected. Classic/non-dynamic models are skipped: moving their
+weights to CPU could increase RAM use instead.
+
+Look for `[SelfLift memory] ... cleanup before/after` and `[SelfLift cleanup]`
+in the console. They report process RSS, available system RAM, GPU statistics
+where applicable, and unloaded/skipped counts without requiring an environment
+variable. Graph-owned weights, conditioning, and OS file caches can remain in
+RAM; this is not a guarantee that all model memory disappears. The next scene
+may take longer to reload its base model/upscaler.
+
+Candidate hunting keeps its low model loaded until finishing starts. Saved
+takes, selection, and finished-result identity are unchanged by this switch,
+so it can be enabled while resuming a paused hunt. A cached finished result
+needs no stage cleanup. No files or execution caches are deleted. Cleanup
+checks cancellation and fences CUDA transfers before unloading; it is never
+used as an exception handler for a failed/cancelled sampler or upscaler. This
+does not fix an underlying CUDA allocator/driver cancellation crash.
+
 In Seed Hunt, changing **only** `model_hires` or its upstream LoRA settings reuses
 the same saved low takes and selected seed, but gets a separate finished-latent
 cache. Switching back can reuse that finishing setup's completed result. Keep

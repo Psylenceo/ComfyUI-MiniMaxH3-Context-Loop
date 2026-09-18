@@ -158,6 +158,22 @@ class RadauTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "middle pass"):
             self.run_runtime(sampler=changed, handoff=middle)
 
+    def test_stage_cleanup_keeps_radau_output_and_resume_identical(self):
+        memory = importlib.import_module(PACKAGE + ".selflift_runtime.memory")
+        with patch.object(memory, "release_stage_models") as release:
+            expected = self.run_runtime()
+            release.assert_not_called()
+            enabled = self.run_runtime(cleanup_between_stages=True)
+            release.assert_called_once()
+            release.reset_mock()
+            middle = self.run_runtime(stop_after_low=True, cleanup_between_stages=True)
+            release.assert_not_called()
+            resumed = self.run_runtime(handoff=middle, cleanup_between_stages=True)
+            release.assert_called_once()
+        for result in (enabled, resumed):
+            for a, b in zip(expected["samples"].unbind(), result["samples"].unbind()):
+                torch.testing.assert_close(a, b, rtol=0, atol=0)
+
     def test_locked_audio_and_spatial_mask_unchanged(self):
         original = self.video.clone()
         result = self.run_runtime()

@@ -1864,7 +1864,8 @@
       "widgets_values": [
         false,
         "none",
-        5
+        5,
+        false
       ]
     },
     {

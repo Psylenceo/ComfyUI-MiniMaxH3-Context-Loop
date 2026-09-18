@@ -243,7 +243,10 @@ class MiniMaxH3SelfLiftSeedHunt:
         recipe = source_recipe(prompt, unique_id, dynprompt)
         contract = {"version": 1, "run_name": plan["run_name"], "branch_id": plan.get("_branch_id", "main"),
             "scene": scene, "shot": shot, "width": plan.get("width"), "height": plan.get("height"),
-            "compatibility": plan.get("compatibility", {}), "settings": settings,
+            # Memory policy does not change a take's sampling identity. Also
+            # preserve the exact settings contract of older saved hunts.
+            "compatibility": plan.get("compatibility", {}),
+            "settings": {k: v for k, v in settings.items() if k != "cleanup_between_stages"},
             "history": [{k: s.get(k) for k in ("index", "revision", "checkpoint")}
                         for s in state.get("segments", [])],
             "recipe": recipe, "seed": str(int(seed)), "cfg": float(cfg),
@@ -297,15 +300,18 @@ class MiniMaxH3SelfLiftSeedHunt:
                 require_h3_mask_support()
             def run(take_seed, **options):
                 from .selflift_runtime.h3_upscaler import learned_latent_lift
+                cleanup = bool(settings.get("cleanup_between_stages", False))
                 def lift(z, hw, temporal_split=None):
-                    return learned_latent_lift(z, hw, name, temporal_split=temporal_split)
+                    lift_options = {"cleanup_after": True} if cleanup else {}
+                    return learned_latent_lift(z, hw, name, temporal_split=temporal_split, **lift_options)
                 with torch.inference_mode():
                     staged = _stage_model(model, source["latent"], sigmas)
                     staged_hires = (_stage_model(model_hires, source["latent"], sigmas, continuity_model=model)
                                     if model_hires is not None and not options.get("stop_after_low") else None)
                     return progressive_sample(staged, source["positive"], source["negative"], vae,
                         source["latent"], sampler, sigmas, take_seed, float(cfg), total-high,
-                        .5, 0., .5, 1., "nearest", latent_lifter=lift, model_hires=staged_hires, **options)
+                        .5, 0., .5, 1., "nearest", latent_lifter=lift, model_hires=staged_hires,
+                        cleanup_between_stages=cleanup, **options)
 
             # An already approved batch jumps directly to the selected high pass.
             if record.get("selected") is None:

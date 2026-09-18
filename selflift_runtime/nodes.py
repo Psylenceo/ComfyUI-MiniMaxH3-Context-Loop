@@ -424,7 +424,8 @@ def _debug_dump(vae, latents):
 
 def progressive_sample(model, positive, negative, vae, latent_image, sampler, sigmas, seed, cfg,
                        transition_step, lowres_scale, rho, w_min, w_max, latent_upsample, latent_lifter=None,
-                       highres_tiling=False, model_hires=None, *, stop_after_low=False, handoff=None):
+                       highres_tiling=False, model_hires=None, *, stop_after_low=False, handoff=None,
+                       cleanup_between_stages=False):
     _validate_schedule(sigmas, transition_step)
     if sigmas.numel() < 2:
         return latent_image
@@ -688,6 +689,9 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
         if radau_mode:
             middle["sampler_contract"] = sampler_contract
         return middle
+    if cleanup_between_stages:
+        from .memory import release_stage_models
+        release_stage_models([low_model], keep_models=[high_model], stage="low-to-lift")
     transition_timer = _StageTimer("transition", model.load_device, (H, W), resolution_scale)
     transition_timer.mark("prepare_endpoint")
     log_memory("transition endpoint_ready", model.load_device)
@@ -813,6 +817,7 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
         resume_latent = high_anchor_latent
         resume_noise = _pack(resume_noise_streams, nested)
         del anchor_streams, resume_noise_streams, resumed_noise, high_video_anchor
+        del state, anchor, clean, high_anchor_latent
     else:
         resume_streams = [model_sampling.inverse_noise_scaling(sigma_next, s) for s in next_streams]
         resume_latent = _stage_latent_transform(high_model, _pack(resume_streams, nested), "out")

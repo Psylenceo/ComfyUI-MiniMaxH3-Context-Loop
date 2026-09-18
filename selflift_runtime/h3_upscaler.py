@@ -361,7 +361,20 @@ def _inference_memory_required(model, z0_low, out_hw):
     return feature_elements * model.conv_in.weight.element_size() * 8
 
 
-def learned_latent_lift(z0_low, out_hw, model_name, device=None, temporal_split=None):
+def learned_latent_lift(z0_low, out_hw, model_name, device=None, temporal_split=None, *, cleanup_after=False):
+    device = comfy.model_management.get_torch_device() if device is None else device
+    out = _learned_latent_lift(z0_low, out_hw, model_name, device, temporal_split)
+    if cleanup_after:
+        # The inference frame (including temporary normalized GPU tensors) has
+        # returned. Do not run this on an OOM, cancellation or failed lift.
+        from .memory import release_stage_models
+        patcher = _model_cache.get((model_name, str(device)))
+        if patcher is not None:
+            release_stage_models([patcher], stage="lift-to-high")
+    return out
+
+
+def _learned_latent_lift(z0_low, out_hw, model_name, device=None, temporal_split=None):
     """3D learned upsample of the low-res clean endpoint to the target latent size.
 
     z0_low: [B, 24, T, h, w] H3 video latent in VAE space. Returns [B, 24, T, H, W].

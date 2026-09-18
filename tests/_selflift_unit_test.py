@@ -300,7 +300,7 @@ class SelfLiftTests(unittest.TestCase):
         out, _ = nodes.MiniMaxH3SelfLiftProject().configure(original, True, "h3_test.safetensors", 2)
         self.assertNotIn(nodes.SETTINGS_KEY, original)
         self.assertEqual(out["plan_hash"], "saved")
-        self.assertEqual(out[nodes.SETTINGS_KEY], self.settings)
+        self.assertEqual(out[nodes.SETTINGS_KEY], {**self.settings, "cleanup_between_stages": False})
 
     def test_wrapper_disabled_uses_one_call_no_lifter(self):
         latent = {**self.latent, state.LOW_CARRY: self.video, state.SIGNATURE: "old"}

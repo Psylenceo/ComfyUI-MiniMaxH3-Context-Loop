@@ -4,6 +4,13 @@ Newest first. This file keeps release history out of the onboarding README.
 
 ## Unreleased — Deferred checkpoint upscaling
 
+- Nightly: add opt-in `cleanup_between_stages` on SelfLift Project. Retire a
+  distinct low checkpoint and the successful learned upscaler through ComfyUI's
+  DynamicVRAM lifecycle, protect shared/finishing/unrelated models, and log
+  before/after RAM. Default off; no file or execution-cache deletion, no changes
+  to saved-take identity, and no exception-path CUDA cleanup. Classic models
+  are skipped; next-scene reloads may be slower.
+
 - Nightly: fix SelfLift rejecting compatible finishing checkpoints when one
   omits patch-size metadata or stores it as a list rather than a tuple. Compare
   the loaded patch size (with H3's native default as fallback), retain genuine

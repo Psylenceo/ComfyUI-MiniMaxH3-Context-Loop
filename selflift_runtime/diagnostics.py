@@ -7,8 +7,8 @@ import psutil
 import torch
 
 
-def log_memory(label, device):
-    if os.environ.get("SELFLIFT_MEMORY_LOG", "0") != "1":
+def log_memory(label, device, *, force=False):
+    if not force and os.environ.get("SELFLIFT_MEMORY_LOG", "0") != "1":
         return
     device = torch.device(device)
     fields = []
