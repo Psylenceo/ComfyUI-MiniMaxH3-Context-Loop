@@ -7,16 +7,16 @@ import {
     promptTextToLines,
     promptValueToText,
     sharedPrompt,
-} from "./h3_chain_plan_core.mjs?v=0.6.10";
+} from "./h3_chain_plan_core.mjs?v=0.6.11";
 import {
     buildPromptAssistantContext,
     makePromptAssistRequest,
-} from "./h3_prompt_assistant_core.mjs?v=0.6.10";
-import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.6.10";
+} from "./h3_prompt_assistant_core.mjs?v=0.6.11";
+import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.6.11";
 import {
     directOptimizerConfigurationError,
     makeDirectPromptOptimizeRequest,
-} from "./h3_prompt_optimizer_core.mjs?v=0.6.10";
+} from "./h3_prompt_optimizer_core.mjs?v=0.6.11";
 import {
     openPromptOptimizerSettings,
     promptOptimizerBackend,
@@ -28,7 +28,7 @@ import {
     promptRevisionLabel,
     promptRevisionNavigation,
     promptRevisionTree,
-} from "./h3_prompt_history_core.mjs?v=0.6.10";
+} from "./h3_prompt_history_core.mjs?v=0.6.11";
 import {
     availableReferenceRecords,
     convertTaggedPictureReference,
@@ -36,7 +36,7 @@ import {
     replacePromptReferenceOccurrence,
     taggedPictureReferenceMode,
     taggedPictureReferenceToken,
-} from "./h3_reference_preview_core.mjs?v=0.6.10";
+} from "./h3_reference_preview_core.mjs?v=0.6.11";
 import {
     PromptUndoHistory,
     RICH_PROMPT_GUIDES,
@@ -46,16 +46,16 @@ import {
     richGenerationMode,
     richGuideInstruction,
     tokenizeRichPrompt,
-} from "./h3_rich_prompt_editor_core.mjs?v=0.6.10";
-import {createPromptCompletionController} from "./h3_prompt_completion_core.mjs?v=0.6.10";
-import {bindPromptMarkerInteractions} from "./h3_prompt_marker_ui.mjs?v=0.6.10";
-import {isWorkflowSaveShortcut, promptEditorRichText} from "./h3_prompt_editor_settings_core.mjs?v=0.6.10";
+} from "./h3_rich_prompt_editor_core.mjs?v=0.6.11";
+import {createPromptCompletionController} from "./h3_prompt_completion_core.mjs?v=0.6.11";
+import {bindPromptMarkerInteractions} from "./h3_prompt_marker_ui.mjs?v=0.6.11";
+import {isWorkflowSaveShortcut, promptEditorRichText} from "./h3_prompt_editor_settings_core.mjs?v=0.6.11";
 import {promptEditorPreferences} from "./h3_prompt_editor_settings.js";
-import {createH3PromptSchemaController} from "./h3_prompt_schema_ui.mjs?v=0.6.10";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.10";
+import {createH3PromptSchemaController} from "./h3_prompt_schema_ui.mjs?v=0.6.11";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.11";
 import {
     PROJECT_ASSET_CATALOG_CHANGED_EVENT,
-} from "./h3_project_asset_sync_core.mjs?v=0.6.10";
+} from "./h3_project_asset_sync_core.mjs?v=0.6.11";
 
 const {
     publishCompanionScene,

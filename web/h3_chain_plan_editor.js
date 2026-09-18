@@ -1,7 +1,7 @@
 import {app} from "/scripts/app.js";
 import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
-import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.6.10";
+import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.6.11";
 import {
     H3_CONTEXT_LENGTHS,
     MAX_SHOTS,
@@ -36,8 +36,8 @@ import {
     shotLengthMode,
     sharedPrompt,
     visualContextCompositions,
-} from "./h3_chain_plan_core.mjs?v=0.6.10";
-import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.6.10";
+} from "./h3_chain_plan_core.mjs?v=0.6.11";
+import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.6.11";
 import {
     applySceneAudioOverride,
     applySceneLipSync,
@@ -48,21 +48,21 @@ import {
     sceneAudioPolicy,
     sceneTransitionPreset,
     transitionPresetLabel,
-} from "./h3_policy_core.mjs?v=0.6.10";
+} from "./h3_policy_core.mjs?v=0.6.11";
 import {
     resolveAudioContextLength,
     resolveAudioPolicy,
     resolveTransitionPolicy,
-} from "./h3_socket_presentation_core.mjs?v=0.6.10";
+} from "./h3_socket_presentation_core.mjs?v=0.6.11";
 import {
     availableLoRARoutes,
     loraRouteLabel,
-} from "./h3_lora_scheduler_core.mjs?v=0.6.10";
+} from "./h3_lora_scheduler_core.mjs?v=0.6.11";
 import {
     MODERN_PLAN_NODE as MODERN_NODE_NAME,
     MODERN_PLAN_WIDGET_NAMES as MODERN_BACKING_WIDGETS,
     upgradeLegacyPlanNode,
-} from "./h3_plan_upgrade_core.mjs?v=0.6.10";
+} from "./h3_plan_upgrade_core.mjs?v=0.6.11";
 
 // This scene editor is an original implementation. Its quick @ reference and
 // # dialogue interactions are inspired by nkxx188/ComfyUI-MiniMaxH3-Easy,

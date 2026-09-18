@@ -15,6 +15,15 @@ result later—without keeping the whole production in memory.
 
 ## Changelog
 
+### 0.6.11 — Faster resume and Plan layout fixes
+
+- Remove duplicate saved-artifact hashing during resume while preserving
+  integrity checks; add verification progress and timing logs.
+- Fix Modern/Production Plan blank space and duplicate controls, including
+  automatic widget sockets and the Vue node renderer.
+- Add persistent global prompt collapse, fix canvas wheel navigation over
+  inactive panels, and restore Loop Start selection after completion (#75).
+
 ### 0.6.10 — Checkpoint recovery and Plan editing fixes
 
 - Recover expanded visual context when resuming saved scenes (#72).
