@@ -912,7 +912,7 @@ def main():
 
     def fake_resume_loader(requested_plan, start_clip, verify_history=True,
                            source_timeline=None, source_audio=None,
-                           artifact_verification=None):
+                           artifact_verification=None, context_only=False):
         resume_calls.append((start_clip, verify_history))
         return {
             "plan": requested_plan,

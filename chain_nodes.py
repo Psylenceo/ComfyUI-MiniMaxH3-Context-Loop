@@ -8413,10 +8413,12 @@ def _versioned_path(path: str, transaction: str) -> str:
     return "%s.%s%s" % (stem, transaction, extension)
 
 
-def _file_sha256(path: str) -> str:
+def _file_sha256(path: str, *, check_interrupted=None) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
         while True:
+            if check_interrupted is not None:
+                check_interrupted()
             block = handle.read(1024 * 1024)
             if not block:
                 break
@@ -8440,6 +8442,7 @@ class _ResumeArtifactVerification:
                 stat.st_mtime_ns, stat.st_ctime_ns)
 
     def sha256(self, path):
+        _throw_if_review_interrupted()
         path = os.path.abspath(path)
         before = self._stamp(path)
         saved = self._hashes.get(path)
@@ -8448,7 +8451,8 @@ class _ResumeArtifactVerification:
             return saved[1]
         # Never reuse an older entry if this read fails or the file changes.
         self._hashes.pop(path, None)
-        digest = _file_sha256(path)
+        digest = _file_sha256(
+            path, check_interrupted=_throw_if_review_interrupted)
         if self._stamp(path) != before:
             raise ValueError(
                 "H3 resume artifact changed during integrity verification: "
@@ -11011,7 +11015,11 @@ def _visual_context_state(
 
 def _verify_segment_artifacts(
         segment: dict[str, Any], index: int, *, verify_hashes: bool = True,
-        artifact_verification: _ResumeArtifactVerification | None = None) -> None:
+        artifact_verification: _ResumeArtifactVerification | None = None,
+        hash_artifacts: frozenset[str] | None = None) -> None:
+    # None retains full validation for assembly, manifest recovery and revisions.
+    # Resume supplies only the payloads it will actually load; all paths and
+    # recorded identities are still checked, even for assembly-only scenes.
     hash_file = (_file_sha256 if artifact_verification is None
                  else artifact_verification.sha256)
     if int(segment.get("index", -1)) != int(index):
@@ -11031,7 +11039,8 @@ def _verify_segment_artifacts(
             raise FileNotFoundError(
                 "H3 chain clip %d %s is missing: %s" %
                 (index, key, artifact))
-        if verify_hashes and hash_file(artifact) != expected_hash:
+        if (verify_hashes and (hash_artifacts is None or key in hash_artifacts)
+                and hash_file(artifact) != expected_hash):
             raise ValueError(
                 "H3 chain clip %d %s failed its SHA-256 integrity check." %
                 (index, key))
@@ -11048,7 +11057,9 @@ def _verify_segment_artifacts(
             raise FileNotFoundError(
                 "H3 chain clip %d blend segment is missing: %s" %
                 (index, artifact))
-        if verify_hashes and hash_file(artifact) != expected_hash:
+        if (verify_hashes and (hash_artifacts is None
+                              or "blend_segment" in hash_artifacts)
+                and hash_file(artifact) != expected_hash):
             raise ValueError(
                 "H3 chain clip %d blend segment failed its SHA-256 integrity "
                 "check." % index)
@@ -11064,7 +11075,9 @@ def _verify_segment_artifacts(
             raise FileNotFoundError(
                 "H3 chain clip %d generated-audio sidecar is missing: %s" %
                 (index, audio_path))
-        if verify_hashes and hash_file(audio_path) != expected_hash:
+        if (verify_hashes and (hash_artifacts is None
+                              or "generated_audio" in hash_artifacts)
+                and hash_file(audio_path) != expected_hash):
             raise ValueError(
                 "H3 chain clip %d generated-audio sidecar failed its SHA-256 "
                 "integrity check." % index)
@@ -11076,6 +11089,12 @@ def _verify_segment_artifacts(
                 "H3 chain clip %d prompt sidecar is missing: %s" %
                 (index, prompt_path))
         artifact_hash = str(segment.get("prompt_file_sha256") or "")
+        if hash_artifacts is not None and "prompt_file" not in hash_artifacts:
+            if not artifact_hash and not str(segment.get("prompt_hash") or ""):
+                raise ValueError(
+                    "H3 chain clip %d metadata has no verified prompt sidecar."
+                    % index)
+            return
         if artifact_hash:
             actual_hash = hash_file(prompt_path)
         else:
@@ -11161,6 +11180,18 @@ def _resume_context_predecessors(
     return result
 
 
+def _resume_checkpoint_sources(context_sources: dict[str, Any],
+                               start_clip: int) -> set[int]:
+    """Checkpoint payloads loaded by resume and the selected context builders."""
+    sources = set(context_sources["scenes"])
+    if sources:
+        # Restore currently seeds the paired AV container from N-1 before
+        # optional non-linear picture/audio selection replaces either stream.
+        # Verify that bootstrap payload too, even if neither final stream uses it.
+        sources.add(int(start_clip) - 1)
+    return sources
+
+
 def _resume_context_predecessor(
         plan: dict[str, Any], start_clip: int) -> int | None:
     """Compatibility view of the nearest consumed predecessor."""
@@ -11209,10 +11240,14 @@ def _load_resume_state(
         plan: dict[str, Any], start_clip: int,
         verify_history: bool = True, source_timeline: Any = None,
         source_audio: Any = None,
-        artifact_verification: _ResumeArtifactVerification | None = None
+        artifact_verification: _ResumeArtifactVerification | None = None,
+        context_only: bool = False
         ) -> dict[str, Any]:
     previous_index = start_clip - 1
     context_sources = _resume_context_predecessors(plan, int(start_clip))
+    checkpoint_sources = _resume_checkpoint_sources(context_sources, start_clip)
+    if context_only and artifact_verification is None:
+        artifact_verification = _ResumeArtifactVerification()
     _active, stale = CheckpointGraphManager(_output_root()).active_selection(
         plan["run_name"])
     stale_prefix = [scene for scene in stale if scene <= previous_index]
@@ -11237,6 +11272,7 @@ def _load_resume_state(
             int(start_clip), int(previous_index),
         )
     for index in range(1, previous_index + 1):
+        _throw_if_review_interrupted()
         paths = _artifact_paths(plan, index)
         if not os.path.isfile(paths["metadata"]):
             raise FileNotFoundError(
@@ -11290,7 +11326,10 @@ def _load_resume_state(
                 "Checkpoint segment record for clip %d has a mismatched history."
                 % index)
         _verify_segment_artifacts(
-            segment, index, artifact_verification=artifact_verification)
+            segment, index, artifact_verification=artifact_verification,
+            hash_artifacts=(frozenset({"checkpoint"})
+                            if index in checkpoint_sources else frozenset())
+            if context_only else None)
         restored = _public_segment(segment)
         for key, value in _prompt_fields(plan, index).items():
             restored.setdefault(key, value)
@@ -11317,11 +11356,13 @@ def _load_resume_state(
     context_frames = None
     previous_latent = None
     if consumed_predecessors:
+        _throw_if_review_interrupted()
         if _st_load is None:
             raise RuntimeError("safetensors is required to resume H3 chains.")
         checkpoint = _absolute_output_path(
             previous_meta["segment"]["checkpoint"])
         tensors = _st_load(checkpoint)
+        _throw_if_review_interrupted()
         required = {"context_frames", "video", "audio"}
         missing = sorted(required - set(tensors))
         if missing:
@@ -11375,7 +11416,7 @@ def _initial_state(plan: dict[str, Any], start_clip: int,
         state = _load_resume_state(
             plan, start_clip, verify_history=verify_resume_history,
             source_timeline=source_timeline, source_audio=source_audio,
-            artifact_verification=artifact_verification)
+            artifact_verification=artifact_verification, context_only=True)
     else:
         state = {
             "plan": plan,
@@ -16419,10 +16460,16 @@ def _preflight_resume(
     }
     context_sources = _resume_context_predecessors(plan, int(start))
     consumed_predecessors = set(context_sources["scenes"])
+    checkpoint_sources = _resume_checkpoint_sources(context_sources, start)
+    if artifact_verification is None:
+        artifact_verification = _ResumeArtifactVerification()
+    result["artifact_verification"] = "context_checkpoints_only"
+    result["checkpoint_sources"] = sorted(checkpoint_sources)
     result["context_sources"] = context_sources
     result["context_predecessor"] = (
         max(consumed_predecessors) if consumed_predecessors else None)
     for index in range(1, int(start)):
+        _throw_if_review_interrupted()
         checked_at = time.perf_counter()
         item: dict[str, Any] = {"scene": index, "ok": False}
         try:
@@ -16479,11 +16526,16 @@ def _preflight_resume(
                     "Predecessor scene %d has inconsistent history metadata."
                     % index)
             _verify_segment_artifacts(
-                segment, index, artifact_verification=artifact_verification)
-            if artifact_verification is not None:
+                segment, index, artifact_verification=artifact_verification,
+                hash_artifacts=(frozenset({"checkpoint"})
+                                if index in checkpoint_sources else frozenset()))
+            item["hashed_artifacts"] = (
+                ["checkpoint"] if index in checkpoint_sources else [])
+            if index in checkpoint_sources:
                 _LOG.info(
-                    "H3 resume preflight: verified saved scene %d/%d in %.2fs.",
-                    index, int(start) - 1, time.perf_counter() - checked_at)
+                    "H3 resume preflight: verified context checkpoint for "
+                    "scene %d in %.2fs.",
+                    index, time.perf_counter() - checked_at)
             item.update({"ok": True, "history_hash": accepted,
                          "revision": segment.get("revision")})
         except (OSError, TypeError, ValueError) as exc:
@@ -16514,6 +16566,12 @@ def _preflight_resume(
                         selected_audio_context),
                 }, scene=index, scene_id=str(shot["id"]))
         result["predecessors"].append(item)
+    _throw_if_review_interrupted()
+    _LOG.info(
+        "H3 resume preflight: checked metadata and file presence for %d saved "
+        "scenes; context checkpoint sources: %s. Full media verification "
+        "is deferred to assembly/export.",
+        int(start) - 1, ", ".join(map(str, sorted(checkpoint_sources))) or "none")
     return result
 
 
@@ -18539,7 +18597,7 @@ class MiniMaxH3ChainLoopStart:
                                "unrelated visual-boundary recipe. Turn OFF only to "
                                "deliberately reuse the saved predecessor after "
                                "changing the current Plan. Missing files, "
-                               "SHA-256 artifact integrity, checkpoint tensor "
+                               "SHA-256 context-checkpoint integrity, tensor "
                                "shape, and internal metadata consistency are "
                                "still verified. Changes to the predecessor "
                                "itself are not applied retroactively."}),
@@ -18624,7 +18682,8 @@ class MiniMaxH3ChainLoopStart:
                     "connect Source Timeline or legacy source_audio, not both.")
             verification = _ResumeArtifactVerification()
             preflight_started = time.perf_counter()
-            _LOG.info("H3 Loop Start: preflight and saved-artifact verification...")
+            _throw_if_review_interrupted()
+            _LOG.info("H3 Loop Start: preflight and context-checkpoint verification...")
             _dry_plan, preflight = _preflight_chain(
                 prepared_plan, source_timeline=source_timeline,
                 source_audio=source_audio, start_clip=start_clip,
@@ -18638,6 +18697,7 @@ class MiniMaxH3ChainLoopStart:
                 "hashed %d files (%.2f GiB).",
                 time.perf_counter() - preflight_started,
                 verification.hashed_files, verification.hashed_bytes / 1024**3)
+            _throw_if_review_interrupted()
             if not preflight["ok"]:
                 raise ValueError(_preflight_failure_text(preflight))
             for issue in preflight["warnings"]:

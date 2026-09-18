@@ -3,6 +3,16 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
+## Unreleased — Context-scoped resume verification
+
+- Resume checks metadata and file presence for all prior scenes, but hashes
+  only the checkpoint payloads used by the selected visual/audio context.
+  Include explicit older sources and the paired AV bootstrap checkpoint;
+  independent cuts read no predecessor payloads. Manifest Load and assembly
+  retain full integrity checks for unused media.
+- Honor Stop/Cancel between resume scenes and each hash read block, preserving
+  ComfyUI's native cancellation exception and leaving saved files untouched.
+
 ## v0.6.11 — Faster resume and Plan layout fixes
 
 - Avoid hashing unchanged saved artifacts twice during Loop Start resume.
