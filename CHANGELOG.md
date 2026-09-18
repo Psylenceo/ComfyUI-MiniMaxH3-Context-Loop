@@ -4,6 +4,14 @@ Newest first. This file keeps release history out of the onboarding README.
 
 ## Unreleased — Deferred checkpoint upscaling
 
+- Resume checks metadata and file presence for all prior scenes, but hashes
+  only the checkpoint payloads used by the selected visual/audio context.
+  Include explicit older sources and the paired AV bootstrap checkpoint;
+  independent cuts read no predecessor payloads. Manifest Load and assembly
+  retain full integrity checks for unused media.
+- Honor Stop/Cancel between resume scenes and each hash read block, preserving
+  ComfyUI's native cancellation exception and leaving saved files untouched.
+
 - Avoid hashing unchanged saved artifacts twice during Loop Start resume.
   Share verification results only within the current call, checking file
   identity, size and timestamps before reuse. Changed or missing files,
