@@ -61,7 +61,9 @@ class ChapterSnapshotManager:
                     if k not in ("sealed_at", "chapter_manifest_id", "chapter_manifest_path")}
         if (_fingerprint(identity)[:32] != path.stem
                 or data.get("chapter_manifest_id") != path.stem
-                or artifact_address(data.get("chapter_manifest_path")) != address):
+                # Layout conversion preserves immutable document bytes, so
+                # its stored legacy address may alias the discovered .h3 path.
+                or self._path(data.get("chapter_manifest_path")) != path):
             raise ValueError("Chapter snapshot failed its identity check.")
         destination = path.parent.parent / "retired_manifests" / path.name
         retired_address = destination.relative_to(self.root).as_posix()

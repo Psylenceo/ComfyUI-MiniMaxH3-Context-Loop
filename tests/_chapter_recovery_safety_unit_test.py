@@ -124,6 +124,46 @@ class ChapterRecoverySafetyTests(unittest.TestCase):
         result = manager.retire("revision_test", address, preview["snapshot"])
         self.assertEqual((Path(self.temp.name) / result["retired_path"]).read_bytes(), before)
 
+    def test_converted_snapshot_retirement_preserves_bytes_and_checks_identity(self):
+        snapshot, path = chain._chapter_manifest_from_manifest(self.manifest, 1)
+        legacy = snapshot["chapter_manifest_path"]
+        branch_address = legacy.replace("/chapters/", "/branches/" + "c" * 32 + "/chapters/")
+        branch_path = Path(self.temp.name) / branch_address
+        branch_path.parent.mkdir(parents=True)
+        branch_path.write_text(json.dumps({**snapshot, "chapter_manifest_path": branch_address}))
+        conversion = import_module(chain.__package__ + ".chain_layout_conversion")
+        layout = import_module(chain.__package__ + ".chain_layout")
+        with tempfile.TemporaryDirectory() as output:
+            conversion.convert_copy(self.run, output)
+            manager = retirement.ChapterSnapshotManager(output)
+            for address in (legacy, branch_address):
+                with self.subTest(address=address):
+                    physical = Path(layout.resolve_path(Path(output) / address))
+                    discovered = physical.relative_to(output).as_posix()
+                    original = physical.read_bytes()
+                    preview = manager.retirement_preview("revision_test", discovered)
+                    self.assertTrue(manager.retirement_preview("revision_test", address)["allowed"])
+                    data = json.loads(original)
+                    # A different run/branch is not an alias, even though the
+                    # stored address is excluded from the content fingerprint.
+                    for wrong in (address.replace("revision_test", "foreign"),
+                                  branch_address if address == legacy else legacy):
+                        physical.write_text(json.dumps({**data, "chapter_manifest_path": wrong}))
+                        with self.assertRaisesRegex(ValueError, "identity"):
+                            manager.retirement_preview("revision_test", discovered)
+                    physical.write_text(json.dumps({**data, "clip_count": 999}))
+                    with self.assertRaisesRegex(ValueError, "identity"):
+                        manager.retirement_preview("revision_test", discovered)
+                    physical.write_bytes(original)
+                    # Restoring content still invalidates the old stat token.
+                    with self.assertRaises(retirement.CheckpointDeleteBlocked):
+                        manager.retire("revision_test", discovered, preview["snapshot"])
+                    preview = manager.retirement_preview("revision_test", discovered)
+                    result = manager.retire("revision_test", discovered, preview["snapshot"])
+                    self.assertEqual((Path(output) / result["retired_path"]).read_bytes(), original)
+                    self.assertFalse(physical.exists())
+                    self.assertTrue((Path(self.temp.name) / address).is_file())
+
     def test_other_snapshot_and_shared_branch_dependencies_still_block(self):
         first, _ = chain._chapter_manifest_from_manifest(self.manifest, 1)
         other, _ = chain._chapter_manifest_from_manifest(dict(self.manifest, plan_hash="other"), 1)
