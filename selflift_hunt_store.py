@@ -208,7 +208,8 @@ class HuntStore:
             folder = self.directory(entry)
             previews = self.preview_path(entry, 1).parent
             project = self.root / "h3_chains" / run
-            bundle_name = r"(?:batch\.json|recovery\.json|source\.safetensors|(?:take|finished)_\d{4,}\.safetensors)(?:\.[0-9a-f]{32}\.tmp)?"
+            bundle_name = (r"(?:batch\.json|recovery\.json|source\.safetensors|take_\d{4,}\.safetensors|"
+                           r"finished_\d{4,}(?:\.[0-9a-f]{64})?\.safetensors)(?:\.[0-9a-f]{32}\.tmp)?")
             preview_name = r"take_\d{4,}(?:\.[0-9a-f]{32}\.tmp)?\.mp4"
             files = []
             for directory, pattern in ((folder, bundle_name), (previews, preview_name)):

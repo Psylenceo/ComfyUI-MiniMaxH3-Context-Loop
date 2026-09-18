@@ -57,12 +57,23 @@ class MiniMaxH3SelfLiftProject:
         return result, status
 
 
-def _stage_model(model, latent, sigmas):
+def _stage_model(model, latent, sigmas, *, continuity_model=None):
     """Rebind only OUR dynamic-prefix patch to each grid; keep engine/LoRA patches."""
     from . import drift_control as drift
-    previous = model.model_options.get(drift._WRAPPER_KEY)
+    # A separately loaded finishing checkpoint has no Chain Drift Control
+    # wrapper. Inherit only that continuity policy, never the base model's
+    # weights, LoRAs or unrelated engine patches.
+    policy_model = model if continuity_model is None else continuity_model
+    previous = policy_model.model_options.get(drift._WRAPPER_KEY)
     if previous is None:
+        if continuity_model is not None and model.model_options.get(drift._WRAPPER_KEY) is not None:
+            raise ValueError("SelfLift model_hires has Drift Control but the base model does not; connect the finishing checkpoint before its Chain Context patch.")
         return model
+    existing_mask = model.model_options.get("denoise_mask_function")
+    own_drift = model.model_options.get(drift._WRAPPER_KEY)
+    if (continuity_model is not None and callable(existing_mask)
+            and (own_drift is None or getattr(existing_mask, "__self__", None) is not own_drift)):
+        raise ValueError("SelfLift model_hires has another dynamic denoise-mask patch; remove it before inheriting Chain Drift Control.")
     from comfy.patcher_extension import WrappersMP
 
     class StageDrift(drift._DriftControlMaskState):
@@ -93,7 +104,11 @@ class MiniMaxH3ChainSelfLiftSampler:
             "latent": ("LATENT",), "sampler": ("SAMPLER",), "sigmas": ("SIGMAS",),
             "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             "cfg": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step": 0.1}),
-        }, "optional": {"negative": ("CONDITIONING",)}}
+        }, "optional": {"negative": ("CONDITIONING",), "model_hires": ("MODEL", {
+            "tooltip": "Optional compatible H3 diffusion checkpoint for the final full-resolution steps. "
+                       "Unconnected: reuse model. Same sampler, sigmas, CFG, VAE and conditioning; "
+                       "connect desired LoRAs to this model separately. Ignored when SelfLift is off.",
+        })}}
 
     RETURN_TYPES = ("LATENT", "STRING")
     RETURN_NAMES = ("output", "status")
@@ -104,7 +119,8 @@ class MiniMaxH3ChainSelfLiftSampler:
                    "SelfLift ON supports Euler or experimental RES4LYF Radau IA 2s (eta=0), "
                    "with a learned H3 latent upscaler; no TST or spatial tiling.")
 
-    def sample(self, state, model, positive, vae, latent, sampler, sigmas, seed, cfg=1.0, negative=None):
+    def sample(self, state, model, positive, vae, latent, sampler, sigmas, seed, cfg=1.0, negative=None,
+               model_hires=None):
         import comfy.sample
         import comfy.samplers
         import comfy.utils
@@ -141,23 +157,28 @@ class MiniMaxH3ChainSelfLiftSampler:
             raise ValueError("Select an installed H3 latent-upscaler model on SelfLift Project, or turn SelfLift off.")
         # Runtime imports, model registration and weight loading happen ONLY
         # when this explicitly enabled sampler executes, never on tab load.
-        from .selflift_runtime.nodes import progressive_sample
+        from .selflift_runtime.nodes import progressive_sample, _validate_hires_model
         from .selflift_runtime.h3_upscaler import learned_latent_lift
         from .masking_support import require_h3_mask_support
 
+        _validate_hires_model(model, model_hires, sampler)
         if latent.get("noise_mask") is not None:
             require_h3_mask_support()
         prepared = prepare_previous_context(latent, settings)
         staged_model = _stage_model(model, prepared, sigmas)
+        staged_hires = (_stage_model(model_hires, prepared, sigmas, continuity_model=model)
+                        if model_hires is not None else None)
         def lifter(z, hw, temporal_split=None):
             return learned_latent_lift(z, hw, name, temporal_split=temporal_split)
         output = progressive_sample(
             staged_model, positive, negative, vae, prepared, sampler, sigmas,
             int(seed), float(cfg), total_steps - high_steps, 0.5,
-            0.0, 0.5, 1.0, "nearest", latent_lifter=lifter)
+            0.0, 0.5, 1.0, "nearest", latent_lifter=lifter, model_hires=staged_hires)
         output[SIGNATURE] = settings_signature(settings)
         status = "SelfLift: %d low-resolution + %d full-resolution steps; native AV masks" % (
             total_steps - high_steps, high_steps)
+        if model_hires is not None:
+            status += "; separate finishing checkpoint"
         from .selflift_runtime.radau import is_radau
         if is_radau(sampler):
             status += "; experimental Radau IA 2s (+1 low-resolution boundary evaluation)"

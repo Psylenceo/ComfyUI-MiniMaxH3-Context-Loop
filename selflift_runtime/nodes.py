@@ -120,6 +120,67 @@ def _validate_sampling(model_sampling, sampler):
                      "RES4LYF ClownSampler Radau IA 2s (eta=0).")
 
 
+def _validate_hires_model(model, model_hires, sampler):
+    """Reject incompatible coordinate/conditioning systems before sampling.
+
+    No weights are read or loaded. Quantization and LoRA patches may differ;
+    changing latent/audio scaling or model families at this boundary may not.
+    Comfy creates the sampling class dynamically, so compare its bases rather
+    than requiring identical class objects.
+    """
+    if model_hires is None or model_hires is model:
+        return
+    low_sampling = model.get_model_object("model_sampling")
+    high_sampling = model_hires.get_model_object("model_sampling")
+    _validate_sampling(high_sampling, sampler)
+    if (type(model.model) is not type(model_hires.model)
+            or type(low_sampling).__mro__[1:] != type(high_sampling).__mro__[1:]):
+        raise ValueError("SelfLift model_hires must use the same H3 model family and flow sampling as model.")
+    for name, default in (("noise_scale", 1.0), ("audio_scale", 1.0),
+                          ("shift", None), ("audio_shift", None), ("multiplier", None)):
+        if getattr(low_sampling, name, default) != getattr(high_sampling, name, default):
+            raise ValueError(f"SelfLift model_hires has incompatible {name}; match the base model's sampling settings.")
+    low_format = model.get_model_object("latent_format")
+    high_format = model_hires.get_model_object("latent_format")
+    if type(low_format) is not type(high_format):
+        raise ValueError("SelfLift model_hires must use the same H3 latent format and VAE as model.")
+    for name in ("latent_channels", "latent_dimensions", "spacial_downscale_ratio",
+                 "temporal_downscale_ratio", "scale_factor", "shift_factor"):
+        if getattr(low_format, name, None) != getattr(high_format, name, None):
+            raise ValueError(f"SelfLift model_hires has incompatible latent {name}.")
+    configs = [getattr(getattr(m.model, "model_config", None), "unet_config", {})
+               for m in (model, model_hires)]
+    for name in ("image_model", "latents_dim", "audio_latents_dim", "text_dim", "patch_size"):
+        if configs[0].get(name) != configs[1].get(name):
+            raise ValueError(f"SelfLift model_hires has incompatible {name}; both checkpoints must accept the same AV latents and conditioning.")
+
+
+def _stage_latent_transform(model, samples, direction):
+    """Apply H3's packed-AV scaling even on a freshly loaded finishing model.
+
+    Comfy normally sets latent_shapes inside sampling, but our resume-noise
+    reconstruction happens before that. Restore the prior value on every exit.
+    """
+    inner = model.model
+    transform = getattr(inner, "process_latent_" + direction)
+    if not hasattr(inner, "latent_shapes"):
+        return transform(samples)
+    previous = {"latent_shapes": inner.latent_shapes}
+    try:
+        # ModelPatcher applies object patches while loading. This checkpoint
+        # need not have been loaded yet (and a shared model may carry another
+        # patcher's sampling settings), so use this patcher's own objects.
+        for name in ("model_sampling", "latent_format"):
+            if hasattr(inner, name):
+                previous[name] = getattr(inner, name)
+                setattr(inner, name, model.get_model_object(name))
+        inner.latent_shapes = [s.shape for s in _streams(samples)[0]]
+        return transform(samples)
+    finally:
+        for name, value in previous.items():
+            setattr(inner, name, value)
+
+
 def _validate_schedule(sigmas, transition_step):
     if sigmas.ndim != 1 or not sigmas.is_floating_point():
         raise ValueError("SelfLift: sigmas must be a one-dimensional floating-point tensor")
@@ -360,6 +421,7 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
 
     model_sampling = model.get_model_object("model_sampling")
     sampler_contract = _validate_sampling(model_sampling, sampler)
+    _validate_hires_model(model, model_hires, sampler)
     radau_mode = sampler_contract is not None
     if radau_mode:
         from . import radau
@@ -710,7 +772,7 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
         # Audio deliberately remains the original clean stream so locked
         # speech/music is preserved exactly throughout the high stage.
         high_anchor_latent = _pack([high_video_anchor] + audio_streams, nested)
-        anchor_streams, _ = _streams(high_model.model.process_latent_in(high_anchor_latent))
+        anchor_streams, _ = _streams(_stage_latent_transform(high_model, high_anchor_latent, "in"))
         noise_scale = float(getattr(model_sampling, "noise_scale", 1.0))
         # Native inpaint needs a CLEAN anchor for both streams. Reconstruct
         # resume noise so unmasked tokens start from SelfLift's lifted state:
@@ -734,15 +796,17 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
         del anchor_streams, resume_noise_streams, resumed_noise, high_video_anchor
     else:
         resume_streams = [model_sampling.inverse_noise_scaling(sigma_next, s) for s in next_streams]
-        resume_latent = model.model.process_latent_out(_pack(resume_streams, nested))
+        resume_latent = _stage_latent_transform(high_model, _pack(resume_streams, nested), "out")
         resume_noise = _pack([torch.zeros_like(s) for s in resume_streams], nested)
         del resume_streams
     del next_streams
     transition_timer.mark("renoise")
     transition_timer.finish()
-    log_memory("transition end / high_resolution start", model.load_device)
+    log_memory("transition end / high_resolution start", high_model.load_device)
 
     high_evaluations = 0
+    high_callback = (latent_preview.prepare_callback(high_model, total_steps)
+                     if model_hires is not None else callback)
 
     def callback_high(step, x0, x, total):
         nonlocal high_evaluations
@@ -750,11 +814,11 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
         high_evaluations += 1
         if high_evaluations > total_steps - transition_step:
             raise RuntimeError("SelfLift: too many high-resolution progress callbacks for the stage schedule")
-        result = callback(step + transition_step, x0, x, total_steps)
+        result = high_callback(step + transition_step, x0, x, total_steps)
         high_timer.mark(f"step {step + 1}/{total_steps - transition_step}" + (" (includes setup)" if step == 0 else ""))
         return result
 
-    high_timer = _StageTimer("high_resolution", model.load_device, (H, W), resolution_scale)
+    high_timer = _StageTimer("high_resolution", high_model.load_device, (H, W), resolution_scale)
     high_drift_state = high_model.model_options.get(_DRIFT_CONTROL_KEY)
     if callable(getattr(high_drift_state, "configure_selflift_stage", None)):
         high_drift_state.configure_selflift_stage(
@@ -762,7 +826,7 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
         )
     if highres_tiling:
         logging.debug("[H3 Chain SelfLift two-stage] automatic high-resolution tiling enabled")
-    out = comfy.samplers.sample(high_model, resume_noise, positive, negative, cfg, model.load_device,
+    out = comfy.samplers.sample(high_model, resume_noise, positive, negative, cfg, high_model.load_device,
                                 radau.stage_sampler(sampler) if radau_mode else sampler,
                                 sigmas[transition_step:], high_model.model_options,
                                 latent_image=resume_latent, denoise_mask=high_noise_mask,
@@ -803,5 +867,5 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
     if low_resolution_carry is not None:
         result[_LOW_CARRY_KEY] = low_resolution_carry
     high_timer.finish()
-    log_memory("high_resolution end", model.load_device)
+    log_memory("high_resolution end", high_model.load_device)
     return result

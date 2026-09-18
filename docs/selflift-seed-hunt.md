@@ -73,6 +73,40 @@ identity; switching samplers creates a separate hunt, never converts old takes.
 As with Euler, recovery restarts an unfinished high pass from its saved boundary,
 not from an internal Radau substage.
 
+## Separate finishing checkpoint
+
+Both **Chain SelfLift Sampler** and **SelfLift Seed Hunt** accept an optional
+`model_hires` **MODEL** input. Connect a second H3 diffusion-model loader's
+MODEL output there to use a different compatible checkpoint for the remaining
+full-resolution steps. Keep the original low-pass model connected to `model`.
+Leaving `model_hires` unconnected keeps the previous same-model behavior;
+SelfLift off ignores it. No existing workflow needs rewiring.
+
+The second checkpoint must accept the same H3 AV latents, VAE and text/reference
+conditioning, with matching flow/audio scaling and sampling settings. Incompatible
+families, latent formats and conditioning dimensions are rejected before sampling.
+The sampler (Euler or supported Radau), CFG, sigma schedule and step split remain
+shared. This is not a generic cross-model-family refiner or a second latent-upscaler
+checkpoint; the learned 3D upscaler is still selected on SelfLift Project.
+
+The high model keeps its own LoRAs and engine patches. Connect any desired LoRA
+setup to that loader separately; base-model LoRAs are not copied automatically.
+Chain Drift Control is rebound for the high grid from the base stage's continuity
+policy, and native video/audio masks and source-audio locks remain in use.
+ComfyUI manages each stage's model loading; a second checkpoint can still add
+considerable CPU RAM use and model-swap time.
+
+In Seed Hunt, changing **only** `model_hires` or its upstream LoRA settings reuses
+the same saved low takes and selected seed, but gets a separate finished-latent
+cache. Switching back can reuse that finishing setup's completed result. Keep
+**Auto-remove saved takes off** to compare multiple finishes. Disconnecting the
+input can still use the original same-model finished file. The saved workflow
+download is updated to the latest queued finishing setup. The upstream recipe
+is required for safe high-pass caching, including virtual/subgraph node recipes;
+direct Python calls without that prompt recipe fail rather than reuse an
+unidentified finishing checkpoint. Models replaced in-place under the same name
+still require a fresh batch name.
+
 ## Choosing before the batch finishes
 
 As soon as a completed preview appears, click **Use take N now**. No need to
@@ -106,14 +140,14 @@ The saved-batch dropdown can review and select a take even without a running
 job. Browsing is separate from choosing: changing previews never approves a
 take. Incoming candidates and ordinary polls do not interrupt playback, and
 you can still browse while the chosen take is being upscaled.
-**Download saved workflow**, under **Help & recovery**, provides the original canvas snapshot if
+**Download saved workflow**, under **Help & recovery**, provides the latest queued canvas snapshot if
 needed. Selecting a saved take does not automatically queue a workflow or
 replace the current canvas. The matching workflow must still be queued.
 In a multi-scene run, set Loop Start to that saved batch's scene when recovering
 mid-run (the downloaded canvas retains the original Loop Start setting).
 
 Change `batch_name` for a fresh hunt. Changes to the generation recipe create
-a separate batch. Files replaced in-place under the same model/reference names
+a separate batch, except finishing-model-only changes described above. Files replaced in-place under the same model/reference names
 are not rehashed: keep them unchanged for resume, or use a new batch name.
 Restore with the same node/model versions for consistent results.
 
@@ -128,7 +162,7 @@ Preview videos go in the project's `processing/<scope>/selflift_seed_hunt/clips/
 One shared safetensors bundle stores masks, full-size context anchors and
 conditioning. Each take stores the low-resolution clean video prediction,
 the noisy audio handoff, seed, schedule and grid metadata. The selected final
-latent has its own bundle. These are real disk files and can use substantial
+latent has its own bundle per finishing setup. These are real disk files and can use substantial
 space; rejected takes are **kept by default**. Model weights are
 not copied into a batch. Unsupported non-tensor conditioning objects fail
 before low-pass sampling rather than being pickled.

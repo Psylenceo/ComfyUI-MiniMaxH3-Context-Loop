@@ -4,6 +4,12 @@ Newest first. This file keeps release history out of the onboarding README.
 
 ## Unreleased — Deferred checkpoint upscaling
 
+- Nightly: optional `model_hires` input on Chain SelfLift Sampler and Seed Hunt
+  for a compatible H3 finishing checkpoint. Keep base sampling unchanged,
+  preserve AV masks/continuity, validate the handoff's latent/audio contract,
+  and reuse saved low takes with separately keyed high-pass results. Existing
+  unconnected workflows and Euler/Radau recovery remain supported.
+
 - Resume checks metadata and file presence for all prior scenes, but hashes
   only the checkpoint payloads used by the selected visual/audio context.
   Include explicit older sources and the paired AV bootstrap checkpoint;

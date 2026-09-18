@@ -11,7 +11,7 @@ _ACTIVE_LOCK = threading.Lock()
 CLEANUP_STATE = "_h3_selflift_hunt_cleanup"
 
 
-def source_recipe(prompt, unique_id, dynprompt=None):
+def source_recipe(prompt, unique_id, dynprompt=None, *, input_names=None, require_complete=False):
     """Hash relevant upstream settings, independent of virtual/subgraph node IDs.
 
     State/Plan are covered by the explicit scene/history contract instead of
@@ -19,6 +19,8 @@ def source_recipe(prompt, unique_id, dynprompt=None):
     """
     from .selflift_hunt_store import digest
     prompt = prompt or {}
+    if input_names is None:
+        input_names = ("model", "positive", "negative", "latent", "vae", "sampler", "sigmas")
     def node(key):
         try:
             return dynprompt.get_node(str(key)) if dynprompt is not None else prompt.get(str(key), {})
@@ -30,6 +32,8 @@ def source_recipe(prompt, unique_id, dynprompt=None):
         if key in memo:
             return memo[key]
         data = node(key)
+        if require_complete and (not data or key in seen):
+            raise ValueError("SelfLift cannot identify the model_hires upstream recipe; queue the complete workflow to save/reuse finishing passes safely.")
         if key in seen:
             return digest({"class_type": data.get("class_type"), "loop": True})
         seen.add(key)
@@ -37,7 +41,8 @@ def source_recipe(prompt, unique_id, dynprompt=None):
         for name, value in sorted(data.get("inputs", {}).items()):
             if name in ("state", "plan", "flow"):
                 continue
-            if isinstance(value, list) and len(value) == 2 and isinstance(value[1], int) and node(value[0]):
+            linked = isinstance(value, list) and len(value) == 2 and isinstance(value[1], int)
+            if linked and (node(value[0]) or (require_complete and isinstance(value[0], str))):
                 inputs[name] = {"source": visit(value[0]), "output": value[1]}
             else:
                 inputs[name] = value
@@ -47,7 +52,7 @@ def source_recipe(prompt, unique_id, dynprompt=None):
     own = node(unique_id)
     return {name: {"source": visit(value[0]), "output": value[1]}
             for name, value in own.get("inputs", {}).items()
-            if name in ("model", "positive", "negative", "latent", "vae", "sampler", "sigmas")
+            if name in input_names
             and isinstance(value, list) and len(value) == 2}
 
 
@@ -135,6 +140,7 @@ def cleanup_after_segment_save(state, output_root, logger):
             "created_at": marker["created_at"], "selected": marker["selected"], "phase": "finished",
             "run_name": plan["run_name"], "branch_id": plan.get("_branch_id", "main"),
             "scene": state["index"],
+            "finishing_id": marker.get("finishing_id"),
         })
     except (OSError, ValueError, KeyError) as exc:
         logger.warning("H3 SelfLift scene saved; temporary hunt cleanup skipped: %s", exc)
@@ -190,7 +196,8 @@ class MiniMaxH3SelfLiftSeedHunt:
     async def sample(self, state, model, positive, vae, latent, sampler, sigmas, seed,
                      cfg=1.0, negative=None, candidate_count=4, batch_name="hunt_1",
                      tiny_vae="taeh3.safetensors", prompt=None, extra_pnginfo=None,
-                     unique_id=None, dynprompt=None, auto_remove_saved_takes=False, review_enabled=True):
+                     unique_id=None, dynprompt=None, auto_remove_saved_takes=False, review_enabled=True,
+                     model_hires=None):
         import folder_paths
         import torch
         import comfy.nested_tensor
@@ -218,8 +225,18 @@ class MiniMaxH3SelfLiftSeedHunt:
             raise ValueError("Select an installed H3 latent upscaler on SelfLift Project.")
         if not 1 <= int(candidate_count) <= 100:
             raise ValueError("SelfLift candidate count must be 1..100.")
-        from .selflift_runtime.nodes import progressive_sample, _validate_sampling
+        from .selflift_runtime.nodes import progressive_sample, _validate_sampling, _validate_hires_model
         sampler_contract = _validate_sampling(model.get_model_object("model_sampling"), sampler)
+        _validate_hires_model(model, model_hires, sampler)
+        finishing_recipe = None
+        if model_hires is not None:
+            finishing_recipe = source_recipe(prompt, unique_id, dynprompt,
+                input_names=("model_hires",), require_complete=True)
+            if not finishing_recipe:
+                raise ValueError("SelfLift Seed Hunt needs the model_hires upstream prompt recipe to safely resume a separate finishing checkpoint.")
+        # Keep existing low batches/finished files byte-for-byte compatible.
+        # Only explicit finishing setups get their own high-result namespace.
+        finishing_id = digest({"version": 1, "recipe": finishing_recipe}) if finishing_recipe else None
         store = HuntStore(folder_paths.get_output_directory())
         scene = int(state["index"])
         shot = plan["shots"][scene - 1]
@@ -258,6 +275,12 @@ class MiniMaxH3SelfLiftSeedHunt:
                 except (ImportError, AttributeError):
                     pass
             notify()
+            # Keep recovery aligned with the CURRENT finishing checkpoint even
+            # when the source and chosen low pass came from an earlier queue.
+            await _work(atomic_json, folder / "recovery.json", {"plan": plan, "contract": contract,
+                "finishing_recipe": finishing_recipe, "finishing_id": finishing_id,
+                "prompt": recovery_prompt(prompt), "workflow": (extra_pnginfo or {}).get("workflow")})
+            await _work(update, finishing_id=finishing_id)
             source_path = folder / "source.safetensors"
             if not source_path.is_file():
                 prepared = dict(latent)
@@ -266,8 +289,6 @@ class MiniMaxH3SelfLiftSeedHunt:
                 prepared = prepare_previous_context(prepared, settings)
                 source = {"latent": prepared, "positive": positive, "negative": positive if negative is None else negative}
                 # The large tensors are written once, never by polling/UI routes.
-                await _work(atomic_json, folder / "recovery.json", {"plan": plan, "contract": contract,
-                    "prompt": recovery_prompt(prompt), "workflow": (extra_pnginfo or {}).get("workflow")})
                 await _work(save_bundle, source_path, source)
                 del source, prepared
             source = await _work(load_bundle, source_path)
@@ -280,9 +301,11 @@ class MiniMaxH3SelfLiftSeedHunt:
                     return learned_latent_lift(z, hw, name, temporal_split=temporal_split)
                 with torch.inference_mode():
                     staged = _stage_model(model, source["latent"], sigmas)
+                    staged_hires = (_stage_model(model_hires, source["latent"], sigmas, continuity_model=model)
+                                    if model_hires is not None and not options.get("stop_after_low") else None)
                     return progressive_sample(staged, source["positive"], source["negative"], vae,
                         source["latent"], sampler, sigmas, take_seed, float(cfg), total-high,
-                        .5, 0., .5, 1., "nearest", latent_lifter=lift, **options)
+                        .5, 0., .5, 1., "nearest", latent_lifter=lift, model_hires=staged_hires, **options)
 
             # An already approved batch jumps directly to the selected high pass.
             if record.get("selected") is None:
@@ -340,7 +363,8 @@ class MiniMaxH3SelfLiftSeedHunt:
                     break
                 await asyncio.sleep(.5)
             selected = next(v for v in record["candidates"] if v["ordinal"] == record["selected"])
-            finished_path = folder / ("finished_%04d.safetensors" % selected["ordinal"])
+            suffix = "." + finishing_id if finishing_id else ""
+            finished_path = folder / ("finished_%04d%s.safetensors" % (selected["ordinal"], suffix))
             await _work(update, phase="high", error=None)
             notify()
             if finished_path.is_file():
@@ -354,11 +378,13 @@ class MiniMaxH3SelfLiftSeedHunt:
             chosen_state.pop(CLEANUP_STATE, None)
             if auto_remove_saved_takes:
                 chosen_state[CLEANUP_STATE] = {"id": key, "created_at": record["created_at"],
-                    "selected": selected["ordinal"], "scene": scene}
+                    "selected": selected["ordinal"], "scene": scene, "finishing_id": finishing_id}
             await _work(update, phase="finished")
             notify()
             status = "SelfLift take %d; seed %s; %d low + %d high steps" % (
                 selected["ordinal"], selected["seed"], total-high, high)
+            if model_hires is not None:
+                status += "; separate finishing checkpoint"
             if not review_enabled:
                 status += "; review gate off"
             if sampler_contract is not None:
