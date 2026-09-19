@@ -218,7 +218,9 @@ function injectStyles() {
       .h3cm-output { display:flex; flex-wrap:wrap; align-items:center; gap:6px;
         flex:0 0 auto; padding:7px; border:1px solid var(--h3cm-border); border-radius:7px; }
       .h3cm-output-summary { flex:1 1 250px; overflow-wrap:anywhere; }
-      .h3cm-working-row { display:flex; align-items:center; gap:7px; flex:0 0 auto; }
+      .h3cm-working-row { display:flex; align-items:center; gap:7px; flex:0 0 auto; flex-wrap:wrap; }
+      .h3cm-branch-cleanup { flex:0 0 auto; padding:8px; border:1px solid #966; border-radius:5px; overflow-wrap:anywhere; }
+      .h3cm-branch-cleanup[hidden] { display:none; }
       .h3cm-assignment { flex:0 0 auto; padding:7px; border:1px solid var(--h3cm-border); border-radius:7px; }
       .h3cm-assignment-actions { flex-wrap:wrap; margin-top:5px; }
       .h3cm-assignment-context { overflow-wrap:anywhere; }
@@ -339,7 +341,9 @@ function injectStyles() {
       .h3cm-dependent { color:var(--h3cm-danger); cursor:pointer; }
       .h3cm-delete-actions { margin-top:7px; flex-wrap:wrap; }
       .h3cm-delete-actions .h3cm-status { flex:1 1 180px; min-width:120px; }
-      .h3cm-delete-button { margin-left:auto; color:var(--h3cm-danger) !important; }
+      .h3cm-delete-button { color:var(--h3cm-danger) !important; }
+      .h3cm-obsolete-preview { margin-top:8px; overflow-wrap:anywhere; }
+      .h3cm-obsolete-preview[hidden] { display:none; }
       .h3cm-bulk-tools { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:5px 0; }
       .h3cm-bulk-tools[hidden],.h3cm-bulk-preview[hidden] { display:none; }
       .h3cm-bulk-selected { outline:3px solid #f3bd55 !important; outline-offset:1px;
@@ -401,7 +405,11 @@ function mount(node) {
     workingSelect.title = "Working branch for the assignments shown here and the manager's output folder. Final cut from separately chooses the saved timeline/ALT settings for the output path. Does not switch Plan Studio or the project default.";
     workingSelect.setAttribute("aria-label", "Working branch whose assignments are shown");
     const workingRow = element("label", "h3cm-working-row");
-    workingRow.append(element("span", "", "Assignments shown for:"), workingSelect);
+    const deleteBranchClips = button("Delete branch clips…", "Clear this branch's saved paths and delete unused takes; keep other branches and shared clips", () => void branchCleanupAction(), "h3cm-delete-button");
+    const branchCleanupPanel = element("section", "h3cm-branch-cleanup");
+    branchCleanupPanel.hidden = true;
+    let branchCleanupIdentity = "", branchCleanupConfirm = null;
+    workingRow.append(element("span", "", "Assignments shown for:"), workingSelect, deleteBranchClips);
     const workingHelp = element("div", "h3cm-muted",
         "Working-branch names are labels, not resolution restrictions. Saved clips are shared: assign a path to Original or another named branch without moving or deleting clips.");
     workingSelect.addEventListener("change", async () => {
@@ -676,7 +684,7 @@ function mount(node) {
     assignmentPanel.append(assignmentContext, assignmentActions);
     deletionActions.append(remove, removeObsolete);
     deletion.append(bulkPanel, deletionActions, obsoletePanel, deletionTitle, deletionDetails);
-    root.append(head, runRow, storagePanel, workingRow, workingHelp, finalCutRow, outputRow, stageTabs, stageNote, chapterTabs, scenes,
+    root.append(head, runRow, storagePanel, workingRow, workingHelp, branchCleanupPanel, finalCutRow, outputRow, stageTabs, stageNote, chapterTabs, scenes,
         assignmentPanel, status, main, deletion);
 
     function setPreviewHeight(value, persist = false) {
@@ -782,6 +790,14 @@ function mount(node) {
             option.value = item.id; workingSelect.append(option);
         }
         workingSelect.value = selectedWorkingBranch();
+        deleteBranchClips.disabled = state.busy || !branchCleanupSelection();
+        deleteBranchClips.title = branchCleanupSelection()
+            ? `Clear ${workingBranchName()}'s saved paths; keep ${workingBranchName(marker.branch)} and other branches' shared clips`
+            : "Keep your current branch open in the connected Plan Studio, then choose an obsolete branch under Assignments shown for.";
+        if (branchCleanupIdentity !== branchCleanupSelection()) {
+            branchCleanupPanel.hidden = true;
+            branchCleanupConfirm = null;
+        }
     }
 
     function restoreOutputScope() {
@@ -984,6 +1000,9 @@ function mount(node) {
         state.busy = Boolean(value);
         runSelect.disabled = state.busy;
         workingSelect.disabled = state.busy;
+        deleteBranchClips.disabled = state.busy || !branchCleanupSelection();
+        if (branchCleanupConfirm) branchCleanupConfirm.disabled = state.busy
+            || branchCleanupIdentity !== branchCleanupSelection();
         refresh.disabled = state.busy;
         open.disabled = state.busy || !state.runName;
         deleteRun.disabled = state.busy || !state.runName;
@@ -2441,6 +2460,73 @@ function mount(node) {
         }
     }
 
+    function branchCleanupSelection() {
+        const marker = currentPlanMarker();
+        // A visible, different Plan branch is the explicit keep target. No
+        // automatic inference that an unselected branch is disposable.
+        return state.runName && marker?.run === state.runName && marker.branch !== selectedWorkingBranch()
+            ? JSON.stringify([state.runName, selectedWorkingBranch(), marker.branch]) : "";
+    }
+
+    async function branchCleanupAction(preview = null) {
+        const identity = branchCleanupSelection();
+        if (state.busy || !identity || (preview && identity !== branchCleanupIdentity)) return;
+        const [run, branch, keep] = JSON.parse(identity);
+        if (preview && (!preview.allowed || !window.confirm(
+            `Delete ${preview.branch_name}'s saved paths?\n\n` +
+            `${preview.revisions.length} unused takes · ${formatCheckpointBytes(preview.reclaimed_bytes)}\n` +
+            `${preview.retired_snapshots} chapter snapshots will be retired.\n` +
+            `${preview.retained_revisions.length} shared takes will be kept.\n\n` +
+            `Keep ${workingBranchName(keep)} and all other branches. Plans and exports stay. Deleted media cannot be recovered.`))) return;
+        setBusy(true, preview ? "Deleting unused branch clips…" : "Checking branch references…");
+        branchCleanupIdentity = identity;
+        branchCleanupConfirm = null;
+        branchCleanupPanel.hidden = false;
+        branchCleanupPanel.replaceChildren(element("strong", "", "Branch clip deletion preview"),
+            element("div", "", preview ? "Deleting confirmed files…" : "Checking shared clips and chapter recovery pins…"));
+        try {
+            const options = {method:"POST", headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({action:preview ? "delete-path" : "delete-path-preview",
+                    run_name:run, branch_id:branch, keep_branch_id:keep,
+                    ...(preview ? {snapshot:preview.snapshot} : {})})};
+            const endpoint = "/minimax_h3_context_loop/working-branches";
+            const result = preview ? await mutationRequest(node, run, endpoint, options)
+                : await jsonRequest(endpoint, options);
+            if (identity !== branchCleanupSelection()) return;
+            if (preview) {
+                if (selectionWidget) selectionWidget.value = "";
+                state.outputTip = null; state.selected = null;
+                branchCleanupPanel.hidden = true;
+                await refreshCheckpoints();
+                status.className = "h3cm-status";
+                status.textContent = result.message;
+                return;
+            }
+            branchCleanupPanel.replaceChildren(element("strong", "", `Delete ${result.branch_name}'s saved paths`),
+                element("div", "", result.message),
+                element("div", "", `${result.revisions.length} unused takes · ${formatCheckpointBytes(result.reclaimed_bytes)} · ${result.retained_revisions.length} shared takes kept · ${result.retired_snapshots} snapshots retired`));
+            if (result.allowed) {
+                branchCleanupConfirm = button("Confirm branch clip deletion", "Delete exactly the previewed unused clips and release this branch's references", () => void branchCleanupAction(result), "h3cm-delete-button");
+                branchCleanupPanel.append(branchCleanupConfirm);
+            } else branchCleanupPanel.append(element("div", "", "This branch has no saved paths to clear."));
+            const details = element("details", "h3cm-delete-details");
+            const inventory = element("div", "h3cm-delete-body");
+            details.append(element("summary", "", "Files and shared takes"), inventory);
+            for (const item of result.retained_revisions) inventory.append(element("div", "",
+                `Keep shared: S${item.scene} · ${item.revision.slice(0, 8)}`));
+            for (const file of result.files) if (file.exists) inventory.append(element("div", "",
+                `${file.owned ? "Delete" : "Keep"}: ${file.path}`));
+            branchCleanupPanel.append(details);
+        } catch (error) {
+            if (identity !== branchCleanupSelection()) return;
+            branchCleanupPanel.replaceChildren(element("strong", "", "Branch cleanup failed"),
+                element("div", "h3cm-error", error.message));
+        } finally {
+            if (identity !== branchCleanupSelection()) branchCleanupPanel.hidden = true;
+            setBusy(false);
+        }
+    }
+
     function obsoletePathIdentity() {
         const record = state.selected;
         return state.stage === "original" && record && !record.active && !state.attribution
@@ -2459,6 +2545,12 @@ function mount(node) {
             "Reattached scenes and shared media are kept. This cannot be undone."))) return;
         const token = state.requestToken;
         setBusy(true, preview ? "Deleting obsolete path…" : "Checking obsolete path and shared files…");
+        obsoleteConfirm = null;
+        obsoletePanel.hidden = false;
+        obsoletePanel.replaceChildren(
+            element("strong", "", "Obsolete path deletion preview"),
+            element("div", "h3cm-status", preview ? "Deleting confirmed files…" : "Checking dependencies and shared files…"),
+        );
         try {
             const path = "/minimax_h3_context_loop/checkpoint-revisions/obsolete-" + (preview ? "delete" : "preview");
             const options = {method:"POST", headers:{"Content-Type":"application/json"},
@@ -2477,23 +2569,37 @@ function mount(node) {
             obsoleteConfirm = null;
             obsoletePanel.replaceChildren(); obsoletePanel.hidden = false;
             obsoletePanel.append(element("strong", "", "Obsolete path deletion preview"));
-            for (const item of payload.revisions ?? []) obsoletePanel.append(element("div", "",
+            obsoletePanel.append(element("div", "", `${payload.revisions?.length ?? 0} revisions · ${payload.owned_file_count} files · ${formatCheckpointBytes(payload.reclaimed_bytes)}`));
+            if (payload.allowed) {
+                obsoleteConfirm = button("Confirm obsolete path deletion", "Delete only the previewed files", () => void obsoletePathAction(payload), "h3cm-delete-button");
+                const actions = element("div", "h3cm-delete-actions");
+                actions.append(obsoleteConfirm);
+                obsoletePanel.append(actions);
+            }
+            const blockers = element("div", "h3cm-delete-body");
+            for (const reason of payload.blockers ?? []) blockers.append(element("div", "h3cm-error", reason));
+            obsoletePanel.append(blockers);
+            const details = element("details", "h3cm-delete-details");
+            const inventory = element("div", "h3cm-delete-body");
+            details.append(element("summary", "", "Revisions, files and retained data"), inventory);
+            for (const item of payload.revisions ?? []) inventory.append(element("div", "",
                 `Remove link: S${item.scene} · ${item.revision.slice(0, 8)}`));
-            for (const item of payload.retained_revisions ?? []) obsoletePanel.append(element("div", "h3cm-muted",
+            for (const item of payload.retained_revisions ?? []) inventory.append(element("div", "h3cm-muted",
                 `Keep reattached: S${item.scene} · ${item.revision.slice(0, 8)}`));
-            for (const reason of payload.blockers ?? []) obsoletePanel.append(element("div", "h3cm-error", reason));
             const files = element("ul", "h3cm-files");
             for (const file of payload.files ?? []) if (file.exists) files.append(element("li", "",
                 `${file.owned ? "Delete" : file.shared ? "Keep shared" : "Keep"}: ${file.path} · ${formatCheckpointBytes(file.size_bytes)}`));
-            obsoletePanel.append(files);
-            if (payload.allowed) {
-                obsoleteConfirm = button("Confirm obsolete path deletion", "Delete only the previewed files", () => void obsoletePathAction(payload), "h3cm-delete-button");
-                obsoletePanel.append(obsoleteConfirm);
-            }
+            inventory.append(files);
+            obsoletePanel.append(details);
             status.textContent = payload.allowed ? "Review the obsolete path preview before confirming." : "Obsolete path cleanup is blocked; see the preview.";
         } catch (error) {
             if (identity !== obsoletePathIdentity()) return;
-            obsoletePanel.replaceChildren(); obsoletePanel.hidden = true; obsoleteConfirm = null;
+            obsoleteConfirm = null;
+            obsoletePanel.hidden = false;
+            obsoletePanel.replaceChildren(
+                element("strong", "", "Obsolete path cleanup failed"),
+                element("div", "h3cm-error", error.message),
+            );
             status.className = "h3cm-status h3cm-error";
             status.textContent = error.message;
         } finally {

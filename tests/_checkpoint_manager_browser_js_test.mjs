@@ -65,6 +65,10 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         const bulkRequests = [];
         let bulkAllowed = true;
         let bulkDeletes = 0, bulkDeleteError = false;
+        let obsoleteAllowed = true, obsoleteError = "", obsoleteDeleteError = "", obsoleteDeletes = 0;
+        const obsoleteRequests = [];
+        const branchCleanupRequests = [];
+        let branchCleanupDeletes = 0, branchCleanupError = "";
         const projectMutationOptions = async (_node, _run, options) => options;
         const storageReport = {format:"h3_storage_inventory_v1",run_name:"demo",scan_complete:true,
             totals:{files:61,logical_bytes:6100,allocated_bytes:8192,allocation_unknown_files:0},
@@ -77,7 +81,41 @@ async function browserChecks(extensionSource, keepStorageOpen) {
             let data;
             if (path.endsWith("/runs")) data = {runs:[{run_name:"demo",checkpoint_count:7}]};
             else if (path.includes("/working-branches?")) data = {default_branch:"main",branches:[{id:"main",name:"Original"},{id:named,name:"960x544"}]};
+            else if (path.endsWith('/working-branches')) {
+                const body = JSON.parse(options.body);
+                branchCleanupRequests.push(body);
+                check(body.branch_id === 'main' && body.keep_branch_id === named,
+                    'Branch cleanup targets Original and explicitly keeps the Plan Studio branch');
+                if (body.action === 'delete-path') {
+                    branchCleanupDeletes++;
+                    check(body.snapshot === 'branch-cleanup-test', 'Branch cleanup confirms the exact preview');
+                }
+                if (branchCleanupError) return {ok:false,status:409,json:async()=>({error:branchCleanupError})};
+                data = body.action === 'delete-path' ? {ok:true,message:'Cleared Original; shared takes kept.'} : {
+                    allowed:true,branch_name:'Original',snapshot:'branch-cleanup-test',retired_snapshots:3,
+                    revisions:[seven[6]],retained_revisions:[seven[0]],reclaimed_bytes:50000,
+                    message:'Release Original assignments and edit. Keep other branches.',
+                    files:Array.from({length:500},(_,i)=>({path:`old/file_${i}`,exists:true,owned:true}))};
+            }
             else if (path.includes("/checkpoints?")) data = payload;
+            else if (path.endsWith('/obsolete-preview')) {
+                const body = JSON.parse(options.body);
+                obsoleteRequests.push(body);
+                if (obsoleteError) return {ok:false,status:400,json:async()=>({error:obsoleteError})};
+                data = {allowed:obsoleteAllowed, snapshot:'obsolete-test',
+                    revisions:[{scene:body.scene,revision:body.revision}], retained_revisions:[],
+                    owned_file_count:500,reclaimed_bytes:50000,
+                    blockers:obsoleteAllowed ? [] : ['A sealed chapter snapshot still protects this take.'],
+                    files:Array.from({length:500},(_,i)=>({exists:true,owned:true,size_bytes:100,path:`demo/obsolete_${i}.mp4`}))};
+            }
+            else if (path.endsWith('/obsolete-delete')) {
+                const body = JSON.parse(options.body);
+                check(body.snapshot === 'obsolete-test', 'Obsolete deletion sends the exact preview snapshot');
+                check(body.scene === 7 && body.revision === seven[6].revision, 'Obsolete deletion targets only the previewed take');
+                obsoleteDeletes++;
+                if (obsoleteDeleteError) return {ok:false,status:423,json:async()=>({error:obsoleteDeleteError})};
+                data = {ok:true,message:'Deleted obsolete fixture path.',reclaimed_bytes:50000};
+            }
             else if (path.endsWith('/bulk-preview')) {
                 const body = JSON.parse(options.body);
                 bulkRequests.push(body);
@@ -134,6 +172,51 @@ async function browserChecks(extensionSource, keepStorageOpen) {
             "Delete is outside and before the scrollable file inventory");
         check(root.querySelector(".h3cm-delete-body").clientHeight <= 135,"Large file inventories stay bounded");
         details.open = false;
+        const obsolete = [...deletion.querySelectorAll('button')].find(item=>item.textContent === 'Delete obsolete path…');
+        const obsoletePanel = deletion.querySelector('.h3cm-obsolete-preview');
+        const deleteGap = obsolete.getBoundingClientRect().left - remove.getBoundingClientRect().right;
+        check(deleteGap >= 0 && deleteGap <= 10, 'Related delete buttons stay together instead of opposite edges');
+        obsolete.click(); await new Promise(resolve=>setTimeout(resolve,30));
+        check(obsoleteRequests.length === 1 && obsoleteDeletes === 0, 'Obsolete action only previews on first click');
+        const confirmObsolete = obsoletePanel.querySelector('button');
+        const obsoleteDetails = obsoletePanel.querySelector('details');
+        check(Boolean(confirmObsolete) && !confirmObsolete.disabled, 'Allowed obsolete path has an enabled confirmation');
+        check(!obsoleteDetails.open && obsoletePanel.getBoundingClientRect().height < 160,
+            'Five hundred files cannot bury obsolete confirmation');
+        obsoleteDetails.open = true;
+        check(obsoleteDetails.querySelector('.h3cm-delete-body').clientHeight <= 135,
+            'Expanded obsolete inventory has bounded height');
+        check(confirmObsolete.getBoundingClientRect().bottom <= obsoleteDetails.getBoundingClientRect().top,
+            'Obsolete confirmation remains above the inventory');
+        window.confirm = () => false;
+        confirmObsolete.click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(obsoleteDeletes === 0, 'Cancelled obsolete confirmation never deletes');
+        window.confirm = () => true;
+        confirmObsolete.click(); await new Promise(resolve=>setTimeout(resolve,50));
+        check(obsoleteDeletes === 1 && obsoletePanel.hidden, 'Confirmed obsolete deletion completes and clears its preview');
+        obsolete.click(); await new Promise(resolve=>setTimeout(resolve,20));
+        obsoleteDeleteError = 'This workflow is read-only.';
+        obsoletePanel.querySelector('button').click(); await new Promise(resolve=>setTimeout(resolve,30));
+        check(!obsoletePanel.hidden && obsoletePanel.textContent.includes(obsoleteDeleteError)
+            && !obsoletePanel.querySelector('button'), 'Deletion rejection is visible beside the controls, with no stale confirmation');
+        obsoleteDeleteError = '';
+        obsoleteAllowed = false;
+        obsolete.click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(!obsoletePanel.querySelector('button') && obsoletePanel.textContent.includes('sealed chapter'),
+            'Protected obsolete path displays its blocker without offering deletion');
+        obsoleteError = 'Cannot read checkpoint metadata.';
+        obsolete.click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(!obsoletePanel.hidden && obsoletePanel.textContent.includes(obsoleteError),
+            'Preview failures stay visible next to obsolete-path controls');
+        obsoleteError = ''; obsoleteAllowed = true;
+        obsolete.click(); await new Promise(resolve=>setTimeout(resolve,20));
+        const staleConfirm = obsoletePanel.querySelector('button');
+        [...root.querySelectorAll('button')].find(item=>item.textContent.startsWith('S2 · 22222222')).click();
+        await new Promise(resolve=>setTimeout(resolve,30));
+        staleConfirm.click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(obsoletePanel.hidden && obsoleteDeletes === 2, 'Changing selection invalidates obsolete confirmation');
+        [...root.querySelectorAll('button')].find(item=>item.textContent.startsWith('S7 · 77777777')).click();
+        await new Promise(resolve=>setTimeout(resolve,30));
         for (const [width,height] of [[900,620],[1500,960]]) {
             const host = document.getElementById("host"); host.style.width = width + "px";host.style.height = height + "px";
             check(root.querySelector(".h3cm-main").getBoundingClientRect().height >= 240,
@@ -398,6 +481,36 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         root.querySelector('.h3cm-bulk-preview button').click(); await new Promise(resolve=>setTimeout(resolve,50));
         check(bulkDeletes === 2 && selectedKeys().length === 0, 'Successful bulk deletion clears selection and refreshes');
         check(node.widgets[0].value === output, 'Bulk deletion never rewrites a pinned output');
+        const branchCleanup = [...root.querySelectorAll('button')].find(item=>item.textContent === 'Delete branch clips…');
+        const branchPanel = root.querySelector('.h3cm-branch-cleanup');
+        check(branchCleanup && !branchCleanup.disabled && branchPanel.hidden,
+            'Original clips can be cleared while the Plan remains on its other branch');
+        branchCleanup.click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(branchCleanupRequests.length === 1 && branchCleanupDeletes === 0,
+            'Branch cleanup starts with a read-only preview');
+        check(!branchPanel.hidden && !branchPanel.querySelector('details').open
+            && branchPanel.getBoundingClientRect().height < 180,
+            'Branch cleanup confirmation stays visible above a collapsed large inventory');
+        const originalPlanBranch = studio.widgets.find(item=>item.name === 'working_branch_id');
+        const staleBranchConfirm = branchPanel.querySelector('button');
+        originalPlanBranch.value = 'main';
+        staleBranchConfirm.click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(branchCleanupDeletes === 0, 'Changing the Plan branch invalidates the pending deletion');
+        originalPlanBranch.value = named;
+        branchCleanup.click(); await new Promise(resolve=>setTimeout(resolve,20));
+        window.confirm = () => false;
+        branchPanel.querySelector('button').click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(branchCleanupDeletes === 0, 'Cancelling branch deletion sends no mutation');
+        window.confirm = () => true;
+        branchCleanupError = 'Branch changed; preview again.';
+        branchPanel.querySelector('button').click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(branchCleanupDeletes === 1 && branchPanel.textContent.includes(branchCleanupError)
+            && !branchPanel.querySelector('button'), 'Branch conflict stays visible and discards the confirmation');
+        branchCleanupError = '';
+        branchCleanup.click(); await new Promise(resolve=>setTimeout(resolve,20));
+        branchPanel.querySelector('button').click(); await new Promise(resolve=>setTimeout(resolve,50));
+        check(branchCleanupDeletes === 2 && branchPanel.hidden, 'Confirmed branch cleanup refreshes and closes its preview');
+        check(originalPlanBranch.value === named, 'Branch deletion never switches Plan Studio');
         const host = document.getElementById("host"); host.style.width="1850px";host.style.height="1040px";
         root.querySelector(".h3cm-main").style.gridTemplateColumns="minmax(0,1fr)";
         root.querySelector(".h3cm-detail").style.display="none";

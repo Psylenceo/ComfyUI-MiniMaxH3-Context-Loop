@@ -32475,6 +32475,27 @@ async def _working_branch_command(request):
             return web.json_response(store.listing())
         if action == "load":
             return web.json_response(store.load(selected))
+        if action in ("delete-path-preview", "delete-path"):
+            if request.method != "POST":
+                return web.json_response({"error": "Branch cleanup requires POST."}, status=405)
+            from .working_branch_cleanup import WorkingBranchCleanup
+            cleanup = WorkingBranchCleanup(_output_root(), run)
+            keep = body.get("keep_branch_id")
+            if not keep:
+                raise ValueError("Select the working branch to keep before deleting another branch's clips.")
+            if action == "delete-path-preview":
+                result = await asyncio.to_thread(cleanup.preview, selected, keep)
+            else:
+                rejection = _project_write_rejection(request, run, "delete a branch's saved clips")
+                if rejection is not None:
+                    return rejection
+                queue = getattr(getattr(PromptServer, "instance", None), "prompt_queue", None)
+                if queue is not None and queue.get_tasks_remaining():
+                    return web.json_response({"error": "Finish or stop queued generation before deleting branch clips."}, status=409)
+                result = await asyncio.to_thread(_owned_project_mutation, run,
+                    _request_project_ownership(request), "delete a branch's saved clips",
+                    cleanup.delete, selected, keep, body.get("snapshot"))
+            return web.json_response(result)
         if request.method != "POST":
             return web.json_response({"error": "Branch changes require POST."}, status=405)
         rejection = _project_write_rejection(request, run, "edit a working branch")
@@ -32505,6 +32526,8 @@ async def _working_branch_command(request):
             else:
                 raise ValueError("Unknown working branch action.")
         return web.json_response(result)
+    except CheckpointDeleteBlocked as exc:
+        return web.json_response({"error": str(exc), "preview": exc.preview}, status=409)
     except ProjectOwnershipError as exc:
         return web.json_response({"error": str(exc), "code": "h3_project_read_only"}, status=423)
     except OSError as exc:
