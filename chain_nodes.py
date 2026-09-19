@@ -28436,13 +28436,15 @@ class MiniMaxH3ChainAssemble:
 
 
 def _partial_boundary_tone_match_mode(manifest: dict[str, Any]) -> str:
-    """Keep automatic review partials faithful to Tone Carry generation."""
+    """Match explicit Tone Carry generation, never passive diagnostics."""
     if str((manifest.get("compatibility") or {}).get(
             "continuation_mode", "")) == "tone_carry_guide":
         return "auto"
+    # Segment Save can record a detected curve for any continuation mode.
+    # Its presence is not an opt-in to color processing. Only actual Tone
+    # Carry input use should preserve correction for mixed-mode history.
     if any(
-            isinstance(item.get("guide_tone_carry"), dict)
-            or bool(item.get("guide_tone_input_applied", False))
+            bool(item.get("guide_tone_input_applied", False))
             for item in manifest.get("segments", [])):
         return "auto"
     return "off"
