@@ -425,7 +425,9 @@ def _debug_dump(vae, latents):
 def progressive_sample(model, positive, negative, vae, latent_image, sampler, sigmas, seed, cfg,
                        transition_step, lowres_scale, rho, w_min, w_max, latent_upsample, latent_lifter=None,
                        highres_tiling=False, model_hires=None, *, stop_after_low=False, handoff=None,
-                       cleanup_between_stages=False):
+                       cleanup_between_stages=False, stop_after_lift=False):
+    if stop_after_lift and (stop_after_low or handoff is None):
+        raise ValueError("SelfLift lift preview requires a saved low-pass handoff and no stop_after_low.")
     _validate_schedule(sigmas, transition_step)
     if sigmas.numel() < 2:
         return latent_image
@@ -764,6 +766,13 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
     del z0_low_vae, z_lat_vae, z_pix_vae, z_lat, z_pix
     transition_timer.mark("correction_and_debug")
     log_memory("transition correction_ready", model.load_device)
+
+    if stop_after_lift:
+        # Exactly the clean endpoint used below (including mask/rho/seam
+        # correction), in native VAE space. Never re-noise or run high sampling.
+        preview = latent_format.process_out(z0_high).detach().cpu().clone()
+        transition_timer.finish()
+        return preview
 
     # Re-noise the corrected video at its prediction sigma. Euler then finishes
     # its reused interval; Radau's prediction is already at the completed boundary.

@@ -212,11 +212,12 @@ class HuntStore:
             atomic_json(self.locate(key) / "batch.json", record)
         return record
 
-    def preview_path(self, record, ordinal):
+    def preview_path(self, record, ordinal, *, upscale=False):
         run = record["run_name"]
         working = Path(working_directory(self.root / "h3_chains" / run, run, record["branch_id"]))
+        suffix = ".upscale" if upscale else ""
         return Path(resolve_path(working / "upscaled" / "selflift_seed_hunt" / "segments" /
-                                 record["id"] / ("take_%04d.mp4" % ordinal)))
+                                 record["id"] / ("take_%04d%s.mp4" % (ordinal, suffix))))
 
     def remove(self, key, expected=None):
         """Delete only this batch's scratch bundles/previews, never scene assets.
@@ -239,7 +240,7 @@ class HuntStore:
             project = self.root / "h3_chains" / run
             bundle_name = (r"(?:batch\.json|recovery\.json|source\.safetensors|take_\d{4,}\.safetensors|"
                            r"finished_\d{4,}(?:\.[0-9a-f]{64})?\.safetensors)(?:\.[0-9a-f]{32}\.tmp)?")
-            preview_name = r"take_\d{4,}(?:\.[0-9a-f]{32}\.tmp)?\.mp4"
+            preview_name = r"take_\d{4,}(?:\.upscale)?(?:\.[0-9a-f]{32}\.tmp)?\.mp4"
             files = []
             for directory, pattern in ((folder, bundle_name), (previews, preview_name)):
                 # Reject linked directories (including parents) and unknown

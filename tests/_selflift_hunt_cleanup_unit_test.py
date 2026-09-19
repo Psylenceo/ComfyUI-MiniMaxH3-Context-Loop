@@ -74,6 +74,16 @@ class CleanupTests(unittest.TestCase):
             hunt.clean_saved_hunt(self.store, record["id"], {"created_at": record["created_at"] - 1})
         self.assertTrue((folder / "source.safetensors").is_file())
 
+    def test_lifted_previews_and_interrupted_encodes_are_cleaned_with_the_hunt(self):
+        record, folder, preview = self.batch()
+        lifted = self.store.preview_path(record, 1, upscale=True)
+        lifted.write_bytes(b"lifted preview")
+        lifted.with_name("take_0002.upscale." + "f" * 32 + ".tmp.mp4").write_bytes(b"partial")
+        result = hunt.clean_saved_hunt(self.store, record["id"])
+        self.assertEqual(result["files"], 11)
+        self.assertFalse(folder.exists())
+        self.assertFalse(preview.parent.exists())
+
     def test_unknown_contents_or_symlinks_refused_before_any_deletion(self):
         record, folder, preview = self.batch()
         foreign = preview.parent / "keep.txt"

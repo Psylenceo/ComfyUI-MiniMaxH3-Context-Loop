@@ -80,7 +80,10 @@ function injectStyles() {
         .h3sh-dot:hover { background:#526078; }
         .h3sh-dot[aria-pressed="true"] { outline:2px solid #a9c2ff; outline-offset:2px; background:#6f8fd0; }
         .h3sh-dot[data-chosen="true"] { border-color:#70d39c; background:#347a54; }
-        .h3sh-approve { width:100%; border-color:#4b9d72; background:#204332; font-weight:650; }
+        .h3sh-actions { display:flex; flex-wrap:wrap; gap:6px; }
+        .h3sh-actions > button { flex:1 1 180px; }
+        .h3sh-view { color:#b9c4d9; font-size:11px; }
+        .h3sh-approve { border-color:#4b9d72; background:#204332; font-weight:650; }
         .h3sh-approve:hover { background:#2b5740; }
         .h3sh-status, .h3sh-notice { margin:0; color:#aeb5c5; white-space:pre-wrap; overflow-wrap:anywhere; }
         .h3sh-notice { color:#f2bd67; }
@@ -192,7 +195,11 @@ function mount(node) {
     const dots = text("div", "", "h3sh-dots");
     dots.setAttribute("aria-label", "Browse saved takes");
     const choose = text("button", "Use this take — finish upscale", "h3sh-button h3sh-approve");
-    candidates.append(nav, meta, dots, choose);
+    const upscale = text("button", "Preview upscale", "h3sh-button h3sh-upscale-preview");
+    const actions = text("div", "", "h3sh-actions");
+    actions.append(upscale, choose);
+    const viewLabel = text("span", "", "h3sh-view");
+    candidates.append(nav, meta, dots, viewLabel, actions);
     const empty = text("p", "Completed motion previews will appear here.", "h3sh-empty");
     const cleanupStatus = text("p", "", "h3sh-notice");
     cleanupStatus.hidden = true;
@@ -202,7 +209,8 @@ function mount(node) {
     const help = text("details", "", "h3sh-help");
     help.append(text("summary", "Silent motion preview · Help & recovery"),
         text("p", "Tiny-VAE previews show approximate motion and composition, not final detail or sound. Browse with the arrows or dots, then choose a take. The current candidate finishes and saves before the rest are skipped."),
-        text("p", "After OOM/restart, keep batch name, seed and settings fixed and queue the matching workflow again. Completed takes are reused; only the chosen take is upscaled."), recover);
+        text("p", "Preview upscale runs the configured latent lift and corrections, then the Tiny VAE, without high-resolution denoising or approving the take. Inspect lift artifacts and switch back to the low preview. A clean preview does not guarantee a clean final render."),
+        text("p", "After OOM/restart, keep batch name, seed and settings fixed and queue the matching workflow in resume mode. Completed takes and upscale previews are reused; only the chosen take runs the high-resolution finishing steps."), recover);
     toolbar.append(select, reload, clean);
     root.append(head, gateNotice, toolbar, player, empty, mediaStatus, candidates, status, cleanupStatus, help);
     let optionsKey = "";
@@ -210,6 +218,7 @@ function mount(node) {
     let previewKey = "";
     let cleaning = false;
     let choosing = false;
+    let requesting = false;
     let currentBatch = null;
     let currentTake = null;
     function clearVideo() {
@@ -241,8 +250,8 @@ function mount(node) {
         select.value = key;
         const batch = batches.find(b => b.id === key);
         currentBatch = batch;
-        clean.disabled = cleaning || choosing || !batch || batch.active;
-        select.disabled = cleaning || choosing;
+        clean.disabled = cleaning || choosing || requesting || !batch || batch.active;
+        select.disabled = cleaning || choosing || requesting;
         if (!batch) {
             recover.hidden = true;
             clearVideo(); dots.replaceChildren(); dotsKey = "";
@@ -260,12 +269,14 @@ function mount(node) {
         recover.href = api.apiURL(`/h3/selflift/workflow?id=${encodeURIComponent(key)}`);
         badge.textContent = `${batch.low_steps} low + ${batch.high_steps} high steps`;
         const hunting = batch.active && ["low", "preview"].includes(batch.phase);
+        const previewPending = batch.active && batch.upscale_request != null;
         const automatic = batch.review_enabled === false;
         status.textContent = batch.error ? `Paused — ${batch.error}`
             : batch.active && automatic ? batch.phase === "high"
                 ? `Review gate off · upscaling take ${batch.selected} automatically.`
                 : "Review gate off · saving one low-resolution take, then upscaling automatically."
             : hunting ? `Generating take ${batch.current || batch.candidates.length + 1} · ${batch.candidates.length} ready to review.`
+            : batch.active && batch.phase === "upscale_preview" ? `Previewing take ${batch.upscale_request}'s latent upscale · no high denoising or approval.`
             : batch.active && batch.phase === "high" ? `Upscaling take ${batch.selected}. You can still browse saved previews.`
             : batch.active ? "Choose a take to finish its upscale."
             : batch.phase === "finished" ? "Upscale finished. Saved takes are available for another version."
@@ -273,6 +284,7 @@ function mount(node) {
         if (hunting && batch.selected && !automatic) {
             status.textContent += ` · Finishing and saving take ${batch.current}; then upscale take ${batch.selected} and skip remaining candidates.`;
         }
+        if (hunting && previewPending) status.textContent += ` · Upscale preview for take ${batch.upscale_request} is queued after the current candidate is saved.`;
         const remembered = node.properties.h3_selflift_preview;
         let ordinal = remembered?.id === key && remembered.created_at === batch.created_at
             ? remembered.ordinal : batch.selected;
@@ -285,7 +297,14 @@ function mount(node) {
         empty.textContent = take ? "No Tiny-VAE preview was generated with the review gate off. The saved take can resume without a preview."
             : "Completed motion previews will appear here.";
         if (!take) { clearVideo(); return; }
-        node.properties.h3_selflift_preview = {id:key, created_at:batch.created_at, ordinal:take.ordinal};
+        const wantsUpscale = remembered?.id === key && remembered.created_at === batch.created_at
+            && remembered.ordinal === take.ordinal && remembered.upscale === true;
+        const showingUpscale = wantsUpscale && Boolean(take.upscale_preview);
+        const mediaPath = showingUpscale ? take.upscale_preview : take.preview;
+        node.properties.h3_selflift_preview = {id:key, created_at:batch.created_at, ordinal:take.ordinal, upscale:wantsUpscale};
+        viewLabel.textContent = showingUpscale ? "Upscaled latent · Tiny VAE · before high denoising"
+            : "Low-resolution latent · Tiny VAE";
+        if (take.upscale_error) status.textContent += `\nUpscale preview failed — ${take.upscale_error}. The saved low take is intact; retry the preview.`;
         const position = batch.candidates.indexOf(take);
         takeTitle.textContent = `Take ${take.ordinal} · ${position + 1} of ${batch.candidates.length} ready`;
         seedLabel.textContent = `Seed ${take.seed}`;
@@ -294,15 +313,15 @@ function mount(node) {
         next.disabled = position === batch.candidates.length - 1;
         // Only change the source when the viewed take changes. New candidates,
         // approvals and status polls must not reset the user's playback.
-        const sourceKey = JSON.stringify([key, batch.created_at, take.ordinal, take.preview]);
+        const sourceKey = JSON.stringify([key, batch.created_at, take.ordinal, mediaPath]);
         if (!hasPreview) {
             clearVideo();
         } else if (sourceKey !== previewKey) {
             clearVideo();
             previewKey = sourceKey;
-            const slash = take.preview.lastIndexOf("/");
-            const query = new URLSearchParams({ filename:take.preview.slice(slash+1),
-                subfolder:take.preview.slice(0, slash), type:"output", h3_hunt_created:String(batch.created_at ?? "") });
+            const slash = mediaPath.lastIndexOf("/");
+            const query = new URLSearchParams({ filename:mediaPath.slice(slash+1),
+                subfolder:mediaPath.slice(0, slash), type:"output", h3_hunt_created:String(batch.created_at ?? "") });
             video.src = api.apiURL(`/view?${query}`);
             video.load();
         }
@@ -323,7 +342,16 @@ function mount(node) {
             dot.setAttribute("aria-pressed", String(Number(dot.dataset.ordinal) === take.ordinal));
             dot.dataset.chosen = String(Number(dot.dataset.ordinal) === batch.selected);
         }
-        choose.disabled = cleaning || choosing || !hasPreview || (batch.active && (batch.phase === "high" || automatic));
+        upscale.textContent = showingUpscale ? "Show low preview" : take.upscale_preview ? "Show upscale preview"
+            : previewPending && batch.upscale_request === take.ordinal ? "Preparing upscale preview…" : "Preview upscale";
+        upscale.disabled = cleaning || choosing || requesting || !hasPreview || (!take.upscale_preview &&
+            (!batch.active || automatic || batch.selected != null || previewPending ||
+                !["low", "preview", "waiting"].includes(batch.phase)));
+        upscale.title = take.upscale_preview ? "Switch between the saved low and upscale previews; no generation."
+            : !batch.active ? "Queue the matching workflow in resume mode to preview its upscale."
+            : "Run the latent lift and Tiny VAE only. Keep the gate open; do not approve or run high denoising.";
+        choose.disabled = cleaning || choosing || requesting || !hasPreview || previewPending ||
+            (batch.active && (batch.phase === "high" || automatic));
         choose.textContent = !hasPreview ? "Automatic take — no review required"
             : hunting ? `Use take ${take.ordinal} now` : `Use take ${take.ordinal} — finish upscale`;
         choose.title = hunting ? "Finish and save the current candidate, skip the rest, then upscale this take."
@@ -340,6 +368,28 @@ function mount(node) {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault(); move(event.key === "ArrowLeft" ? -1 : 1);
     });
+    upscale.onclick = async () => {
+        if (!currentBatch || !currentTake || upscale.disabled) return;
+        if (currentTake.upscale_preview) {
+            node.properties.h3_selflift_preview.upscale = !node.properties.h3_selflift_preview.upscale;
+            panel.render(); return;
+        }
+        const key = currentBatch.id, ordinal = currentTake.ordinal, created_at = currentBatch.created_at;
+        requesting = true; panel.render();
+        let errorMessage = "";
+        try {
+            const response = await api.fetchApi("/h3/selflift/upscale-preview", {method:"POST",
+                headers:{"Content-Type":"application/json"}, body:JSON.stringify({id:key, ordinal, created_at})});
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || "Could not request upscale preview");
+            // Do not jump to another take if the user browsed while requesting.
+            const viewed = node.properties.h3_selflift_preview;
+            if (viewed?.id === key && viewed.created_at === created_at && viewed.ordinal === ordinal) viewed.upscale = true;
+            await refresh();
+        } catch (error) { errorMessage = error.message; }
+        finally { requesting = false; panel.render(); }
+        if (errorMessage) status.textContent = errorMessage;
+    };
     choose.onclick = async () => {
         if (!currentBatch || !currentTake || choose.disabled) return;
         const key = currentBatch.id, ordinal = currentTake.ordinal;
@@ -360,7 +410,7 @@ function mount(node) {
     reload.onclick = async () => { await refresh(); if (video.error && previewKey) video.load(); };
     clean.onclick = async () => {
         const batch = batches.find(b => b.id === select.value);
-        if (!batch || batch.active || cleaning || choosing) return;
+        if (!batch || batch.active || cleaning || choosing || requesting) return;
         if (!window.confirm(`Clean all saved takes for ${batch.run_name} · S${batch.scene} ${batch.scene_name} · ${batch.batch_name}?\n\nThis permanently deletes only this hunt's temporary latents, previews and recovery files. You cannot resume or upscale another take from it afterward. Normal saved scene videos/checkpoints are kept.`)) return;
         cleaning = true; panel.render();
         try {

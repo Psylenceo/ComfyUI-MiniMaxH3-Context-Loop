@@ -96,6 +96,8 @@ def selected_state(state, seed):
 
 def approve(store, key, ordinal):
     def change(record):
+        if record.get("upscale_request") is not None and key in _ACTIVE:
+            raise ValueError("Wait for the upscale preview, then choose a take to finish.")
         if record.get("phase") == "high" and key in _ACTIVE:
             raise ValueError("The selected take is already being upscaled; wait for it to finish.")
         if record.get("review_enabled", True) is False and key in _ACTIVE:
@@ -109,6 +111,29 @@ def approve(store, key, ordinal):
     with _ACTIVE_LOCK:
         if key in _CLEANING:
             raise ValueError("This saved hunt is being cleaned.")
+        return store.update(key, change)
+
+
+def request_upscale_preview(store, key, ordinal, created_at):
+    """Request only: GPU work stays on the executing hunt's serialized worker."""
+    def change(record):
+        if record.get("created_at") != created_at:
+            raise ValueError("This saved hunt changed; refresh before previewing it.")
+        if (record.get("review_enabled", True) is False or record.get("selected") is not None
+                or record.get("phase") not in ("low", "preview", "waiting", "upscale_preview")):
+            raise ValueError("Preview an unapproved take while its review gate is running.")
+        take = next((v for v in record["candidates"] if v["ordinal"] == ordinal), None)
+        if take is None or not take.get("preview"):
+            raise ValueError("Choose a completed low-resolution preview first.")
+        if not (store.locate(key) / take["checkpoint"]).is_file():
+            raise ValueError("This take's middle-pass file is missing.")
+        if record.get("upscale_request") not in (None, ordinal):
+            raise ValueError("Wait for the current upscale preview to finish.")
+        record["upscale_request"] = ordinal
+        take.pop("upscale_error", None)
+    with _ACTIVE_LOCK:
+        if key not in _ACTIVE or key in _CLEANING:
+            raise ValueError("Queue the matching workflow in resume mode to preview its upscale.")
         return store.update(key, change)
 
 
@@ -308,7 +333,9 @@ class MiniMaxH3SelfLiftSeedHunt:
             await _work(atomic_json, folder / "recovery.json", {"plan": plan, "contract": contract,
                 "finishing_recipe": finishing_recipe, "finishing_id": finishing_id,
                 "prompt": recovery_prompt(prompt), "workflow": (extra_pnginfo or {}).get("workflow")})
-            await _work(update, finishing_id=finishing_id)
+            # A stale request left by interruption is not an approval, nor a
+            # reason to repeat GPU work automatically on the next queue.
+            await _work(update, finishing_id=finishing_id, upscale_request=None)
             source_path = folder / "source.safetensors"
             if not source_path.is_file():
                 prepared = dict(latent)
@@ -332,12 +359,57 @@ class MiniMaxH3SelfLiftSeedHunt:
                 with torch.inference_mode():
                     staged = _stage_model(model, source["latent"], sigmas)
                     staged_hires = (_stage_model(model_hires, source["latent"], sigmas, continuity_model=model)
-                                    if model_hires is not None and not options.get("stop_after_low") else None)
+                                    if model_hires is not None and not options.get("stop_after_low")
+                                    and not options.get("stop_after_lift") else None)
                     return progressive_sample(staged, source["positive"], source["negative"], vae,
                         source["latent"], sampler, sigmas, take_seed, float(cfg), total-high,
                         controls["lowres_scale"], controls["rho"], controls["w_min"], controls["w_max"],
                         "nearest", latent_lifter=lift, model_hires=staged_hires,
                         cleanup_between_stages=cleanup, **options)
+
+            async def preview_requested():
+                # Called only between low candidates or while waiting at the
+                # gate: never concurrently with low/high sampling or cleanup.
+                pending = await _work(store.read, key)
+                if pending.get("upscale_request") is None or pending.get("selected") is not None:
+                    return
+                def claim(r):
+                    if r.get("upscale_request") is not None and r.get("selected") is None:
+                        r.update(phase="upscale_preview", current=r["upscale_request"])
+                pending = await _work(store.update, key, claim)
+                ordinal = pending.get("upscale_request")
+                if ordinal is None or pending.get("selected") is not None:
+                    return
+                notify()
+                take = next(v for v in pending["candidates"] if v["ordinal"] == ordinal)
+                path = store.preview_path(pending, ordinal, upscale=True)
+                error = None
+                try:
+                    if not path.is_file():
+                        middle = await _work(load_bundle, folder / take["checkpoint"])
+                        lifted = await _work(run, int(take["seed"]), handoff=middle, stop_after_lift=True)
+                        del middle
+                        raw = int(shot["raw_frames"])
+                        trim = max(0, raw - int(shot.get("delivered_frames", raw)))
+                        try:
+                            await _work(save_preview, lifted, path, tiny_vae, raw, trim)
+                        finally:
+                            del lifted
+                except Exception as exc:
+                    # An optional preview failure must not lose the low take or
+                    # close the gate. Cancellation/Comfy interruption propagate.
+                    error = str(exc)[:500]
+                    logging.warning("[SelfLift] take %d upscale preview failed: %s", ordinal, error)
+                def complete(r):
+                    candidate = next(v for v in r["candidates"] if v["ordinal"] == ordinal)
+                    if error is None:
+                        candidate["upscale_preview"] = path.relative_to(store.root).as_posix()
+                        candidate.pop("upscale_error", None)
+                    else:
+                        candidate["upscale_error"] = error
+                    r.update(upscale_request=None, phase="waiting", current=None)
+                await _work(store.update, key, complete)
+                notify()
 
             # An already approved batch jumps directly to the selected high pass.
             if record.get("selected") is None:
@@ -346,6 +418,7 @@ class MiniMaxH3SelfLiftSeedHunt:
                 count = int(candidate_count) if review_enabled else 1
                 for ordinal in range(1, count + 1):
                     throw_exception_if_processing_interrupted()
+                    await preview_requested()
                     # Check approval and claim the next candidate under the same
                     # lock. A choice made after this claim waits for this candidate
                     # to be saved; a choice made before it starts no further work.
@@ -375,7 +448,8 @@ class MiniMaxH3SelfLiftSeedHunt:
                     take = {"ordinal": ordinal, "seed": str(take_seed), "checkpoint": checkpoint,
                             "preview": preview.relative_to(store.root).as_posix() if preview.is_file() else None}
                     def append(r):
-                        r["candidates"] = [v for v in r["candidates"] if v["ordinal"] != ordinal] + [take]
+                        previous = next((v for v in r["candidates"] if v["ordinal"] == ordinal), {})
+                        r["candidates"] = [v for v in r["candidates"] if v["ordinal"] != ordinal] + [{**previous, **take}]
                         if not review_enabled and r.get("selected") is None:
                             r["selected"] = ordinal
                     record = await _work(store.update, key, append)
@@ -387,6 +461,7 @@ class MiniMaxH3SelfLiftSeedHunt:
                     notify()
             while True:
                 throw_exception_if_processing_interrupted()
+                await preview_requested()
                 record = await _work(store.read, key)
                 if record.get("selected") is not None:
                     # Claim the choice under the same lock as approval so a
@@ -454,7 +529,8 @@ def register_routes():
         rows = await asyncio.to_thread(store.list)
         # No prompts/conditioning, media probing, or tensor reads on UI requests.
         fields = ("id", "run_name", "branch_id", "scene", "scene_name", "batch_name", "created_at",
-                  "phase", "current", "selected", "candidates", "error", "low_steps", "high_steps", "review_enabled")
+                  "phase", "current", "selected", "candidates", "error", "low_steps", "high_steps", "review_enabled",
+                  "upscale_request")
         return web.json_response({"batches": [dict({k: row.get(k) for k in fields},
             active=row["id"] in _ACTIVE) for row in rows]}, headers={"Cache-Control": "no-store"})
 
@@ -483,6 +559,17 @@ def register_routes():
         except (ValueError, FileNotFoundError) as exc:
             return web.json_response({"error": str(exc)}, status=400)
 
+    async def upscale_preview(request):
+        try:
+            body = await request.json()
+            if type(body.get("ordinal")) is not int or "created_at" not in body:
+                raise ValueError("Choose a saved take to preview.")
+            await asyncio.to_thread(request_upscale_preview, HuntStore(folder_paths.get_output_directory()),
+                str(body.get("id", "")), body["ordinal"], body["created_at"])
+            return web.json_response({"ok": True})
+        except (OSError, ValueError, KeyError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
     async def clean(request):
         try:
             body = await request.json()
@@ -496,5 +583,6 @@ def register_routes():
             return web.json_response({"error": str(exc)}, status=400)
     routes.get("/h3/selflift/hunts")(listing)
     routes.post("/h3/selflift/choose")(choose)
+    routes.post("/h3/selflift/upscale-preview")(upscale_preview)
     routes.get("/h3/selflift/workflow")(workflow)
     routes.post("/h3/selflift/clean")(clean)

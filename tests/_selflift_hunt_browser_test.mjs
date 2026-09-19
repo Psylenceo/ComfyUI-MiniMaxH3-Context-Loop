@@ -117,6 +117,13 @@ async function browserChecks() {
         node.setSize([620, 900]);
         check(root.offsetHeight === 580, "Panel also follows a deliberate shrink");
         check(root.scrollWidth <= root.clientWidth, "No horizontal scrollbar after narrowing");
+        const previewButton = root.querySelector('.h3sh-upscale-preview');
+        const approvalButton = root.querySelector('.h3sh-approve');
+        check(previewButton.textContent === "Preview upscale" && !previewButton.disabled,
+            "An unapproved take has an explicit upscale-preview action");
+        const previewBounds = previewButton.getBoundingClientRect(), approvalBounds = approvalButton.getBoundingClientRect();
+        check(Math.abs(previewBounds.top - approvalBounds.top) < 1 && approvalBounds.left - previewBounds.right <= 7,
+            "Preview and approval buttons stay adjacent on one row at 620px");
         batch.candidates = takes(12); node._h3SelfLiftHunt.render();
         check(root.querySelectorAll("video").length === 1, "Twelve takes use one focused player");
         check(root.querySelectorAll(".h3sh-dot").length === 12, "Every take has a navigation dot");

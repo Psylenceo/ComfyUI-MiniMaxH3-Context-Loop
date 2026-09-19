@@ -13,10 +13,12 @@ workflows and the ordinary Review Gate are unchanged.
    and the temporal TAEH3 format supported by KJNodes both work.
 3. Set candidate count and a batch name. Keep the base seed **fixed**. Queue.
    Candidate seeds are base seed, base seed + 1, etc., wrapping at uint64.
-4. Browse the low-pass videos with the Review Gate-style arrows or dots, then
+4. Browse the low-pass videos with the Review Gate-style arrows or dots.
+   Optionally click **Preview upscale** to inspect the lifted latent using the
+   Tiny VAE before spending high-resolution denoising steps. Then
    click **Use take — finish upscale**. The single player fills the node; drag
    its lower handle to resize it, or double-click the handle to restore auto-fit.
-   Only that candidate gets the selected lift and remaining high-resolution steps.
+   Only the approved candidate gets the remaining high-resolution steps.
    These are silent, approximate motion/composition previews, not final-detail
    or audio-quality previews. Flat 2D TAE frames repeat at H3's token timing;
    playback duration is correct, but motion has fewer distinct frames.
@@ -24,6 +26,29 @@ workflows and the ordinary Review Gate are unchanged.
    and Loop End. This records the chosen seed and carries it to later scenes.
    The example already does this. Keep the final Review Gate's candidate count
    at **1**; it reviews the finished result, not another set of expensive hunts.
+
+## Preview the latent upscale before approval
+
+**Preview upscale** sits beside **Use take — finish upscale**. It reuses the
+saved low pass, applies the configured upscaler and lift corrections (including
+`rho` when enabled), and decodes a silent full-resolution Tiny-VAE preview.
+It does **not** run the high denoiser, change the seed, select the candidate,
+or release the gate. With `rho=0`, it does not need a full-VAE round trip.
+
+- Requests made while another low candidate is running wait for it to finish
+  and save. GPU work is serialized inside the executing hunt, not an HTTP handler.
+- Use **Show low preview** / **Show upscale preview** to compare the two saved
+  videos. Reopening the upscale preview does not repeat the lift or decode.
+- Wait for the preview to finish before approving. A failed preview keeps the
+  gate open and the low pass intact, with a retry button and error message.
+- To make a new upscale preview after interruption/restart, queue the matching
+  workflow in **resume** mode. Existing previews remain viewable while stopped.
+- Hunt cleanup includes these extra temporary previews; normal saved scenes
+  are unaffected.
+
+This is an artifact-screening aid, not a final-quality guarantee: the tiny
+decoder is approximate, and artifacts can also appear during high denoising.
+No upscale-preview computation happens unless explicitly requested.
 
 ## Latent upscaler choices
 

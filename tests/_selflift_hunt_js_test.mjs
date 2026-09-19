@@ -19,7 +19,7 @@ class Element {
     getAttribute(name) { return this[name]; }
 }
 let extension, nextTimer=0, gets=0, confirmClean=false, cleanError=false, removedBatch=false;
-const timers = new Map(), events = new Map(), posts=[];
+const timers = new Map(), events = new Map(), posts=[], previewPosts=[];
 const batch = { id:"a".repeat(64), run_name:"test", scene:1, scene_name:"walk", batch_name:"hunt_1",
     created_at:123,
     phase:"waiting", active:true, selected:null, low_steps:20, high_steps:5,
@@ -32,6 +32,10 @@ const app = {graph:{}, registerExtension:value => {extension=value;}, queuePromp
 const api = { apiURL:path=>`/proxy${path}`, addEventListener:(name,cb)=>events.set(name,cb),
     async fetchApi(path, options={}) {
         if (options.method === "POST") {
+            if (path === "/h3/selflift/upscale-preview") {
+                const body=JSON.parse(options.body); previewPosts.push(body); batch.upscale_request=body.ordinal;
+                return {ok:true,json:async()=>({ok:true})};
+            }
             if (path === "/h3/selflift/clean") {
                 if (cleanError) return {ok:false,json:async()=>({error:"Stop the running hunt"})};
                 const body=JSON.parse(options.body); posts.push(body); removedBatch=true;
@@ -103,6 +107,38 @@ assert.deepEqual(posts,[],"browsing is not approval");
 assert.ok(videos[0].src.includes("take_2.mp4"));
 videos[0].currentTime=2.5;
 const button=part(node,"approve");
+const upscale=part(node,"upscale-preview");
+assert.equal(upscale.disabled,false);
+assert.equal(upscale.textContent,"Preview upscale");
+await upscale.onclick();
+assert.deepEqual(previewPosts,[{id:batch.id,ordinal:2,created_at:123}]);
+assert.deepEqual(posts,[],"requesting a lift preview never approves or autoqueues");
+assert.equal(batch.selected,null);
+assert.equal(button.disabled,true,"approval waits until optional preview completes");
+assert.equal(upscale.disabled,true,"only one preview request at a time");
+assert.equal(videos[0].currentTime,2.5,"request metadata does not restart the low preview");
+batch.phase="upscale_preview";await tick();
+assert.ok(part(node,"status").textContent.includes("no high denoising or approval"));
+batch.candidates[1].upscale_preview="h3_chains/test/processing/take_2.upscale.mp4";
+batch.upscale_request=null;batch.phase="waiting";await tick();
+assert.ok(videos[0].src.includes("take_2.upscale.mp4"),"completed requested preview opens in the same player");
+assert.equal(upscale.textContent,"Show low preview");
+assert.ok(part(node,"view").textContent.includes("before high denoising"));
+videos[0].currentTime=1.2;const upscaleLoads=videos[0].loads;await tick();
+assert.equal(videos[0].loads,upscaleLoads);
+assert.equal(videos[0].currentTime,1.2,"polling does not restart the upscaled preview");
+await upscale.onclick();
+assert.ok(videos[0].src.includes("take_2.mp4"));
+assert.equal(upscale.textContent,"Show upscale preview");
+await upscale.onclick();
+assert.equal(previewPosts.length,1,"cached preview switching performs no generation request");
+batch.active=false;await tick();
+assert.equal(upscale.disabled,false,"saved upscaled preview is viewable while stopped");
+part(node,"dots").children[0].onclick();
+assert.equal(upscale.disabled,true,"new preview requires a running hunt");
+assert.ok(upscale.title.includes("resume mode"));
+part(node,"dots").children[1].onclick();
+batch.active=true;await tick();videos[0].currentTime=2.5;
 batch.phase="low";batch.current=4;await tick();
 assert.equal(button.disabled,false,"completed takes stay selectable while low sampling is busy");
 assert.equal(button.textContent,"Use take 2 now");
