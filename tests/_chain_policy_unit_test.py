@@ -235,6 +235,39 @@ assert lora_plan["shots"][1]["lora_route"] == "a"
 assert lora_plan["shots"][2]["lora_route"] == "z"
 assert chain._effective_editor_plan(lora_plan)["shots"][1][
     "lora_route"] == "a"
+
+# A scene's plain-language basic_prompt draft must survive round-tripping
+# through _effective_editor_plan, since that is what gets embedded back into
+# a saved/archived workflow's Plan JSON - dropping it there wipes out an
+# unexecuted scene's basic draft the moment the user reloads that checkpoint.
+basic_prompt_plan = chain._normalize_plan(
+    json.dumps({"shots": [
+        {"id": "with_draft", "prompt": "Formatted H3 prompt.", "length": 73,
+         "basic_prompt": "A plain-language idea for later."},
+        {"id": "without_draft", "prompt": "Other scene.", "length": 73},
+    ]}),
+    "basic-prompt-test", 64, 64, 22, "video", "head", "disabled",
+    "generated_audio", 22, 3.0, 8, 7, 18, "model-stack", 0,
+    "guide")
+effective_basic_prompt_plan = chain._effective_editor_plan(basic_prompt_plan)
+assert effective_basic_prompt_plan["shots"][0]["basic_prompt"] == (
+    "A plain-language idea for later.")
+assert "basic_prompt" not in effective_basic_prompt_plan["shots"][1]
+assert chain._public_segment(chain._prompt_fields(basic_prompt_plan, 1))[
+    "basic_prompt"] == "A plain-language idea for later."
+other_basic = json.loads(json.dumps(basic_prompt_plan))
+other_basic["shots"][0]["basic_prompt"] = "Different authoring draft."
+assert chain._history_hash(other_basic, 1) == chain._history_hash(basic_prompt_plan, 1)
+retry_basic = chain._plan_with_review_revision(
+    basic_prompt_plan, 1, "Formatted H3 prompt.",
+    basic_prompt_plan["shots"][0]["seed"], basic_prompt="Retry draft.")
+assert retry_basic["shots"][0]["basic_prompt"] == "Retry draft."
+cleared_basic = chain._plan_with_review_revision(
+    retry_basic, 1, "Formatted H3 prompt.",
+    basic_prompt_plan["shots"][0]["seed"], basic_prompt="")
+assert "basic_prompt" not in cleared_basic["shots"][0]
+assert basic_prompt_plan["shots"][0]["basic_prompt"] == "A plain-language idea for later."
+
 assert chain._shot_lora_route(lora_plan["shots"][0]) == "base"
 try:
     chain._shot_lora_route({"lora_route": "hero"})

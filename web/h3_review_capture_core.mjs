@@ -1,5 +1,5 @@
 // Frame capture must never guess a project from an unrelated node on canvas.
-const CAROUSEL = "MiniMaxH3ProjectAssetManager";
+const CAROUSELS = new Set(["MiniMaxH3ProjectAssetManager", "MiniMaxH3ProjectAssetTree"]);
 const PLANS = new Set(["MiniMaxH3ChainPlan", "MiniMaxH3ChainPlanModern"]);
 const type = (node) => node?.comfyClass ?? node?.type ?? node?.constructor?.type;
 
@@ -7,7 +7,7 @@ export function captureCarousels(graph, seen = new Set()) {
     if (!graph || seen.has(graph)) return [];
     seen.add(graph);
     return (graph._nodes ?? []).flatMap((node) => [
-        ...(type(node) === CAROUSEL ? [node] : []),
+        ...(CAROUSELS.has(type(node)) ? [node] : []),
         ...captureCarousels(node.subgraph, seen),
     ]);
 }
@@ -23,7 +23,7 @@ export function captureTargetProject(start) {
         const node = queue.shift();
         if (!node || seen.has(node)) continue;
         seen.add(node);
-        if (type(node) === CAROUSEL) carousels.push(node);
+        if (CAROUSELS.has(type(node))) carousels.push(node);
         if (PLANS.has(type(node))) plans.push(node);
         for (const input of node.inputs ?? []) {
             const link = node.graph?.links?.[input.link];

@@ -75,6 +75,8 @@ assert.equal(missingFetches,0);
 const manager={comfyClass:"MiniMaxH3ProjectAssetManager",widgets:[{name:"run_name",value:"actual-run"}]};
 const plan={widgets:[{name:"run_name",value:"stale-plan-name"}],inputs:[{name:"project_assets",link:1}],graph:{links:{1:{origin_id:2}},getNodeById:()=>manager}};
 assert.equal(authoritativeRunName(plan),"actual-run");
+manager.comfyClass = "MiniMaxH3ProjectAssetTree";
+assert.equal(authoritativeRunName(plan),"actual-run", "Tree node owns the Run during loop continuation too");
 assert.equal(authoritativeRunName({widgets:[{name:"run_name",value:"plain-run"}]}),"plain-run");
 const emptyManager={comfyClass:"MiniMaxH3ProjectAssetManager",widgets:[{name:"run_name",value:""}]};
 const emptyPlan={widgets:[{name:"run_name",value:"fallback-run"}],inputs:[{name:"project_assets",link:2}],graph:{links:{2:{origin_id:9}},getNodeById:id=>id===9?emptyManager:null}};

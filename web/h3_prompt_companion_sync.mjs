@@ -61,10 +61,69 @@ export function connectedPlanStudios(node) {
     );
 }
 
+function editedFieldsSet(shot) {
+    if (!(shot.__h3EditedFields instanceof Set)) {
+        Object.defineProperty(shot, "__h3EditedFields", {
+            value: new Set(), enumerable: false, configurable: true, writable: true,
+        });
+    }
+    return shot.__h3EditedFields;
+}
+
+/** Mark a single field of an in-memory shot as having been edited locally
+ * since the last successful rebase. Stored as a non-enumerable property so
+ * it never leaks into the Plan JSON that gets serialized into the widget.
+ * Call this from every input handler that writes `shot.prompt` or
+ * `shot.basic_prompt` so rebaseScenePrompt can tell which field actually
+ * changed here, instead of assuming both did. */
+export function markShotFieldEdited(shot, field) {
+    if (!shot || typeof shot !== "object") return;
+    editedFieldsSet(shot).add(field);
+}
+
+/** Ensure a shot carries edited-field tracking without marking any field
+ * touched, leaving any already-recorded touches untouched. rebaseScenePrompt
+ * treats a shot with NO tracking at all as "assume both fields may have
+ * been locally edited" (the right default for an editor about to write its
+ * own change, via rebaseActivePromptOntoLivePlan). A companion receiver
+ * adopting an external push is the opposite case: it has not edited
+ * anything itself, and must not let a field it never touched silently keep
+ * clobbering whatever the live Plan carries. Call this before rebasing in a
+ * receiver, so an untouched field correctly adopts the live value while any
+ * field genuinely mid-edit (already marked) still wins. */
+export function beginTrackingShotFields(shot) {
+    if (!shot || typeof shot !== "object") return;
+    editedFieldsSet(shot);
+}
+
+/** Retire edit tracking for a shot once its current field values have
+ * actually been serialized into the Plan JSON. markShotFieldEdited records
+ * intent to write; writePlan/commitPlan-style callers only ever rebase (and
+ * so only ever clear that tracking, inside rebaseScenePrompt) when the live
+ * Plan has diverged since the last write. An ordinary successful write with
+ * no such divergence never rebases, so without this call a field's "edited"
+ * mark would outlive the write itself - a later external push for that same
+ * field would then be wrongly treated as clobbering an in-progress local
+ * edit, and this shot's own stale value would be kept instead. Call this
+ * synchronously, right after the shot's fields are read into the Plan JSON
+ * that gets written to the widget, so nothing pending can be lost. */
+export function commitShotFields(shot) {
+    if (!shot || typeof shot !== "object") return;
+    if (shot.__h3EditedFields instanceof Set) shot.__h3EditedFields.clear();
+}
+
 /** Merge a dedicated editor's active prompt onto a freshly parsed Plan while
  * preserving the local Plan and active-shot object identities. DOM input
  * handlers commonly close over that shot object; replacing it after the first
- * keystroke would make later keystrokes write into a detached object. */
+ * keystroke would make later keystrokes write into a detached object.
+ *
+ * Only fields recorded via markShotFieldEdited are copied onto the live
+ * shot; an untouched field is left as the live Plan has it, so an edit made
+ * to one field (e.g. the H3 prompt) can never clobber a newer, concurrent
+ * edit made to the other field (e.g. a basic draft saved from Plan Studio)
+ * that this editor never touched. When no edited-field tracking is present
+ * at all (a caller that predates this tracking), both fields are copied as
+ * before. */
 export function rebaseScenePrompt(localPlan, livePlan, sceneIndex) {
     if (!Array.isArray(localPlan?.shots) || !Array.isArray(livePlan?.shots)) return -1;
     const localIndex = Math.max(0, Math.trunc(Number(sceneIndex) || 0));
@@ -77,11 +136,19 @@ export function rebaseScenePrompt(localPlan, livePlan, sceneIndex) {
     if (targetIndex < 0 || targetIndex >= livePlan.shots.length) return -1;
 
     const targetShot = livePlan.shots[targetIndex];
-    targetShot.prompt = Array.isArray(editedShot.prompt)
-        ? [...editedShot.prompt] : editedShot.prompt;
+    const touched = editedShot.__h3EditedFields instanceof Set
+        ? editedShot.__h3EditedFields : null;
+    if (!touched || touched.has("prompt")) {
+        targetShot.prompt = Array.isArray(editedShot.prompt)
+            ? [...editedShot.prompt] : editedShot.prompt;
+    }
+    if ((!touched || touched.has("basic_prompt")) && "basic_prompt" in editedShot) {
+        targetShot.basic_prompt = editedShot.basic_prompt;
+    }
     for (const key of Object.keys(editedShot)) delete editedShot[key];
     Object.assign(editedShot, targetShot);
     livePlan.shots[targetIndex] = editedShot;
+    if (touched) touched.clear();
 
     for (const key of Object.keys(localPlan)) delete localPlan[key];
     Object.assign(localPlan, livePlan);
@@ -125,6 +192,7 @@ export function planHasNonPromptChanges(previousPlan, nextPlan) {
                 }
                 const copy = {...shot};
                 delete copy.prompt;
+                delete copy.basic_prompt;
                 return copy;
             }) : plan.shots,
         };
@@ -145,6 +213,28 @@ export function publishCompanionScene(source, planNode, sceneIndex) {
             if (apply.call(candidate, planNode, index, source) !== false) delivered += 1;
         } catch (_error) {
             // A companion UI must never break navigation in the source node.
+        }
+    }
+    return delivered;
+}
+
+/** Publish one already-written basic (pre-optimization) prompt to every UI
+ * bound to that exact Plan, mirroring publishCompanionPrompt. Kept as a
+ * separate broadcast (not folded into publishCompanionPrompt) since the two
+ * fields are edited and consumed independently - only Rich Scene Prompt
+ * Editor's Optimize action ever turns one into the other. */
+export function publishCompanionBasicPrompt(source, planNode, sceneIndex, basicPrompt) {
+    const index = Math.max(0, Math.trunc(Number(sceneIndex) || 0));
+    const text = String(basicPrompt ?? "").replace(/\r\n?/g, "\n");
+    let delivered = 0;
+    for (const candidate of allGraphNodes(graphRoot(source))) {
+        if (!candidate || candidate === source) continue;
+        const apply = candidate._h3PromptCompanionSetBasicPrompt;
+        if (typeof apply !== "function") continue;
+        try {
+            if (apply.call(candidate, planNode, index, text, source) !== false) delivered += 1;
+        } catch (_error) {
+            // A companion UI must not make a Plan write fail.
         }
     }
     return delivered;

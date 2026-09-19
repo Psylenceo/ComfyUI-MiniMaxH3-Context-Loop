@@ -77,7 +77,7 @@ import {
     convertTaggedPictureReference,
     taggedPictureReferenceMode,
     taggedPictureReferenceToken,
-} from "./h3_reference_preview_core.mjs?v=0.7.25";
+} from "./h3_reference_preview_core.mjs?v=0.7.26";
 import {
     applySceneAudioOverride,
     applySceneLipSync,
@@ -129,7 +129,7 @@ import {
     studioWaveformIntervalSamples,
     timedLyricAtSecond,
 } from "./h3_chain_plan_studio_core.mjs?v=editorial-rename-1";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.2";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.26";
 import {
     projectMutationOptions, subscribeProjectOwnership, isProjectReadOnlyError,
 } from "./h3_project_ownership.mjs?v=0.7.4";
@@ -421,6 +421,8 @@ function injectStyles() {
             grid-template-columns:minmax(0,160px) minmax(0,1fr) auto; gap:5px; }
         .h3studio-context-pair { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
         .h3studio-prompt { min-height:250px; width:100%; font:15px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace !important; }
+        .h3studio-basic-prompt-label { display:flex; flex-direction:column; gap:4px; font-size:12px; }
+        .h3studio-basic-prompt { min-height:72px; }
         .h3studio-prompt-tools { display:flex; align-items:center; gap:6px; margin:7px 0; flex-wrap:wrap; }
         .h3studio-prompt-delegated { margin-top:10px; padding:12px; border:1px dashed var(--hs-border);
             border-radius:7px; color:var(--hs-muted); background:var(--hs-bg); }
@@ -1543,10 +1545,16 @@ function mount(node) {
     }
 
     function preserveDelegatedPrompts() {
-        if (!state.promptEditors.length || !state.planWidget || !state.plan) return;
-        let live;
-        try { live = parsePlanJson(String(state.planWidget.value ?? "")); }
+        if (!state.planWidget || !state.plan) return;
+        const liveValue = String(state.planWidget.value ?? "");
+        if (!state.promptEditors.length && liveValue === state.lastValue) return;
+        let live, previous;
+        try {
+            live = parsePlanJson(liveValue);
+            if (liveValue !== state.lastValue && state.lastValue) previous = parsePlanJson(state.lastValue);
+        }
         catch (_error) { return; }
+        const previousById = new Map((previous?.shots ?? []).map(shot => [String(shot.id ?? "").trim(), shot]));
         const byId = new Map();
         for (const shot of live.shots) {
             const id = String(shot?.id ?? "").trim();
@@ -1557,7 +1565,25 @@ function mount(node) {
             // A new ID (duplicate/add/rename) has no live counterpart yet.
             // Never replace its prompt with the scene formerly at this index.
             const current = id ? byId.get(id) : live.shots[index];
-            if (current) shot.prompt = promptTextToLines(promptValueToText(current.prompt));
+            if (current && state.promptEditors.length) shot.prompt = promptTextToLines(promptValueToText(current.prompt));
+            // A basic draft is shared by both UIs. Before the next poll/push,
+            // preserve newer external text unless this write actually edited it.
+            const before = id ? previousById.get(id) : previous?.shots[index];
+            if (current && before && shot.basic_prompt === before.basic_prompt
+                    && current.basic_prompt !== shot.basic_prompt) {
+                if (Object.hasOwn(current, "basic_prompt")) shot.basic_prompt = current.basic_prompt;
+                else delete shot.basic_prompt;
+                const field = index === state.active ? root.querySelector(".h3studio-basic-prompt") : null;
+                const text = String(shot.basic_prompt ?? "");
+                if (field && field.value !== text) {
+                    const start = field.selectionStart, end = field.selectionEnd;
+                    const direction = field.selectionDirection;
+                    const scrollTop = field.scrollTop, scrollLeft = field.scrollLeft;
+                    field.value = text;
+                    field.setSelectionRange(Math.min(start, text.length), Math.min(end, text.length), direction);
+                    field.scrollTop = scrollTop; field.scrollLeft = scrollLeft;
+                }
+            }
         });
     }
 
@@ -4305,6 +4331,18 @@ function mount(node) {
         const alternate = alternateTakePanel();
         const original = element("div", "h3studio-original-prompt-panel");
 
+        const basicPromptLabel = element("label", "h3studio-basic-prompt-label", "Basic prompt (plain language)");
+        const basicPromptTextarea = element("textarea", "h3studio-basic-prompt");
+        basicPromptTextarea.value = String(shot.basic_prompt ?? "");
+        basicPromptTextarea.placeholder = "Optional plain-language scene idea, kept separate from the H3-formatted scene prompt. Optimize it into the scene prompt from Rich Scene Prompt Editor.";
+        basicPromptTextarea.title = "A simple draft description, not H3-formatted. Never delegated: editable here even when prompt editing itself is delegated below.";
+        basicPromptTextarea.spellcheck = true;
+        basicPromptTextarea.addEventListener("input", () => {
+            shot.basic_prompt = basicPromptTextarea.value;
+            writePlan();
+        });
+        basicPromptLabel.append(basicPromptTextarea);
+
         if (state.promptEditors.length) {
             const delegated = element("div", "h3studio-prompt-delegated");
             delegated.append(
@@ -4314,7 +4352,7 @@ function mount(node) {
                     "Scene selection is synchronized in both directions; Studio keeps scene ID, length, steps, seed, timeline, and playback controls.",
                 ),
             );
-            original.append(delegated);
+            original.append(basicPromptLabel, delegated);
             panel.append(head, form, audioOverrides,
                 promptTakeTabs(original, alternate, String(row.id), String(checkpoint?.revision ?? "")));
             return panel;
@@ -4346,7 +4384,7 @@ function mount(node) {
         );
         const history = element("div", "h3studio-history");
         state.history.host = history; state.history.textarea = prompt; state.history.status = message;
-        original.append(prompt, tools, tray, history);
+        original.append(basicPromptLabel, prompt, tools, tray, history);
         panel.append(head, form, audioOverrides,
             promptTakeTabs(original, alternate, String(row.id), String(checkpoint?.revision ?? "")));
         void loadHistory(row.id, prompt.value);
@@ -7022,7 +7060,10 @@ function mount(node) {
         const previousJson = jsonArea ? planToJson(state.plan) : "";
         // Keep shot identities: existing input handlers close over these objects.
         for (let index = 0; index < livePlan.shots.length; index += 1) {
-            state.plan.shots[index].prompt = [...livePlan.shots[index].prompt];
+            const shot = state.plan.shots[index], liveShot = livePlan.shots[index];
+            shot.prompt = [...liveShot.prompt];
+            if (Object.hasOwn(liveShot, "basic_prompt")) shot.basic_prompt = liveShot.basic_prompt;
+            else delete shot.basic_prompt;
         }
         const prompt = state.history.textarea;
         const text = promptValueToText(state.plan.shots[state.active]?.prompt);
@@ -7035,6 +7076,16 @@ function mount(node) {
             prompt.scrollTop = scrollTop; prompt.scrollLeft = scrollLeft;
             scheduleHistoryDraft(
                 String(state.plan.shots[state.active].id || `clip_${String(state.active + 1).padStart(4, "0")}`), text);
+        }
+        const basicPrompt = root.querySelector(".h3studio-basic-prompt");
+        const basicText = String(state.plan.shots[state.active]?.basic_prompt ?? "");
+        if (basicPrompt && basicPrompt.value !== basicText) {
+            const start = basicPrompt.selectionStart, end = basicPrompt.selectionEnd;
+            const direction = basicPrompt.selectionDirection;
+            const scrollTop = basicPrompt.scrollTop, scrollLeft = basicPrompt.scrollLeft;
+            basicPrompt.value = basicText;
+            basicPrompt.setSelectionRange(Math.min(start, basicText.length), Math.min(end, basicText.length), direction);
+            basicPrompt.scrollTop = scrollTop; basicPrompt.scrollLeft = scrollLeft;
         }
         // Never replace an unapplied JSON draft, even after its field loses focus.
         if (jsonArea && jsonArea.value === previousJson) jsonArea.value = planToJson(state.plan);
@@ -7268,6 +7319,7 @@ function mount(node) {
         document.removeEventListener("keydown", onPlayerKeydown, true);
         delete node._h3PromptCompanionSetActiveScene;
         delete node._h3PromptCompanionSetScenePrompt;
+        delete node._h3PromptCompanionSetBasicPrompt;
         delete node._h3FlushProjectWrites;
         disposePlayer();
         void finalFlush.catch((error) => console.warn(
@@ -7287,6 +7339,12 @@ function mount(node) {
         if (planNode !== state.planNode || !state.plan?.shots?.[index]) return false;
         // Use the already-written live JSON, not a potentially delayed text
         // notification. Polling and broadcasts share the same in-place path.
+        loadPlan(false);
+        return true;
+    };
+    node._h3PromptCompanionSetBasicPrompt = (planNode, index, text) => {
+        if (planNode !== state.planNode || !state.plan?.shots?.[index]) return false;
+        // As with H3 prompts, the live Plan is authoritative over delayed pushes.
         loadPlan(false);
         return true;
     };

@@ -5,8 +5,11 @@ import fs from "node:fs";
 import {
     activeSceneIndexAfterRefresh,
     adjacentPlanCompanions,
+    beginTrackingShotFields,
+    commitShotFields,
     connectedPlanStudios,
     connectedPromptEditors,
+    markShotFieldEdited,
     planHasNonPromptChanges,
     publishCompanionPrompt,
     publishCompanionScene,
@@ -86,6 +89,91 @@ assert.equal(localPlan.shots[0], editedShot, "active shot identity survives reba
 assert.deepEqual(localPlan.shots[0], {id:"two", prompt:["edited two"], seed:"22", steps:20});
 assert.deepEqual(localPlan.shots[1], {id:"one", prompt:["live one"], seed:"11"});
 assert.equal(rebaseScenePrompt({shots:[{id:"gone",prompt:[]}]}, livePlan, 0), -1);
+
+// An edit to one prompt field must not overwrite a newer, concurrent edit
+// made to the *other* field through a different UI (e.g. Plan Studio).
+{
+    const h3OnlyEdit = {id:"one", prompt:"new H3 edit", basic_prompt:"old basic"};
+    markShotFieldEdited(h3OnlyEdit, "prompt");
+    const local = {shots:[h3OnlyEdit]};
+    const live = {shots:[{id:"one", prompt:"old H3", basic_prompt:"new basic from Studio"}]};
+    assert.equal(rebaseScenePrompt(local, live, 0), 0);
+    assert.equal(live.shots[0].prompt, "new H3 edit");
+    assert.equal(live.shots[0].basic_prompt, "new basic from Studio",
+        "an H3-only edit must not discard a newer basic-draft edit");
+}
+{
+    const basicOnlyEdit = {id:"one", prompt:"stale H3", basic_prompt:"new basic edit"};
+    markShotFieldEdited(basicOnlyEdit, "basic_prompt");
+    const local = {shots:[basicOnlyEdit]};
+    const live = {shots:[{id:"one", prompt:"newer H3 from elsewhere", basic_prompt:"old basic"}]};
+    assert.equal(rebaseScenePrompt(local, live, 0), 0);
+    assert.equal(live.shots[0].prompt, "newer H3 from elsewhere",
+        "a basic-only edit must not carry forward stale H3 text");
+    assert.equal(live.shots[0].basic_prompt, "new basic edit");
+}
+{
+    // Without any edited-field tracking (a caller that predates it), both
+    // fields still get copied, preserving the pre-existing behavior.
+    const untracked = {id:"one", prompt:"untracked H3", basic_prompt:"untracked basic"};
+    const local = {shots:[untracked]};
+    const live = {shots:[{id:"one", prompt:"old H3", basic_prompt:"old basic"}]};
+    assert.equal(rebaseScenePrompt(local, live, 0), 0);
+    assert.equal(live.shots[0].prompt, "untracked H3");
+    assert.equal(live.shots[0].basic_prompt, "untracked basic");
+}
+{
+    // beginTrackingShotFields is the opposite default a companion RECEIVER
+    // needs: it has not edited anything itself, so an untouched field must
+    // adopt the live value rather than keep clobbering it with whatever the
+    // receiver's own stale local copy happens to hold.
+    const receiverShot = {id:"one", prompt:"stale local H3", basic_prompt:"stale local basic"};
+    beginTrackingShotFields(receiverShot);
+    const local = {shots:[receiverShot]};
+    const live = {shots:[{id:"one", prompt:"live H3", basic_prompt:"live basic"}]};
+    assert.equal(rebaseScenePrompt(local, live, 0), 0);
+    assert.equal(live.shots[0].prompt, "live H3",
+        "an untracked-but-tracking-began shot must adopt the live prompt");
+    assert.equal(live.shots[0].basic_prompt, "live basic",
+        "an untracked-but-tracking-began shot must adopt the live basic_prompt");
+}
+{
+    // beginTrackingShotFields must never clear a field already genuinely
+    // touched (a receiver can have its own in-progress, unflushed edit).
+    const midEditShot = {id:"one", prompt:"my in-progress H3 edit", basic_prompt:"stale local basic"};
+    markShotFieldEdited(midEditShot, "prompt");
+    beginTrackingShotFields(midEditShot);
+    const local = {shots:[midEditShot]};
+    const live = {shots:[{id:"one", prompt:"live H3", basic_prompt:"live basic"}]};
+    assert.equal(rebaseScenePrompt(local, live, 0), 0);
+    assert.equal(live.shots[0].prompt, "my in-progress H3 edit",
+        "a field already marked edited must survive beginTrackingShotFields");
+    assert.equal(live.shots[0].basic_prompt, "live basic",
+        "a field never touched must still adopt the live value");
+}
+{
+    // commitShotFields must retire tracking for fields already written into
+    // the Plan JSON, so an ordinary write that never rebases (because the
+    // live Plan had not diverged) does not leave a stale "edited" mark that
+    // a later external push for that same field would wrongly treat as an
+    // unsaved local edit still needing to win.
+    const committedShot = {id:"one", prompt:"saved H3", basic_prompt:"saved basic"};
+    markShotFieldEdited(committedShot, "prompt");
+    markShotFieldEdited(committedShot, "basic_prompt");
+    commitShotFields(committedShot);
+    const local = {shots:[committedShot]};
+    const live = {shots:[{id:"one", prompt:"newer H3 from elsewhere", basic_prompt:"newer basic from elsewhere"}]};
+    assert.equal(rebaseScenePrompt(local, live, 0), 0);
+    assert.equal(live.shots[0].prompt, "newer H3 from elsewhere",
+        "a committed field must adopt a later external value instead of clobbering it");
+    assert.equal(live.shots[0].basic_prompt, "newer basic from elsewhere",
+        "commitShotFields must retire tracking for both fields it commits");
+}
+{
+    // commitShotFields must be a no-op on a shot with no tracking Set yet.
+    commitShotFields({id:"one", prompt:"untracked"});
+    commitShotFields(null);
+}
 
 assert.equal(planHasNonPromptChanges(
     {shared:"same", shots:[{id:"one", prompt:["old"], seed:"11", length:90}]},

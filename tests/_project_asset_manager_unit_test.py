@@ -47,6 +47,13 @@ spec.loader.exec_module(chain)
 
 
 def main():
+    tree = chain.CHAIN_NODE_CLASS_MAPPINGS["MiniMaxH3ProjectAssetTree"]
+    assert tree is chain.MiniMaxH3ProjectAssetTree
+    assert tree.INPUT_TYPES() == chain.MiniMaxH3ProjectAssetManager.INPUT_TYPES()
+    assert tree.build is chain.MiniMaxH3ProjectAssetManager.build
+    assert tree.RETURN_TYPES == chain.MiniMaxH3ProjectAssetManager.RETURN_TYPES
+    assert chain.CHAIN_NODE_DISPLAY_NAME_MAPPINGS["MiniMaxH3ProjectAssetTree"] == (
+        "MiniMax H3 Project Asset Carousel (Tree)")
     assert chain.CHAIN_NODE_CLASS_MAPPINGS[
         "MiniMaxH3ProjectAssetManager"] is chain.MiniMaxH3ProjectAssetManager
     assert "asset_0" not in chain.MiniMaxH3ProjectAssetManager.INPUT_TYPES().get(
@@ -65,6 +72,16 @@ def main():
         chain.MiniMaxH3ProjectAssetManager.INPUT_TYPES()["optional"])
     assert "ownership_json" in (
         chain.MiniMaxH3ProjectAssetManager.INPUT_TYPES()["optional"])
+    for node_type in ("MiniMaxH3ProjectAssetManager", "MiniMaxH3ProjectAssetTree"):
+        workflow = {"nodes": [{"type": node_type,
+                              "widgets_values": ["project", "", "", "", "", "transient-proof"]}]}
+        chain._strip_workflow_ownership(workflow)
+        assert workflow["nodes"][0]["widgets_values"][5] == ""
+        api_prompt = {"assets": {"class_type": node_type,
+                                 "inputs": {"ownership_json": "transient-proof"}}}
+        archived, _ = chain._matching_plan_node_ids(
+            api_prompt, {"run_name": "project", "shots": [], "compatibility": {}})
+        assert archived["assets"]["inputs"]["ownership_json"] == ""
     assert "tagged_scene_options" not in (
         chain.MiniMaxH3ProjectAssetManager.INPUT_TYPES()["optional"])
     assert chain.MiniMaxH3ProjectAssetManager.INPUT_TYPES()["optional"][

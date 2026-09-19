@@ -11,7 +11,7 @@ const panels = fs.readdirSync(web).filter(name => name.endsWith(".js")
     && fs.readFileSync(new URL(name, web), "utf8").includes("node.addDOMWidget("));
 for (const name of panels) {
     const source = fs.readFileSync(new URL(name, web), "utf8");
-    assert.match(source, /import \{bindNodeWheel\} from "\.\/h3_dom_wheel\.mjs";/, name);
+    assert.match(source, /import \{\s*bindNodeWheel\s*\} from "\.\/h3_dom_wheel\.mjs";/, name);
     assert.match(source, /bindNodeWheel\(root, node, app\);/, name);
     assert.doesNotMatch(source, /root\.addEventListener\("wheel"/, name);
 }
@@ -36,6 +36,10 @@ const server = http.createServer((req, res) => {
     if (req.url === "/web/h3_dom_wheel.mjs") {
         res.setHeader("Content-Type", "text/javascript");
         res.end(fs.readFileSync(new URL("h3_dom_wheel.mjs", web))); return;
+    }
+    if (req.url.split("?")[0] === "/web/h3_dom_wheel_core.mjs") {
+        res.setHeader("Content-Type", "text/javascript");
+        res.end(fs.readFileSync(new URL("h3_dom_wheel_core.mjs", web))); return;
     }
     res.writeHead(404); res.end();
 });

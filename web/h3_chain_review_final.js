@@ -3,13 +3,13 @@ import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {
     canCaptureFrame, captureCarousels, captureTargetProject, carouselProject,
-} from "./h3_review_capture_core.mjs?v=0.7.0";
+} from "./h3_review_capture_core.mjs?v=0.7.26";
 import {
     parsePlanJson,
     planToJson,
     promptValueToText,
 } from "./h3_chain_plan_core.mjs?v=0.7.8";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.2";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.26";
 import {
     refreshRestoredPlanEditors,
     restoreConnectedPolicyInputs,
@@ -26,13 +26,13 @@ import {
     reviewLocalDeadline,
     reviewPlanScenePrompt,
     reviewSeed,
-} from "./h3_chain_review_core.mjs?v=context-mask-1";
+} from "./h3_chain_review_core.mjs?v=0.7.26";
 import {projectMutationOptions} from "./h3_project_ownership.mjs?v=0.7.4";
 
 const NODE_NAME = "MiniMaxH3ChainReview";
 const PLAN_NAME = "MiniMaxH3ChainPlan";
 const PLAN_NAMES = new Set([PLAN_NAME, "MiniMaxH3ChainPlanModern"]);
-const PROJECT_ASSET_MANAGER_NODE = "MiniMaxH3ProjectAssetManager";
+const PROJECT_ASSET_MANAGER_NODES = new Set(["MiniMaxH3ProjectAssetManager", "MiniMaxH3ProjectAssetTree"]);
 const PROMPT_EDITOR_SETTING = "MiniMaxH3ContexLoop.ReviewGate.PromptEditor";
 const VIDEO_HEIGHT_PROPERTY = "h3_chain_review_video_height";
 const PROMPT_HEIGHT_PROPERTY = "h3_chain_review_prompt_height";
@@ -140,6 +140,10 @@ function reviewPromptEditorEnabled() {
 // prompt synchronization becomes a no-op until the module cache refreshes.
 function publishCompanionPrompt(...args) {
     return promptCompanionSync.publishCompanionPrompt?.(...args) ?? 0;
+}
+
+function publishCompanionBasicPrompt(...args) {
+    return promptCompanionSync.publishCompanionBasicPrompt?.(...args) ?? 0;
 }
 
 function publishPlanCompanionScene(...args) {
@@ -257,6 +261,8 @@ function injectStyles() {
             width:40px; height:2px; border-top:1px solid #7e899f;
             border-bottom:1px solid #4f586b; }
         .h3r-prompt-grip:hover { background:linear-gradient(180deg,#313848,#1d212b); }
+        .h3r-basic-prompt { width:100%; min-height:70px; resize:vertical; padding:7px;
+            border:1px solid #56637e; border-radius:5px; background:#101218; color:#eef1f7; }
         .h3r-prompt-notice { padding:8px 9px; border:1px solid #56637e;
             border-radius:6px; background:#202431; color:#cbd3e5; white-space:pre-wrap; }
         .h3r-row { display:flex; align-items:flex-end; gap:7px; }
@@ -328,10 +334,20 @@ function nodeType(node) {
     return node?.comfyClass ?? node?.type ?? null;
 }
 
+// app.graph can be a subgraph's own graph object rather than the true root
+// (e.g. while a subgraph is open, or under newer nested-subgraph frontends);
+// getNodeById and node enumeration must start from the actual root or a
+// top-level node id like a review token's node_id will never resolve.
+// Mirrors h3_prompt_companion_sync.mjs's graphRoot().
+function appRootGraph() {
+    return app.graph?.rootGraph ?? app.graph;
+}
+
 function findNodeByQualifiedId(qid) {
-    if (!app.graph || qid == null) return null;
+    const root = appRootGraph();
+    if (!root || qid == null) return null;
     const parts = String(qid).split(":");
-    let graph = app.graph;
+    let graph = root;
     for (let i = 0; i < parts.length - 1; i += 1) {
         const id = Number(parts[i]);
         const parent = Number.isFinite(id) ? graph?.getNodeById?.(id) : null;
@@ -381,7 +397,7 @@ function videoUrl(item) {
 
 function upstreamPlanNode(reviewNode) {
     return findUpstreamNode(reviewNode, PLAN_NAMES) ??
-        allNodes(app.graph).find((item) => PLAN_NAMES.has(nodeType(item)));
+        allNodes(appRootGraph()).find((item) => PLAN_NAMES.has(nodeType(item)));
 }
 
 function widgetByName(node, name) {
@@ -416,13 +432,14 @@ function requireReviewBranch(reviewNode, review) {
     }
 }
 
-function updatePlan(reviewNode, index, prompt, seed, length) {
+function updatePlan(reviewNode, index, prompt, seed, length, basicPrompt = undefined) {
     const planNode = upstreamPlanNode(reviewNode);
     const widget = planNode?.widgets?.find((item) => item.name === "plan_json");
     if (!widget) return false;
     const sceneIndex = Number(index) - 1;
     const plan = applyReviewEdit(
         parsePlanJson(String(widget.value ?? "")), index, prompt, seed, length,
+        basicPrompt,
     );
     const value = planToJson(plan);
     widget.value = value;
@@ -435,6 +452,11 @@ function updatePlan(reviewNode, index, prompt, seed, length) {
         sceneIndex,
         promptValueToText(plan.shots[sceneIndex]?.prompt),
     );
+    if (typeof basicPrompt === "string") {
+        publishCompanionBasicPrompt(
+            reviewNode, planNode, sceneIndex, plan.shots[sceneIndex]?.basic_prompt,
+        );
+    }
     return true;
 }
 
@@ -545,7 +567,7 @@ function checkpointRevisionLabel(revision) {
 
 function prepareResume(reviewNode, nextIndex, endIndex = null, clipCount = null) {
     const startNode = findUpstreamNode(reviewNode, "MiniMaxH3ChainLoopStart") ??
-        allNodes(app.graph).find((item) => nodeType(item) === "MiniMaxH3ChainLoopStart");
+        allNodes(appRootGraph()).find((item) => nodeType(item) === "MiniMaxH3ChainLoopStart");
     const widget = startNode?.widgets?.find((item) => item.name === "start_clip");
     if (!widget) return false;
     widget.value = nextIndex;
@@ -598,7 +620,8 @@ async function activateAcceptedCandidate(reviewNode, submittedReview, body) {
         };
     }
     const saved = updatePlan(
-        reviewNode, clipIndex, body.scene_prompt, body.seed, body.length);
+        reviewNode, clipIndex, body.scene_prompt, body.seed, body.length,
+        body.basic_prompt);
     if (!saved) {
         return {
             immediate: false,
@@ -735,7 +758,7 @@ function reviewRunName(planNode) {
         // Project Assets is authoritative: it replaces Plan.run_name
         // server-side while the Plan editor deliberately keeps its hidden
         // widget unchanged. Do not fall back to a reused Review node id.
-        if (nodeType(manager) === PROJECT_ASSET_MANAGER_NODE) {
+        if (PROJECT_ASSET_MANAGER_NODES.has(nodeType(manager))) {
             const run = String(widgetByName(manager, "run_name")?.value ?? "").trim();
             if (run) return run;
         }
@@ -743,13 +766,35 @@ function reviewRunName(planNode) {
     return String(widgetByName(planNode, "run_name")?.value ?? "").trim();
 }
 
-function deliverReview(node, data) {
-    if (!node || nodeType(node) !== NODE_NAME) return false;
+function deliverReview(node, data, {verifyRun = true} = {}) {
+    if (!node) return false;
+    if (nodeType(node) !== NODE_NAME) {
+        console.warn(
+            `[H3 Chain Review] Node ${node?.id} did not match the expected type ` +
+            `(got ${JSON.stringify(nodeType(node))}, wanted ${JSON.stringify(NODE_NAME)}); ` +
+            "not delivering the pending review to it.",
+        );
+        return false;
+    }
+    // reviewFallbackNode() already applied its own run_name/id matching (or
+    // explicitly trusted a lone candidate gate) before returning a node; a
+    // second strict re-check here would just reject that same node again
+    // whenever the Plan's run_name widget has since changed or reset (e.g.
+    // a node was recreated, or the widget shows a stale/default value) even
+    // though it is demonstrably the only Review Gate in the graph.
     if (!reviewBranchMatches(node, data)) return false;
-    const expectedRun = String(data?.run_name ?? "").trim();
+    const expectedRun = verifyRun ? String(data?.run_name ?? "").trim() : "";
     if (expectedRun) {
-        const actualRun = reviewRunName(findUpstreamNode(node, PLAN_NAMES));
-        if (actualRun && actualRun !== expectedRun) return false;
+        const planNode = findUpstreamNode(node, PLAN_NAMES);
+        const actualRun = reviewRunName(planNode);
+        if (actualRun && actualRun !== expectedRun) {
+            console.warn(
+                `[H3 Chain Review] Node ${node.id} run_name mismatch: ` +
+                `expected ${JSON.stringify(expectedRun)}, found ${JSON.stringify(actualRun)} ` +
+                `on upstream ${JSON.stringify(nodeType(planNode))}; not delivering this review.`,
+            );
+            return false;
+        }
     }
     if (typeof node._h3ReviewHandler === "function") {
         node._h3ReviewHandler(data);
@@ -764,7 +809,7 @@ function deliverReview(node, data) {
 
 function reviewFallbackNode(data) {
     const gates = [...new Set([
-        ...allNodes(app.graph).filter((item) => nodeType(item) === NODE_NAME),
+        ...allNodes(appRootGraph()).filter((item) => nodeType(item) === NODE_NAME),
         ...[...mountedReviewNodes].filter((item) => nodeType(item) === NODE_NAME),
     ])];
     const expectedRun = String(data?.run_name ?? "").trim();
@@ -777,19 +822,65 @@ function reviewFallbackNode(data) {
     // Durable recovery inventory has no reliable display-node identity. It
     // may only route through its authoritative run match above.
     if (data?.durable === true) return null;
+    // A gate whose connected Plan carries a *different*, known run_name is
+    // proof this review belongs to another project/workflow, and no amount
+    // of leaf-id or singleton guessing may override that. Only gates whose
+    // run_name is unknown/blank (stale or not-yet-mounted widget) remain
+    // eligible for that weaker recovery.
+    const candidates = expectedRun
+        ? gates.filter((item) => {
+            const actualRun = reviewRunName(findUpstreamNode(item, PLAN_NAMES));
+            return !actualRun || actualRun === expectedRun;
+        })
+        : gates;
     // GraphBuilder execution ids use dots while subgraph-qualified display
     // ids use colons. The visible LiteGraph node is always the final leaf.
     const leaf = String(data?.node_id ?? "").split(/[.:]/).at(-1);
-    const matchingLeaf = gates.filter((item) => String(item.id) === leaf);
+    const matchingLeaf = candidates.filter((item) => String(item.id) === leaf);
     if (matchingLeaf.length === 1) return matchingLeaf[0];
-    return gates.length === 1 ? gates[0] : null;
+    return candidates.length === 1 ? candidates[0] : null;
 }
 
+// A remembered routing decision is only valid for as long as the gate node's
+// identity (its mount state, and the Plan/project it's wired to) doesn't
+// change. Forget any cached decisions pointing at a node once that node is
+// removed or reconfigured (rewired to a different Plan), and forget every
+// decision when the graph itself is reloaded/pasted, so a stale entry can
+// never keep routing a review to a project the gate no longer represents.
+function forgetRoutedNode(node) {
+    for (const [token, routed] of routedReviewNodes) {
+        if (routed === node) routedReviewNodes.delete(token);
+    }
+}
+
+// One token can arrive many times (candidate/preview ticks, reconnect
+// polling) while a review stays pending. Once a token has been routed once,
+// reuse that decision silently instead of repeating the same exact-match
+// attempt, run_name mismatch warning, and fallback notice on every message.
+const routedReviewNodes = new Map();
+
 function routeReview(data) {
+    const token = String(data?.token ?? "");
+    const remembered = token ? routedReviewNodes.get(token) : null;
+    if (remembered) {
+        // Unlike a freshly resolved fallback node, a remembered decision can
+        // be arbitrarily old: the gate's connected Plan run_name can change
+        // live (a widget edit, or a Project Assets manager swap) without any
+        // graph reload, node removal, or reconfigure event to invalidate the
+        // cache via forgetRoutedNode. Re-verify identity on every cached
+        // delivery so a token cached for one project can never be delivered
+        // to a gate that has since become another project's.
+        if (deliverReview(remembered, data)) return true;
+        routedReviewNodes.delete(token);
+    }
     const exact = findNodeByQualifiedId(data?.node_id);
-    if (deliverReview(exact, data)) return true;
+    if (deliverReview(exact, data)) {
+        if (token) routedReviewNodes.set(token, exact);
+        return true;
+    }
     const fallback = reviewFallbackNode(data);
-    if (deliverReview(fallback, data)) {
+    if (deliverReview(fallback, data, {verifyRun: false})) {
+        if (token) routedReviewNodes.set(token, fallback);
         console.warn(
             `[H3 Chain Review] Display node ${data?.node_id} was not directly ` +
             "resolvable; routed the pending review to the only matching gate.",
@@ -797,17 +888,27 @@ function routeReview(data) {
         return true;
     }
     if (data?.durable !== true) {
+        const gates = [...new Set([
+            ...allNodes(appRootGraph()).filter((item) => nodeType(item) === NODE_NAME),
+            ...[...mountedReviewNodes].filter((item) => nodeType(item) === NODE_NAME),
+        ])];
         console.warn(
             `[H3 Chain Review] Pending token ${data?.token ?? "?"} could not be ` +
-            `routed to display node ${data?.node_id ?? "?"}.`,
+            `routed to display node ${data?.node_id ?? "?"} ` +
+            `(expected run_name ${JSON.stringify(String(data?.run_name ?? ""))}; ` +
+            `found ${gates.length} MiniMaxH3ChainReview node(s) with run_name(s) ` +
+            `${JSON.stringify(gates.map((item) => reviewRunName(findUpstreamNode(item, PLAN_NAMES))))}).`,
         );
     }
     return false;
 }
 
 function routeReviewResolved(data) {
-    const exact = findNodeByQualifiedId(data?.node_id);
+    const token = String(data?.token ?? "");
+    const remembered = token ? routedReviewNodes.get(token) : null;
+    const exact = remembered ?? findNodeByQualifiedId(data?.node_id);
     const node = nodeType(exact) === NODE_NAME ? exact : reviewFallbackNode(data);
+    if (token) routedReviewNodes.delete(token);
     node?._h3ReviewResolvedHandler?.(data);
 }
 
@@ -1185,6 +1286,16 @@ function mount(node) {
     prefix.hidden = true;
     prefix.title = "Shared prompt prepended to every scene. It is shown for context and is not changed by retrying this scene.";
 
+    const basicPromptLabel = document.createElement("label");
+    basicPromptLabel.className = "h3r-label";
+    basicPromptLabel.append("Basic prompt (plain language draft)");
+    const basicPrompt = document.createElement("textarea");
+    basicPrompt.className = "h3r-basic-prompt";
+    basicPrompt.title = "A simple, non-H3-formatted scene idea kept alongside the scene prompt. Retrying sends this along; optimizing it into the scene prompt happens in Rich Scene Prompt Editor.";
+    basicPromptLabel.append(basicPrompt);
+    let basicPromptEditedInGate = false;
+    basicPrompt.addEventListener("input", () => { basicPromptEditedInGate = true; });
+
     const promptLabel = document.createElement("label");
     promptLabel.className = "h3r-label";
     promptLabel.append("Scene prompt (used when retrying)");
@@ -1210,6 +1321,8 @@ function mount(node) {
 
     function refreshPromptEditorSetting() {
         const enabled = reviewPromptEditorEnabled();
+        basicPromptLabel.hidden = !enabled;
+        basicPrompt.disabled = !enabled;
         promptLabel.hidden = !enabled;
         prompt.disabled = !enabled;
         promptGrip.hidden = !enabled;
@@ -1447,8 +1560,8 @@ function mount(node) {
     resume.append(resumeTitle, resumeRow, resumeStatus, revisionsPanel);
 
     root.append(
-        head, videoPanel, captureRow, prefix, promptNotice, promptLabel,
-        seedRow, candidateRow, actions, status, deferred, resume,
+        head, videoPanel, captureRow, prefix, promptNotice, basicPromptLabel,
+        promptLabel, seedRow, candidateRow, actions, status, deferred, resume,
     );
 
     let current = null;
@@ -2229,6 +2342,9 @@ function mount(node) {
                 : (planScenePrompt(node, submittedReview)
                     ?? submittedReview.scene_prompt
                     ?? prompt.value);
+            const submittedBasicPrompt = reviewPromptEditorEnabled() && basicPromptEditedInGate
+                ? basicPrompt.value
+                : (submittedReview.basic_prompt ?? basicPrompt.value);
             const normalizedSeed = action === "retry" ? reviewSeed(seed.value) : seed.value;
             const normalizedDuration = action === "retry" || action === "reroll"
                 ? reviewDuration(duration.value) : null;
@@ -2253,6 +2369,7 @@ function mount(node) {
                     token: submittedToken,
                     action: candidateBatchAction || action,
                     scene_prompt: submittedPrompt,
+                    basic_prompt: submittedBasicPrompt,
                     seed: normalizedSeed,
                     length: normalizedDuration?.length,
                     candidate_revision: (candidateBatchAction === "accept" ||
@@ -2310,12 +2427,19 @@ function mount(node) {
             } else if (action === "retry" || action === "reroll") {
                 const acceptedPrompt = typeof body.scene_prompt === "string"
                     ? body.scene_prompt : submittedPrompt.trim();
+                const acceptedBasicPrompt = typeof body.basic_prompt === "string"
+                    ? body.basic_prompt : undefined;
                 const acceptedDuration = reviewDurationText(body.length);
                 const saved = updatePlan(
-                    node, submittedIndex, acceptedPrompt, body.seed, body.length);
+                    node, submittedIndex, acceptedPrompt, body.seed, body.length,
+                    acceptedBasicPrompt);
                 if (current?.token === submittedToken) {
                     prompt.value = acceptedPrompt;
                     promptEditedInGate = false;
+                    if (acceptedBasicPrompt !== undefined) {
+                        basicPrompt.value = acceptedBasicPrompt;
+                    }
+                    basicPromptEditedInGate = false;
                     seed.value = body.seed;
                     duration.value = acceptedDuration;
                 }
@@ -2411,6 +2535,8 @@ function mount(node) {
             if (deferredReview) setTimeout(refreshDeferredReviews, 0);
         }
         if (!sameToken) {
+            basicPrompt.value = data.basic_prompt ?? "";
+            basicPromptEditedInGate = false;
             prompt.value = data.scene_prompt ?? "";
             promptEditedInGate = false;
             seed.value = data.seed ?? "";
@@ -2450,6 +2576,17 @@ function mount(node) {
         }
         prompt.value = String(text ?? "").replace(/\r\n?/g, "\n");
         promptEditedInGate = false;
+        return true;
+    };
+
+    node._h3PromptCompanionSetBasicPrompt = (planNode, index, text) => {
+        if (root.classList.contains("h3r-busy")
+                || planNode !== upstreamPlanNode(node)
+                || Number(index) !== Number(current?.clip_index) - 1) {
+            return false;
+        }
+        basicPrompt.value = String(text ?? "").replace(/\r\n?/g, "\n");
+        basicPromptEditedInGate = false;
         return true;
     };
 
@@ -2508,11 +2645,13 @@ function mount(node) {
     node.onRemoved = function () {
         stopCountdown();
         delete this._h3PromptCompanionSetScenePrompt;
+        delete this._h3PromptCompanionSetBasicPrompt;
         api.removeEventListener("execution_start", onResumeExecutionStart);
         api.removeEventListener("execution_success", onResumeExecutionTerminal);
         api.removeEventListener("execution_error", onResumeExecutionTerminal);
         api.removeEventListener("execution_interrupted", onResumeExecutionTerminal);
         mountedReviewNodes.delete(this);
+        forgetRoutedNode(this);
         updatePendingPolling();
         return removed?.apply(this, arguments);
     };
@@ -2571,12 +2710,21 @@ app.registerExtension({
         const configured = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function () {
             const result = configured?.apply(this, arguments);
+            // The node's widgets/links (and therefore its connected Plan
+            // and project identity) may have just changed underneath a
+            // cached routing decision. Force the next review for this gate
+            // to be re-resolved from scratch.
+            forgetRoutedNode(this);
             setTimeout(() => this._h3ReviewApplyLayout?.(), 0);
             return result;
         };
         const graphConfigured = nodeType.prototype.onGraphConfigured;
         nodeType.prototype.onGraphConfigured = function () {
             const result = graphConfigured?.apply(this, arguments);
+            // A full graph load/paste can remap ids and rewire every Plan
+            // connection at once; drop all cached routing decisions rather
+            // than trying to reason about which ones are still valid.
+            routedReviewNodes.clear();
             setTimeout(() => this._h3ReviewApplyLayout?.(), 0);
             return result;
         };
@@ -2589,7 +2737,7 @@ app.registerExtension({
     },
     async afterConfigureGraph() {
         await fetchPending();
-        for (const node of allNodes(app.graph)) {
+        for (const node of allNodes(appRootGraph())) {
             if (nodeType(node) === NODE_NAME) node._h3RefreshResume?.();
             if (nodeType(node) === NODE_NAME) node._h3RefreshDeferred?.();
             if (nodeType(node) === NODE_NAME) node._h3ReviewApplyLayout?.();

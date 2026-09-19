@@ -137,6 +137,7 @@ class PromptHistoryStore:
                 raise ValueError("The prompt-history index is invalid.")
             revision.setdefault("label", "")
             revision.setdefault("archived_at", None)
+            revision.setdefault("basic_prompt", "")
         return index
 
     @staticmethod
@@ -205,8 +206,17 @@ class PromptHistoryStore:
             return self._read_revision(directory, revision)
 
     def _find_prompt(self, directory: str, index: dict[str, Any],
-                     prompt: str) -> dict[str, Any] | None:
+                     prompt: str,
+                     basic_prompt: str | None = None) -> dict[str, Any] | None:
+        # Matching on H3 text alone picks whichever revision happens to sit
+        # last with that text, even if a different, more recent basic draft
+        # was recorded against it under the same H3 text. When a caller
+        # supplies basic_prompt, prefer an exact (prompt, basic_prompt) match
+        # over the merely most-recent prompt-only match, so re-running the
+        # same take reuses that same revision instead of always landing on
+        # (and then forking away from) whichever revision is newest.
         digest = _prompt_hash(prompt)
+        fallback = None
         for meta in reversed(index["revisions"]):
             if meta.get("prompt_sha256") != digest:
                 continue
@@ -214,15 +224,20 @@ class PromptHistoryStore:
                 revision = self._read_revision(directory, meta["id"])
             except ValueError:
                 continue
-            if revision.get("prompt") == prompt:
+            if revision.get("prompt") != prompt:
+                continue
+            if fallback is None:
+                fallback = meta
+            if basic_prompt is not None and (meta.get("basic_prompt") or "") == basic_prompt:
                 return meta
-        return None
+        return fallback
 
     def _write_index(self, directory: str, index: dict[str, Any]) -> None:
         _atomic_json(os.path.join(directory, "index.json"), index)
 
     def _create(self, directory: str, index: dict[str, Any], prompt: str,
-                parent_id: str | None) -> dict[str, Any]:
+                parent_id: str | None,
+                basic_prompt: str = "") -> dict[str, Any]:
         now = _timestamp()
         meta = {
             "id": uuid.uuid4().hex,
@@ -235,6 +250,7 @@ class PromptHistoryStore:
             "last_executed_at": None,
             "execution_count": 0,
             "prompt_sha256": _prompt_hash(prompt),
+            "basic_prompt": basic_prompt,
         }
         revision = {"format": FORMAT, **meta, "prompt": prompt}
         _atomic_json(self._revision_path(directory, meta["id"]), revision)
@@ -244,24 +260,47 @@ class PromptHistoryStore:
         return revision
 
     def save_draft(self, run_name: Any, scene_id: Any, prompt: Any,
-                   parent_revision: Any = None) -> dict[str, Any]:
+                   parent_revision: Any = None,
+                   basic_prompt: Any = None) -> dict[str, Any]:
         prompt = _normalized_prompt(prompt)
+        basic_prompt_given = basic_prompt is not None
+        if basic_prompt_given:
+            basic_prompt = _normalized_prompt(basic_prompt)
         with _LOCK:
             directory, run, scene = self._scene_dir(run_name, scene_id)
             index = self._load_index(directory, run, scene)
-            exact = self._find_prompt(directory, index, prompt)
+            exact = self._find_prompt(
+                directory, index, prompt,
+                basic_prompt if basic_prompt_given else None)
             if exact is not None:
+                revision = self._read_revision(directory, exact["id"])
+                basic_changed = (
+                    basic_prompt_given
+                    and (exact.get("basic_prompt") or "") != basic_prompt)
+                if basic_changed and exact.get("executed_at"):
+                    # This H3 text was already executed together with a
+                    # different basic draft. Mutating that revision's
+                    # basic_prompt in place would silently rewrite executed
+                    # history; fork a fresh, still-unexecuted child instead.
+                    revision = self._create(
+                        directory, index, prompt, exact["id"], basic_prompt)
+                    return {
+                        "history": self._public_index(index),
+                        "revision": revision,
+                    }
                 if exact.get("archived_at"):
                     exact["archived_at"] = None
-                    revision = self._read_revision(directory, exact["id"])
                     revision["archived_at"] = None
-                    _atomic_json(
-                        self._revision_path(directory, exact["id"]), revision)
+                if basic_prompt_given:
+                    exact["basic_prompt"] = basic_prompt
+                    revision["basic_prompt"] = basic_prompt
+                _atomic_json(
+                    self._revision_path(directory, exact["id"]), revision)
                 index["active_revision"] = exact["id"]
                 self._write_index(directory, index)
                 return {
                     "history": self._public_index(index),
-                    "revision": self._read_revision(directory, exact["id"]),
+                    "revision": revision,
                 }
 
             parent = str(parent_revision or index.get("active_revision") or "")
@@ -281,13 +320,17 @@ class PromptHistoryStore:
                     "prompt_sha256": parent_meta["prompt_sha256"],
                     "prompt": prompt,
                 })
+                if basic_prompt_given:
+                    parent_meta["basic_prompt"] = basic_prompt
+                    revision["basic_prompt"] = basic_prompt
                 _atomic_json(self._revision_path(directory, parent), revision)
                 index["active_revision"] = parent
                 self._write_index(directory, index)
             else:
                 revision = self._create(
                     directory, index, prompt,
-                    parent if parent_meta is not None else None)
+                    parent if parent_meta is not None else None,
+                    basic_prompt if basic_prompt_given else "")
             return {
                 "history": self._public_index(index),
                 "revision": revision,
@@ -391,20 +434,40 @@ class PromptHistoryStore:
             return {"history": self._public_index(index)}
 
     def mark_executed(self, run_name: Any, scene_id: Any,
-                      prompt: Any) -> dict[str, Any]:
+                      prompt: Any, basic_prompt: Any = None) -> dict[str, Any]:
         prompt = _normalized_prompt(prompt)
+        basic_prompt_given = basic_prompt is not None
+        if basic_prompt_given:
+            basic_prompt = _normalized_prompt(basic_prompt)
         with _LOCK:
             directory, run, scene = self._scene_dir(run_name, scene_id)
             index = self._load_index(directory, run, scene)
-            meta = self._find_prompt(directory, index, prompt)
+            meta = self._find_prompt(
+                directory, index, prompt,
+                basic_prompt if basic_prompt_given else None)
             if meta is None:
                 parent = str(index.get("active_revision") or "")
                 revision = self._create(
                     directory, index, prompt,
-                    parent if self._meta(index, parent) is not None else None)
+                    parent if self._meta(index, parent) is not None else None,
+                    basic_prompt if basic_prompt_given else "")
                 meta = self._meta(index, revision["id"])
             else:
                 revision = self._read_revision(directory, meta["id"])
+                basic_changed = (
+                    basic_prompt_given
+                    and (meta.get("basic_prompt") or "") != basic_prompt)
+                if basic_changed and meta.get("executed_at"):
+                    # Same H3 text, but this revision was already executed
+                    # with a different basic draft. Fork a child to carry
+                    # the new basic draft as its own revision rather than
+                    # overwriting the executed original.
+                    revision = self._create(
+                        directory, index, prompt, meta["id"], basic_prompt)
+                    meta = self._meta(index, revision["id"])
+                elif basic_prompt_given:
+                    meta["basic_prompt"] = basic_prompt
+                    revision["basic_prompt"] = basic_prompt
 
             if meta.get("archived_at"):
                 meta["archived_at"] = None

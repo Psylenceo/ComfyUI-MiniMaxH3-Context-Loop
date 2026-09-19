@@ -20,6 +20,9 @@ export const TAGGED_AUDIO_REF_TYPE = "MiniMaxH3TaggedAudioReference";
 export const SEMANTIC_ANCHOR_BUNDLE_TYPE = "MiniMaxH3SemanticAnchorBundle";
 export const SEMANTIC_PICTURE_ANCHOR_TYPE = "MiniMaxH3SemanticPictureAnchor";
 export const PROJECT_ASSET_MANAGER_TYPE = "MiniMaxH3ProjectAssetManager";
+export const PROJECT_ASSET_MANAGER_TYPES = new Set([
+    PROJECT_ASSET_MANAGER_TYPE, "MiniMaxH3ProjectAssetTree",
+]);
 
 const SCHEDULE_TYPES = new Set([
     PICTURE_REF_TYPE,
@@ -389,7 +392,8 @@ function findUpstreamType(start, wantedType) {
         const node = queue.shift();
         if (!node || seen.has(node)) continue;
         seen.add(node);
-        if (node !== start && nodeType(node) === wantedType) return node;
+        if (node !== start && (wantedType instanceof Set
+            ? wantedType.has(nodeType(node)) : nodeType(node) === wantedType)) return node;
         for (const input of node.inputs ?? []) {
             const parent = inputConnection(node, input.name)?.source ?? null;
             if (parent) queue.push(parent);
@@ -415,7 +419,7 @@ export function findImageToVideo(start) {
 }
 
 export function findProjectAssetManager(start) {
-    return findUpstreamType(start, PROJECT_ASSET_MANAGER_TYPE);
+    return findUpstreamType(start, PROJECT_ASSET_MANAGER_TYPES);
 }
 
 export function collectScheduleNodes(wrapper) {
@@ -577,7 +581,7 @@ function semanticPromptTagState(prompt) {
 }
 
 function projectCatalog(node) {
-    if (nodeType(node) !== PROJECT_ASSET_MANAGER_TYPE) return null;
+    if (!PROJECT_ASSET_MANAGER_TYPES.has(nodeType(node))) return null;
     try {
         const value = JSON.parse(String(widgetValue(node, "catalog_json", "")));
         return value && Array.isArray(value.assets) ? value : null;
@@ -726,7 +730,7 @@ export function taggedReferenceRecords(editorNode, prompt = "") {
         } : {wrapper: null, mode: null, records: []};
     }
     const referenceSource = inputSource(wrapper, "references");
-    if (nodeType(referenceSource) === PROJECT_ASSET_MANAGER_TYPE) {
+    if (PROJECT_ASSET_MANAGER_TYPES.has(nodeType(referenceSource))) {
         return {
             wrapper,
             mode: "tagged",

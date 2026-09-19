@@ -37,7 +37,7 @@ import {
     replacePromptReferenceOccurrence,
     taggedPictureReferenceMode,
     taggedPictureReferenceToken,
-} from "./h3_reference_preview_core.mjs?v=0.7.25";
+} from "./h3_reference_preview_core.mjs?v=0.7.26";
 import {
     PromptUndoHistory,
     promptUndoDirection,
@@ -49,7 +49,7 @@ import {bindPromptMarkerInteractions} from "./h3_prompt_marker_ui.mjs?v=0.7.6";
 import {isWorkflowSaveShortcut, promptEditorRichText} from "./h3_prompt_editor_settings_core.mjs?v=0.7.5";
 import {promptEditorPreferences} from "./h3_prompt_editor_settings.js";
 import {createH3PromptSchemaController} from "./h3_prompt_schema_ui.mjs?v=0.7.6";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.2";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.26";
 import {
     PROJECT_ASSET_CATALOG_CHANGED_EVENT,
 } from "./h3_project_asset_sync_core.mjs?v=0.7.2";
@@ -57,6 +57,9 @@ import {
 const {
     publishCompanionScene,
     rebaseScenePrompt,
+    markShotFieldEdited,
+    beginTrackingShotFields,
+    commitShotFields,
 } = promptCompanionSync;
 const activeSceneIndexAfterRefresh =
     typeof promptCompanionSync.activeSceneIndexAfterRefresh === "function"
@@ -163,6 +166,16 @@ function injectStyles() {
             tab-size:4; white-space:pre-wrap;
         }
         .h3sp-textarea:focus { border-color:var(--h3sp-accent);
+            box-shadow:0 0 0 1px color-mix(in srgb,var(--h3sp-accent) 45%,transparent); }
+        .h3sp-basic-prompt-label { display:flex; flex-direction:column; gap:4px;
+            color:var(--h3sp-muted); font-size:12px; }
+        .h3sp-basic-prompt {
+            width:100%; min-height:64px; resize:vertical; padding:8px 10px;
+            border:1px solid var(--h3sp-border); border-radius:7px;
+            outline:none; background:var(--comfy-input-bg,#11141a); color:var(--h3sp-text);
+            font:13px/1.4 inherit;
+        }
+        .h3sp-basic-prompt:focus { border-color:var(--h3sp-accent);
             box-shadow:0 0 0 1px color-mix(in srgb,var(--h3sp-accent) 45%,transparent); }
         .h3sp-hidden { display:none !important; }
         .h3sp-editor-shell { position:relative; width:100%; min-height:240px;
@@ -959,6 +972,7 @@ function mount(node) {
         {deferEffects = false} = {},
     ) {
         const value = planToJson(state.plan);
+        commitShotFields(state.plan.shots[state.active]);
         state.lastValue = value;
         state.planWidget.value = value;
         const pending = {
@@ -1336,6 +1350,7 @@ function mount(node) {
             });
             renderRichEditorText(history.textarea.value);
             shot.prompt = promptTextToLines(history.textarea.value);
+            markShotFieldEdited(shot, "prompt");
             writePlan(history.status);
             if (history.status) history.status.textContent = "Loaded prompt version";
             renderHistory();
@@ -2631,6 +2646,14 @@ function mount(node) {
         font.append(smaller, fontValue, larger);
         nav.append(previous, sceneSelect, next, add, font);
 
+        const basicPromptLabel = element("label", "h3sp-basic-prompt-label", "Basic prompt (plain language)");
+        const basicPromptTextarea = element("textarea", "h3sp-basic-prompt");
+        basicPromptTextarea.value = String(shot.basic_prompt ?? "");
+        basicPromptTextarea.placeholder = "Optional plain-language scene idea, kept separate from the H3-formatted prompt below. Optimize it into the scene prompt from Rich Scene Prompt Editor.";
+        basicPromptTextarea.title = "A simple draft description, not H3-formatted. It is never used for generation by itself.";
+        basicPromptTextarea.spellcheck = true;
+        basicPromptLabel.append(basicPromptTextarea);
+
         const textarea = element("textarea", "h3sp-textarea");
         textarea.value = promptValueToText(shot.prompt, `Scene ${state.active + 1} prompt`);
         textarea.placeholder = "Write this scene's action, camera, performance, dialogue, and ending continuity…";
@@ -2710,6 +2733,11 @@ function mount(node) {
             "span", "", `Scene ${state.active + 1}/${state.plan.shots.length} · ${shotId}`,
         );
         const status = element("span", "h3sp-footer-status", "Synchronized with Plan");
+        basicPromptTextarea.addEventListener("input", () => {
+            shot.basic_prompt = basicPromptTextarea.value;
+            markShotFieldEdited(shot, "basic_prompt");
+            writePlan(status, {deferEffects:true});
+        });
         const historyHost = element("div", "h3sp-history");
         footer.append(identity, historyHost, status);
         state.history.host = historyHost;
@@ -2725,6 +2753,7 @@ function mount(node) {
                 ? selectionTextOffset(richEditor) : null;
             textarea.value = text;
             shot.prompt = promptTextToLines(text);
+            markShotFieldEdited(shot, "prompt");
             writePlan(status);
             scheduleHistoryDraft(shotId, text);
             renderRichEditorText(
@@ -2758,6 +2787,7 @@ function mount(node) {
                 inputType:event.inputType || state.richInputType,
             });
             shot.prompt = promptTextToLines(textarea.value);
+            markShotFieldEdited(shot, "prompt");
             writePlan(status, {deferEffects:true});
             scheduleHistoryDraft(shotId, textarea.value);
             if (document.activeElement !== richEditor) renderRichEditorText(textarea.value);
@@ -2931,7 +2961,7 @@ function mount(node) {
             beforeOpen:() => hidePopover(true),
         });
 
-        root.append(head, nav, tools);
+        root.append(head, nav, basicPromptLabel, tools);
         if (state.schema) root.append(state.schema.panel);
         root.append(refs, textarea, editorShell);
         if (PROMPT_ASSISTANT_ENABLED) {
@@ -3126,6 +3156,7 @@ function mount(node) {
         delete node._h3PromptCompanionSetActiveScene;
         delete node._h3PromptCompanionSetScenePrompt;
         delete node._h3FlushProjectWrites;
+        delete node._h3PromptCompanionSetBasicPrompt;
         return removed?.apply(this, arguments);
     };
     node._h3PromptCompanionSetActiveScene = (planNode, index) => {
@@ -3139,6 +3170,7 @@ function mount(node) {
         if (planNode !== state.planNode || !state.plan?.shots?.[index]) return false;
         const liveValue = String(state.planWidget?.value ?? "");
         let livePlanParsed = false;
+        let targetIndex = index;
         try {
             const livePlan = parsePlanJson(liveValue);
             livePlanParsed = true;
@@ -3146,36 +3178,98 @@ function mount(node) {
                 loadPlan(true);
                 return true;
             }
+            // Merge every live field onto the local shot (prompt,
+            // basic_prompt, ...), preserving only a field this editor has
+            // itself edited but not yet flushed (tracked via
+            // markShotFieldEdited). Patching only `prompt` here would still
+            // mark the live text "already synced" via state.lastValue below
+            // while leaving an unrelated local field (e.g. a stale basic
+            // draft) untouched - the next save would then silently
+            // republish that stale value over whatever changed elsewhere.
+            // A shot with no tracking at all is treated by rebaseScenePrompt
+            // as "assume both fields may have been locally edited" (correct
+            // for an editor about to write its own change). This receiver
+            // has not edited anything itself, so force empty-but-present
+            // tracking first: an untouched field then correctly adopts the
+            // live value, while a field genuinely mid-edit here (already
+            // marked via markShotFieldEdited) still wins.
+            beginTrackingShotFields(state.plan.shots[index]);
+            const rebased = rebaseScenePrompt(state.plan, livePlan, index);
+            if (rebased >= 0) targetIndex = rebased;
         } catch (_error) {
             // Leave lastValue untouched so normal polling reports invalid JSON.
         }
-        state.plan.shots[index].prompt = promptTextToLines(text);
-        const shotId = String(
-            state.plan.shots[index].id
-            || `clip_${String(index + 1).padStart(4, "0")}`,
-        );
-        const promptUndo = promptUndoForScene(shotId, text, {external:true});
-        if (index === state.active) state.promptUndo = promptUndo;
-        if (index === state.active) {
+        const shot = state.plan.shots[targetIndex];
+        if (!shot) return false;
+        const mergedText = promptValueToText(shot.prompt);
+        const shotId = String(shot.id || `clip_${String(targetIndex + 1).padStart(4, "0")}`);
+        const promptUndo = promptUndoForScene(shotId, mergedText, {external:true});
+        if (targetIndex === state.active) state.promptUndo = promptUndo;
+        if (targetIndex === state.active) {
             const textarea = root.querySelector(".h3sp-textarea");
-            if (textarea && textarea.value !== text) {
+            if (textarea && textarea.value !== mergedText) {
                 const focused = document.activeElement === textarea;
                 const start = textarea.selectionStart;
                 const end = textarea.selectionEnd;
                 const richFocused = document.activeElement === state.richEditor;
                 const richCaret = richFocused ? selectionTextOffset(state.richEditor) : null;
-                textarea.value = text;
+                textarea.value = mergedText;
                 if (focused) textarea.setSelectionRange(
-                    Math.min(start, text.length), Math.min(end, text.length));
+                    Math.min(start, mergedText.length), Math.min(end, mergedText.length));
                 renderRichEditorText(
-                    text,
-                    richCaret == null ? null : Math.min(richCaret, text.length),
+                    mergedText,
+                    richCaret == null ? null : Math.min(richCaret, mergedText.length),
                 );
-                scheduleHistoryDraft(
-                    String(state.plan.shots[index].id || `clip_${String(index + 1).padStart(4, "0")}`),
-                    text);
+                scheduleHistoryDraft(shotId, mergedText);
                 refreshAssistant();
                 state.schema?.refresh();
+            }
+            const basicPromptTextarea = root.querySelector(".h3sp-basic-prompt");
+            const mergedBasicPrompt = String(shot.basic_prompt ?? "");
+            if (basicPromptTextarea && basicPromptTextarea.value !== mergedBasicPrompt) {
+                basicPromptTextarea.value = mergedBasicPrompt;
+            }
+        }
+        if (livePlanParsed) state.lastValue = liveValue;
+        return true;
+    };
+    node._h3PromptCompanionSetBasicPrompt = (planNode, index, text) => {
+        if (planNode !== state.planNode || !state.plan?.shots?.[index]) return false;
+        const liveValue = String(state.planWidget?.value ?? "");
+        let livePlanParsed = false;
+        let targetIndex = index;
+        try {
+            const livePlan = parsePlanJson(liveValue);
+            livePlanParsed = true;
+            if (planHasNonPromptChanges(state.plan, livePlan)) {
+                loadPlan(true);
+                return true;
+            }
+            // Same field-level merge as _h3PromptCompanionSetScenePrompt:
+            // preserve any locally edited-but-unflushed field, adopt
+            // everything else (including the pushed basic_prompt) from the
+            // live Plan, so this editor's own in-progress H3 edit is never
+            // silently discarded by an unrelated basic-draft push.
+            // A shot with no tracking at all is treated by rebaseScenePrompt
+            // as "assume both fields may have been locally edited" (correct
+            // for an editor about to write its own change). This receiver
+            // has not edited anything itself, so force empty-but-present
+            // tracking first: an untouched field then correctly adopts the
+            // live value, while a field genuinely mid-edit here (already
+            // marked via markShotFieldEdited) still wins.
+            beginTrackingShotFields(state.plan.shots[index]);
+            const rebased = rebaseScenePrompt(state.plan, livePlan, index);
+            if (rebased >= 0) targetIndex = rebased;
+        } catch (_error) {
+            // Leave lastValue untouched so normal polling reports invalid JSON.
+        }
+        const shot = state.plan.shots[targetIndex];
+        if (!shot) return false;
+        if (targetIndex === state.active) {
+            const basicPromptTextarea = root.querySelector(".h3sp-basic-prompt");
+            const mergedBasicPrompt = String(shot.basic_prompt ?? "");
+            if (basicPromptTextarea && basicPromptTextarea.value !== mergedBasicPrompt) {
+                basicPromptTextarea.value = mergedBasicPrompt;
             }
         }
         if (livePlanParsed) state.lastValue = liveValue;

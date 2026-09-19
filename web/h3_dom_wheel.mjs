@@ -1,3 +1,5 @@
+import {resolveWheelRouting} from "./h3_dom_wheel_core.mjs?v=0.7.26";
+
 // DOM widgets are overlays, not children of the LiteGraph canvas. An inactive
 // panel must explicitly forward wheel input to the canvas's own zoom/pan handler.
 export function bindNodeWheel(root, node, app) {
@@ -7,13 +9,16 @@ export function bindNodeWheel(root, node, app) {
     root.addEventListener("wheel", (event) => {
         const canvas = app.canvas;
         const target = canvas?.canvas;
-        if (!target || !node.graph || canvas.graph !== node.graph || root.contains(target)) return;
-        // Do not process a gesture already handled by the host frontend.
-        if (event.defaultPrevented) return;
-        const selected = canvas.selectedItems?.has(node)
-            || canvas.selected_nodes?.[node.id] === node;
-        const focused = root.contains(root.ownerDocument.activeElement);
-        if (!canvas.read_only && (selected || focused)) return;
+        const forward = resolveWheelRouting({
+            hasTarget: Boolean(target) && Boolean(node.graph),
+            sameGraph: Boolean(target) && canvas.graph === node.graph,
+            targetInsideRoot: Boolean(target) && root.contains(target),
+            alreadyHandled: event.defaultPrevented,
+            readOnly: Boolean(canvas?.read_only),
+            selected: Boolean(canvas?.selectedItems?.has(node) || canvas?.selected_nodes?.[node.id] === node),
+            focused: root.contains(root.ownerDocument.activeElement),
+        });
+        if (!forward) return;
 
         event.preventDefault();
         event.stopPropagation();

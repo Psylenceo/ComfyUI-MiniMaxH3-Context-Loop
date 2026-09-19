@@ -161,6 +161,53 @@ async function browserChecks() {
             check(Boolean(node.root.querySelector(".h3studio-error")), "Invalid JSON is reported");
             planWidget.value = valid; await wait(550);
             check(Boolean(node.root.querySelector(".h3studio-prompt")), "Restoring identical valid JSON recovers the form after an error");
+            // Integration review: basic drafts must be consumed by the same
+            // poll as H3 prompts, before a debounced companion push arrives.
+            const draftUpdate = JSON.parse(planWidget.value);
+            draftUpdate.shots[0].basic_prompt = "New basic draft from another editor";
+            planWidget.value = JSON.stringify(draftUpdate);
+            await wait(550);
+            report.checks += 3;
+            if (state.plan.shots[0].basic_prompt !== draftUpdate.shots[0].basic_prompt) {
+                report.failures.push(`connected=${connected}: polling did not adopt basic_prompt`);
+            }
+            if (node.root.querySelector(".h3studio-basic-prompt").value !== draftUpdate.shots[0].basic_prompt) {
+                report.failures.push(`connected=${connected}: polling left the basic draft textarea stale`);
+            }
+            const currentPrompt = node.root.querySelector(".h3studio-prompt");
+            currentPrompt.value = "H3-only edit after draft update";
+            currentPrompt.dispatchEvent(new Event("input", {bubbles:true}));
+            if (JSON.parse(planWidget.value).shots[0].basic_prompt !== draftUpdate.shots[0].basic_prompt) {
+                report.failures.push(`connected=${connected}: Studio H3 edit overwrote the newer saved basic draft`);
+            }
+            if (owner) {
+                node._h3PromptCompanionSetBasicPrompt(owner, 0, "stale draft broadcast");
+                check(state.plan.shots[0].basic_prompt === draftUpdate.shots[0].basic_prompt,
+                    "Delayed basic notification cannot replace the live draft");
+            }
+            const clearedDraft = JSON.parse(planWidget.value);
+            delete clearedDraft.shots[0].basic_prompt;
+            clearedDraft.shots[1].basic_prompt = "Other scene draft";
+            planWidget.value = JSON.stringify(clearedDraft); await wait(550);
+            check(!Object.hasOwn(state.plan.shots[0], "basic_prompt")
+                && node.root.querySelector(".h3studio-basic-prompt").value === "",
+                "Clearing a basic draft is reflected in state and the existing field");
+            check(state.plan.shots[1].basic_prompt === "Other scene draft",
+                "Inactive scene basic drafts synchronize too");
+            const immediate = JSON.parse(planWidget.value);
+            immediate.shots[0].basic_prompt = "Saved just before Studio edits";
+            planWidget.value = JSON.stringify(immediate);
+            currentPrompt.value = "H3 edit before polling";
+            currentPrompt.dispatchEvent(new Event("input", {bubbles:true}));
+            check(JSON.parse(planWidget.value).shots[0].basic_prompt === immediate.shots[0].basic_prompt,
+                "A write before polling also preserves the external basic draft");
+            const ownDraft = node.root.querySelector(".h3studio-basic-prompt");
+            check(ownDraft.value === immediate.shots[0].basic_prompt,
+                "The pre-poll write also updates the displayed basic draft");
+            ownDraft.value = "Intentional local draft edit";
+            ownDraft.dispatchEvent(new Event("input", {bubbles:true}));
+            check(JSON.parse(planWidget.value).shots[0].basic_prompt === ownDraft.value,
+                "Studio can still intentionally replace its basic draft");
             check(requests === 0, "Typing triggers no backend refresh requests");
             node.onRemoved?.(); editor.remove(); node.host.remove();
         }
