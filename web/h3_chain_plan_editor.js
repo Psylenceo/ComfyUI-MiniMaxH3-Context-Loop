@@ -37,7 +37,7 @@ import {
     sharedPrompt,
     visualContextCompositions,
 } from "./h3_chain_plan_core.mjs?v=0.6.11";
-import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.6.11";
+import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.6.12";
 import {
     applySceneAudioOverride,
     applySceneLipSync,

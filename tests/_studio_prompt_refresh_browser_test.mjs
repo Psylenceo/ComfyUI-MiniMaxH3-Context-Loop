@@ -194,6 +194,20 @@ async function browserChecks() {
                 "Clearing a basic draft is reflected in state and the existing field");
             check(state.plan.shots[1].basic_prompt === "Other scene draft",
                 "Inactive scene basic drafts synchronize too");
+            const immediate = JSON.parse(planWidget.value);
+            immediate.shots[0].basic_prompt = "Saved just before Studio edits";
+            planWidget.value = JSON.stringify(immediate);
+            currentPrompt.value = "H3 edit before polling";
+            currentPrompt.dispatchEvent(new Event("input", {bubbles:true}));
+            check(JSON.parse(planWidget.value).shots[0].basic_prompt === immediate.shots[0].basic_prompt,
+                "A write before polling also preserves the external basic draft");
+            const ownDraft = node.root.querySelector(".h3studio-basic-prompt");
+            check(ownDraft.value === immediate.shots[0].basic_prompt,
+                "The pre-poll write also updates the displayed basic draft");
+            ownDraft.value = "Intentional local draft edit";
+            ownDraft.dispatchEvent(new Event("input", {bubbles:true}));
+            check(JSON.parse(planWidget.value).shots[0].basic_prompt === ownDraft.value,
+                "Studio can still intentionally replace its basic draft");
             check(requests === 0, "Typing triggers no backend refresh requests");
             node.onRemoved?.(); editor.remove(); node.host.remove();
         }

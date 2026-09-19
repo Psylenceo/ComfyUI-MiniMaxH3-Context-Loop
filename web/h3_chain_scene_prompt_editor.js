@@ -33,7 +33,7 @@ import {
     replacePromptReferenceOccurrence,
     taggedPictureReferenceMode,
     taggedPictureReferenceToken,
-} from "./h3_reference_preview_core.mjs?v=0.6.11";
+} from "./h3_reference_preview_core.mjs?v=0.6.12";
 import {
     PromptUndoHistory,
     promptUndoDirection,
@@ -45,7 +45,7 @@ import {bindPromptMarkerInteractions} from "./h3_prompt_marker_ui.mjs?v=0.6.12";
 import {isWorkflowSaveShortcut, promptEditorRichText} from "./h3_prompt_editor_settings_core.mjs?v=0.6.11";
 import {promptEditorPreferences} from "./h3_prompt_editor_settings.js";
 import {createH3PromptSchemaController} from "./h3_prompt_schema_ui.mjs?v=0.6.12";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.11";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.12";
 import {
     PROJECT_ASSET_CATALOG_CHANGED_EVENT,
 } from "./h3_project_asset_sync_core.mjs?v=0.6.11";

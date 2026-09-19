@@ -18283,6 +18283,10 @@ class MiniMaxH3ProjectAssetManager:
         return record, references, fingerprint, source_timeline, status
 
 
+class MiniMaxH3ProjectAssetTree(MiniMaxH3ProjectAssetManager):
+    """The opt-in source-tree layout; shares the Carousel's storage and sockets."""
+
+
 class MiniMaxH3ChainRunManager:
     @classmethod
     def INPUT_TYPES(cls):
@@ -30170,6 +30174,7 @@ CHAIN_NODE_CLASS_MAPPINGS = {
     "MiniMaxH3ChainPlanStudio": MiniMaxH3ChainPlanStudio,
     "MiniMaxH3ChainPreflight": MiniMaxH3ChainPreflight,
     "MiniMaxH3ProjectAssetManager": MiniMaxH3ProjectAssetManager,
+    "MiniMaxH3ProjectAssetTree": MiniMaxH3ProjectAssetTree,
     "MiniMaxH3ChainRunManager": MiniMaxH3ChainRunManager,
     "MiniMaxH3ChainCheckpointManager": MiniMaxH3ChainCheckpointManager,
     "MiniMaxH3ChainFirstSceneImage": MiniMaxH3ChainFirstSceneImage,
@@ -30235,6 +30240,7 @@ CHAIN_NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3ChainPlanStudio": "MiniMax H3 Plan Studio (Experimental)",
     "MiniMaxH3ChainPreflight": "MiniMax H3 Chain Preflight",
     "MiniMaxH3ProjectAssetManager": "MiniMax H3 Project Asset Carousel",
+    "MiniMaxH3ProjectAssetTree": "MiniMax H3 Project Asset Carousel (Tree)",
     "MiniMaxH3ChainRunManager": "MiniMax H3 Run Manager",
     "MiniMaxH3ChainCheckpointManager": "MiniMax H3 Checkpoint Manager",
     "MiniMaxH3ChainFirstSceneImage": "MiniMax H3 Frame Gate",

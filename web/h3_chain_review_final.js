@@ -3,13 +3,13 @@ import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
 import {
     canCaptureFrame, captureCarousels, captureTargetProject, carouselProject,
-} from "./h3_review_capture_core.mjs?v=0.6.11";
+} from "./h3_review_capture_core.mjs?v=0.6.12";
 import {
     parsePlanJson,
     planToJson,
     promptValueToText,
 } from "./h3_chain_plan_core.mjs?v=0.6.11";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.11";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.12";
 import {
     refreshRestoredPlanEditors,
     restoreConnectedPolicyInputs,
@@ -31,7 +31,7 @@ import {
 const NODE_NAME = "MiniMaxH3ChainReview";
 const PLAN_NAME = "MiniMaxH3ChainPlan";
 const PLAN_NAMES = new Set([PLAN_NAME, "MiniMaxH3ChainPlanModern"]);
-const PROJECT_ASSET_MANAGER_NODE = "MiniMaxH3ProjectAssetManager";
+const PROJECT_ASSET_MANAGER_NODES = new Set(["MiniMaxH3ProjectAssetManager", "MiniMaxH3ProjectAssetTree"]);
 const PROMPT_EDITOR_SETTING = "MiniMaxH3ContexLoop.ReviewGate.PromptEditor";
 const VIDEO_HEIGHT_PROPERTY = "h3_chain_review_video_height";
 const PROMPT_HEIGHT_PROPERTY = "h3_chain_review_prompt_height";
@@ -732,7 +732,7 @@ function reviewRunName(planNode) {
         // Project Assets is authoritative: it replaces Plan.run_name
         // server-side while the Plan editor deliberately keeps its hidden
         // widget unchanged. Do not fall back to a reused Review node id.
-        if (nodeType(manager) === PROJECT_ASSET_MANAGER_NODE) {
+        if (PROJECT_ASSET_MANAGER_NODES.has(nodeType(manager))) {
             const run = String(widgetByName(manager, "run_name")?.value ?? "").trim();
             if (run) return run;
         }

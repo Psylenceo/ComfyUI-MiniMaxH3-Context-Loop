@@ -29,7 +29,7 @@ import {
     promptValueToText,
 } from "./h3_chain_plan_core.mjs?v=0.6.11";
 import {applyCheckpointRevisionSet} from "./h3_chain_review_core.mjs?v=0.6.11";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.11";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.12";
 import {
     refreshRestoredPlanEditors,
     restoreConnectedPolicyInputs,

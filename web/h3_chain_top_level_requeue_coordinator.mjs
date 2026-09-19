@@ -139,7 +139,7 @@ export function authoritativeRunName(planNode) {
     const input = planNode?.inputs?.find((item) => item.name === "project_assets");
     const link = input?.link != null ? planNode?.graph?.links?.[input.link] : null;
     const manager = link ? planNode?.graph?.getNodeById?.(link.origin_id) : null;
-    const managed = manager?.comfyClass === "MiniMaxH3ProjectAssetManager"
+    const managed = ["MiniMaxH3ProjectAssetManager", "MiniMaxH3ProjectAssetTree"].includes(manager?.comfyClass ?? manager?.type)
         ? String(widget(manager, "run_name") ?? "").trim() : "";
     return managed || String(widget(planNode, "run_name") ?? "").trim();
 }

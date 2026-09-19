@@ -46,6 +46,13 @@ spec.loader.exec_module(chain)
 
 
 def main():
+    tree = chain.CHAIN_NODE_CLASS_MAPPINGS["MiniMaxH3ProjectAssetTree"]
+    assert tree is chain.MiniMaxH3ProjectAssetTree
+    assert tree.INPUT_TYPES() == chain.MiniMaxH3ProjectAssetManager.INPUT_TYPES()
+    assert tree.build is chain.MiniMaxH3ProjectAssetManager.build
+    assert tree.RETURN_TYPES == chain.MiniMaxH3ProjectAssetManager.RETURN_TYPES
+    assert chain.CHAIN_NODE_DISPLAY_NAME_MAPPINGS["MiniMaxH3ProjectAssetTree"] == (
+        "MiniMax H3 Project Asset Carousel (Tree)")
     assert chain.CHAIN_NODE_CLASS_MAPPINGS[
         "MiniMaxH3ProjectAssetManager"] is chain.MiniMaxH3ProjectAssetManager
     assert "asset_0" not in chain.MiniMaxH3ProjectAssetManager.INPUT_TYPES().get(

@@ -66,7 +66,7 @@ import {
     convertTaggedPictureReference,
     taggedPictureReferenceMode,
     taggedPictureReferenceToken,
-} from "./h3_reference_preview_core.mjs?v=0.6.11";
+} from "./h3_reference_preview_core.mjs?v=0.6.12";
 import {
     applySceneAudioOverride,
     applySceneLipSync,
@@ -118,7 +118,7 @@ import {
     studioWaveformIntervalSamples,
     timedLyricAtSecond,
 } from "./h3_chain_plan_studio_core.mjs?v=0.6.11";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.11";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.12";
 
 const {
     connectedPromptEditors,
@@ -1120,10 +1120,16 @@ function mount(node) {
     }
 
     function preserveDelegatedPrompts() {
-        if (!state.promptEditors.length || !state.planWidget || !state.plan) return;
-        let live;
-        try { live = parsePlanJson(String(state.planWidget.value ?? "")); }
+        if (!state.planWidget || !state.plan) return;
+        const liveValue = String(state.planWidget.value ?? "");
+        if (!state.promptEditors.length && liveValue === state.lastValue) return;
+        let live, previous;
+        try {
+            live = parsePlanJson(liveValue);
+            if (liveValue !== state.lastValue && state.lastValue) previous = parsePlanJson(state.lastValue);
+        }
         catch (_error) { return; }
+        const previousById = new Map((previous?.shots ?? []).map(shot => [String(shot.id ?? "").trim(), shot]));
         const byId = new Map();
         for (const shot of live.shots) {
             const id = String(shot?.id ?? "").trim();
@@ -1134,7 +1140,25 @@ function mount(node) {
             // A new ID (duplicate/add/rename) has no live counterpart yet.
             // Never replace its prompt with the scene formerly at this index.
             const current = id ? byId.get(id) : live.shots[index];
-            if (current) shot.prompt = promptTextToLines(promptValueToText(current.prompt));
+            if (current && state.promptEditors.length) shot.prompt = promptTextToLines(promptValueToText(current.prompt));
+            // A basic draft is shared by both UIs. Before the next poll/push,
+            // preserve newer external text unless this write actually edited it.
+            const before = id ? previousById.get(id) : previous?.shots[index];
+            if (current && before && shot.basic_prompt === before.basic_prompt
+                    && current.basic_prompt !== shot.basic_prompt) {
+                if (Object.hasOwn(current, "basic_prompt")) shot.basic_prompt = current.basic_prompt;
+                else delete shot.basic_prompt;
+                const field = index === state.active ? root.querySelector(".h3studio-basic-prompt") : null;
+                const text = String(shot.basic_prompt ?? "");
+                if (field && field.value !== text) {
+                    const start = field.selectionStart, end = field.selectionEnd;
+                    const direction = field.selectionDirection;
+                    const scrollTop = field.scrollTop, scrollLeft = field.scrollLeft;
+                    field.value = text;
+                    field.setSelectionRange(Math.min(start, text.length), Math.min(end, text.length), direction);
+                    field.scrollTop = scrollTop; field.scrollLeft = scrollLeft;
+                }
+            }
         });
     }
 

@@ -718,7 +718,11 @@ for (const code of [409, 423]) {
     obsoleteError = code;
     byText(obsoleteNode, "Confirm obsolete path deletion").click(); await settle();
     assert.match(byClass(obsoleteNode, "h3cm-status").textContent, /preview changed|read only/);
-    assert.equal(byClass(obsoleteNode, "h3cm-obsolete-preview").hidden, true);
+    assert.equal(byClass(obsoleteNode, "h3cm-obsolete-preview").hidden, false,
+        "Failed cleanup keeps its diagnostic visible");
+    assert.ok(elements(obsoleteNode).some(item => item.textContent === "Obsolete path cleanup failed"));
+    assert.ok(!elements(obsoleteNode).some(item => item.textContent === "Confirm obsolete path deletion"),
+        "A failed delete requires a fresh preview before another confirmation");
     assert.equal(value(obsoleteNode), obsoletePin);
     byText(obsoleteNode, "Delete obsolete path…").click(); await settle();
 }

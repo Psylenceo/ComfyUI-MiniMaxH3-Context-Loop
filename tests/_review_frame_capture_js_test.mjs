@@ -22,10 +22,13 @@ function carousel(project) {
         async _h3ProjectAssetRefresh() { this.refreshed++; }};
 }
 const reviewA = {}, reviewB = {}, a = carousel("A"), b = carousel("B");
+b.type = "MiniMaxH3ProjectAssetTree";
 const canvas = graph([b, reviewA, a, reviewB]); // Wrong project is first on canvas.
 connect(a, reviewA); connect(b, reviewB);
 assert.equal(captureTargetProject(reviewA), "A");
 assert.equal(captureTargetProject(reviewB), "B");
+assert.deepEqual(new Set(captureCarousels(canvas)), new Set([a, b]),
+    "Both separate node types are valid frame-capture destinations");
 a.project = "Renamed";
 assert.equal(captureTargetProject(reviewA), "Renamed");
 connect(b, reviewA);

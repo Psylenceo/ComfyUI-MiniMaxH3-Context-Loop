@@ -732,6 +732,11 @@ assert.deepEqual(
 );
 assert.ok(projectRecords.every((record) => record.previewUrl?.includes(
     "project=episode_1")));
+projectManager.type = projectManager.comfyClass = "MiniMaxH3ProjectAssetTree";
+assert.equal(findProjectAssetManager(projectRef2va), projectManager);
+assert.deepEqual(taggedReferenceRecords(
+    projectEditor, "Use @hero and @walk with #door[2.00s] and @voice.",
+).records, projectRecords, "Tree node preserves all native and semantic references");
 
 const compactEditor = add(makeNode(273, "MiniMaxH3ChainScenePromptEditor"));
 const compactLoopStart = add(makeNode(274, "MiniMaxH3ChainLoopStart"));

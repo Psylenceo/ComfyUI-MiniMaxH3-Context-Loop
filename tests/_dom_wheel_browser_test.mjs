@@ -37,6 +37,10 @@ const server = http.createServer((req, res) => {
         res.setHeader("Content-Type", "text/javascript");
         res.end(fs.readFileSync(new URL("h3_dom_wheel.mjs", web))); return;
     }
+    if (req.url === "/web/h3_dom_wheel_core.mjs") {
+        res.setHeader("Content-Type", "text/javascript");
+        res.end(fs.readFileSync(new URL("h3_dom_wheel_core.mjs", web))); return;
+    }
     res.writeHead(404); res.end();
 });
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
