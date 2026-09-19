@@ -36,7 +36,10 @@ for (const rich of [false, true]) {
     const capture = source.match(/    root\.addEventListener\("keydown", \(event\) => \{[^]*?^    }, true\);/m)?.[0];
     const paste = source.match(new RegExp("        " + (rich ? "editor" : "richEditor") + '\\.addEventListener\\("paste", [^]*?^        \\}\\);', "m"))?.[0];
     for (const value of [replacement, controller, binding, guard, capture, paste]) assert.ok(value);
-    fixtures.push({rich, render, functions, replacement, controller, binding, guard, capture, paste});
+    const basicPrompt = source.match(/        const basicPromptLabel = [^]*?        basicPromptLabel\.append\(basicPromptTextarea\);/)?.[0];
+    const basicStyles = source.match(/\.h3(?:sp|rp)-basic-prompt-label \{[^]*?(?=\n\s*\.h3(?:sp|rp)-basic-prompt:focus)/)?.[0];
+    assert.ok(basicPrompt); assert.ok(basicStyles);
+    fixtures.push({rich, render, functions, replacement, controller, binding, guard, capture, paste, basicPrompt, basicStyles});
 }
 console.log("Browser fixture: extracted actual DOM helpers, replacement/save path, bindings and shortcut guards from both editors");
 if (!process.argv.includes("--browser")) process.exit(0);
@@ -46,7 +49,8 @@ const html = '<!doctype html><meta charset="utf-8"><style>'
     + '[contenteditable]{width:900px;min-height:120px;white-space:pre-wrap;font:16px monospace;border:1px solid #888}'
     + '[data-token]{display:inline-block;background:#ddd;color:black}textarea{width:900px;height:120px}'
     + '</style><pre id="report"></pre><script>\n' + modules + "\n"
-    + "(" + browserChecks.toString() + ")(" + JSON.stringify(fixtures).replace(/<\/script/gi, "<\\/script") + ");</script>";
+    + "(" + browserChecks.toString() + ")(" + JSON.stringify(fixtures).replace(/<\/script/gi, "<\\/script")
+    + ", " + process.argv.includes("--basic-only") + ");</script>";
 const file = join(out, "fixture.html");
 writeFileSync(file, html);
 const run = spawnSync(process.env.H3_TEST_BROWSER || "/opt/google/chrome/chrome", [
@@ -62,7 +66,7 @@ console.log(report);
 console.log("Isolated browser fixture: " + file);
 assert.deepEqual(report.failures, []);
 
-function browserChecks(fixtures) {
+function browserChecks(fixtures, basicOnly = false) {
     const report = {checks:0, failures:[]};
     const test = (condition, message) => {
         report.checks++;
@@ -70,6 +74,46 @@ function browserChecks(fixtures) {
     };
     for (const fixture of fixtures) {
         try {
+            const basicRoot = document.createElement("div"); document.body.append(basicRoot);
+            const basicStyle = document.createElement("style"); basicStyle.textContent = fixture.basicStyles;
+            document.head.append(basicStyle);
+            const basicNode = {properties:{}};
+            const basicShot = {basic_prompt:"Keep my plain-language draft", prompt:"Keep the H3 prompt"};
+            const before = JSON.stringify(basicShot);
+            let viewChanges = 0;
+            const makeElement = (tag, className, text = "") => {
+                const item = document.createElement(tag); item.className = className; item.textContent = text; return item;
+            };
+            const buildBasic = Function("element", "node", "shot", "root", "dirty",
+                fixture.basicPrompt + "\nreturn basicPromptLabel;");
+            const mountBasic = (node = basicNode, shot = basicShot) => {
+                const section = buildBasic(makeElement, node, shot, basicRoot, () => viewChanges++);
+                basicRoot.replaceChildren(section); return section;
+            };
+            const toggleBasic = section => {
+                section.querySelector("summary").click();
+                // Deliver the coalesced native toggle now so this synchronous
+                // fixture also tests persistence before a scene redraw.
+                section.dispatchEvent(new Event("toggle"));
+            };
+            const basic = mountBasic();
+            test(basic.open, "Basic prompt starts expanded");
+            const expandedHeight = basic.getBoundingClientRect().height;
+            toggleBasic(basic);
+            test(!basic.open && basic.getBoundingClientRect().height < expandedHeight,
+                "Collapsing Basic prompt frees editor space");
+            test(basicNode.properties.h3_basic_prompt_open === false, "Collapsed choice is saved on the node");
+            test(basic.querySelector("textarea").value === basicShot.basic_prompt, "Hidden draft is retained");
+            test(!mountBasic(basicNode, {basic_prompt:"Another scene"}).open, "Scene changes retain collapsed choice");
+            const restored = mountBasic({properties:JSON.parse(JSON.stringify(basicNode.properties))});
+            test(!restored.open, "Workflow reload retains collapsed choice");
+            toggleBasic(restored);
+            test(restored.open && restored.querySelector("textarea").value === basicShot.basic_prompt,
+                "Expanding restores the unchanged draft");
+            test(JSON.stringify(basicShot) === before && viewChanges === 2, "Visibility never edits either prompt");
+            test(mountBasic({properties:{}}).open, "Separate nodes keep independent visibility");
+            basicRoot.remove(); basicStyle.remove();
+            if (basicOnly) continue;
             // Production helpers/bindings execute together; only network/Plan
             // persistence and the reference preview surface are replaced.
             const setup = `
