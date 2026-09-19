@@ -49,13 +49,14 @@ import {
     promptUndoDirection,
     richGenerationMode,
     richGuideInstruction,
+    revealPromptCaret,
     tokenizeRichPrompt,
-} from "./h3_rich_prompt_editor_core.mjs?v=0.7.5";
-import {createPromptCompletionController} from "./h3_prompt_completion_core.mjs?v=0.7.5";
-import {bindPromptMarkerInteractions} from "./h3_prompt_marker_ui.mjs?v=0.7.5";
+} from "./h3_rich_prompt_editor_core.mjs?v=0.7.6";
+import {createPromptCompletionController} from "./h3_prompt_completion_core.mjs?v=0.7.6";
+import {bindPromptMarkerInteractions} from "./h3_prompt_marker_ui.mjs?v=0.7.6";
 import {isWorkflowSaveShortcut, promptEditorRichText} from "./h3_prompt_editor_settings_core.mjs?v=0.7.5";
 import {promptEditorPreferences} from "./h3_prompt_editor_settings.js";
-import {createH3PromptSchemaController} from "./h3_prompt_schema_ui.mjs?v=0.7.5";
+import {createH3PromptSchemaController} from "./h3_prompt_schema_ui.mjs?v=0.7.6";
 import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.2";
 import {
     PROJECT_ASSET_CATALOG_CHANGED_EVENT,
@@ -2214,6 +2215,7 @@ function mount(node) {
                 const position = Math.max(0, Math.min(text.length, Number(caret) || 0));
                 renderEditorText(text, position);
                 editor.focus();
+                revealPromptCaret(editor);
             },
             getRecords:() => state.records,
             defaultDuration:Number(shot.duration_seconds)
@@ -2446,6 +2448,9 @@ function mount(node) {
     };
     node._h3PromptCompanionSetActiveScene = (planNode, index) => {
         if (planNode !== state.planNode || !state.plan?.shots?.length || optimizerBusy()) return false;
+        // Add/Duplicate publishes before our polling refresh. Load the new
+        // scene list before navigate clamps the requested index or captures ID.
+        loadPlan();
         navigate(0, index, {synchronize:false, focus:false});
         return true;
     };

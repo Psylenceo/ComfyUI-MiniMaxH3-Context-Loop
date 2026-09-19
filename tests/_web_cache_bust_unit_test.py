@@ -24,12 +24,12 @@ MINIMUM_CACHE_VERSION = {
     "h3_chain_review_core.mjs": "0.7.7",
     "h3_chain_cancel_reroll_core.mjs": "0.7.10",
     "h3_prompt_assistant_core.mjs": "0.7.7",
-    "h3_prompt_completion_core.mjs": "0.7.5",
-    "h3_prompt_schema_core.mjs": "0.7.5",
-    "h3_prompt_schema_ui.mjs": "0.7.5",
-    "h3_rich_prompt_editor_core.mjs": "0.7.5",
+    "h3_prompt_completion_core.mjs": "0.7.6",
+    "h3_prompt_schema_core.mjs": "0.7.6",
+    "h3_prompt_schema_ui.mjs": "0.7.6",
+    "h3_rich_prompt_editor_core.mjs": "0.7.6",
     "h3_prompt_editor_settings_core.mjs": "0.7.5",
-    "h3_prompt_marker_ui.mjs": "0.7.5",
+    "h3_prompt_marker_ui.mjs": "0.7.6",
     "h3_chain_plan_studio_core.mjs": "0.7.1",
     # These helpers changed during 0.7 nightly development. Reusing their
     # original 0.7.0 URL can load an incompatible browser-cached module and

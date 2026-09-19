@@ -32170,6 +32170,30 @@ def _capture_video_frame(video_path: str, time_seconds: float, output_path: str)
     if ffmpeg is None:
         raise RuntimeError("Capturing a video frame requires a working ffmpeg.")
     offset = _capture_frame_time(time_seconds)
+    # HTML video.currentTime reaches duration when paused at the end. That is
+    # one frame beyond a CFR clip's final presentation timestamp, so input
+    # seeking there succeeds without producing an image. Read only headers,
+    # with the same protocol/demuxer restrictions as the capture command.
+    if av is not None:
+        try:
+            with av.open(video_path, mode="r", options={
+                    "protocol_whitelist": "file",
+                    "format_whitelist": "avi,mov,matroska,webm,mpeg,mpegvideo"}) as container:
+                video = container.streams.video[0]
+                rate = video.average_rate or video.base_rate or video.guessed_rate
+                if rate and float(rate) > 0:
+                    duration = _stream_duration_seconds(
+                        video, container, int(video.frames or 0), float(rate))
+                    # Browser duration may include an audio tail or container
+                    # timestamp rounding beyond the video stream's end.
+                    media_end = max(duration, float(container.duration or 0) / av.time_base)
+                    final_start = duration - 1.0 / float(rate)
+                    if duration > 0 and final_start <= offset <= media_end + 1e-6:
+                        offset = max(0.0, final_start - 1e-6)
+        except (OSError, ValueError, IndexError):
+            # Preserve the capture command's error handling and whitelist
+            # enforcement when this optional metadata probe cannot open it.
+            pass
     temporary = "%s.%s.tmp.png" % (output_path, uuid.uuid4().hex)
     command = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",

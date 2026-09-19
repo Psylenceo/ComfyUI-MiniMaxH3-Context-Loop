@@ -505,6 +505,8 @@ function injectStyles() {
             display:grid; place-items:center; overflow:hidden; color:#fff; font-size:10px;
             font-variant-numeric:tabular-nums; cursor:grab; user-select:none; }
         .h3studio-context-movie-track.h3studio-dragging .h3studio-context-window { cursor:grabbing; }
+        .h3studio-context-movie-track[aria-disabled="true"],
+        .h3studio-context-movie-track[aria-disabled="true"] .h3studio-context-window { cursor:default; }
         .h3studio-context-window::before,.h3studio-context-window::after { content:"";
             position:absolute; top:6px; bottom:6px; width:2px; background:rgba(255,255,255,.78); }
         .h3studio-context-window::before { left:4px; }
@@ -5097,9 +5099,9 @@ function mount(node) {
             }
         };
         const writeVisualBuilder = (
-            partition, {preserveStarts = false} = {},
+            partition, {preserveStarts = false, previous = currentVisualBlocks()} = {},
         ) => {
-            const previous = currentVisualBlocks();
+            let prefixFrames = 0;
             shot.visual_context_blocks = partition.map((frames, offset) => {
                 const prior = previous[offset] ?? previous.at(-1);
                 const source = Number(prior?.source) || state.active;
@@ -5107,10 +5109,17 @@ function mount(node) {
                 if (previous[offset]?.weaken_mask) {
                     block.weaken_mask = structuredClone(previous[offset].weaken_mask);
                 }
-                if (preserveStarts && Number(prior?.frames) === Number(frames)
-                        && Number.isInteger(prior?.startFrame)) {
-                    block.start_frame = Number(prior.startFrame);
+                if (preserveStarts && Number.isInteger(prior?.startFrame)) {
+                    const sourceRow = result.shots[source - 1];
+                    const starts = sourceRow ? nativeContextWindowStarts(
+                        sourceRow.rawFrames, sourceRow.deliveredFrames,
+                        Number(frames), prefixFrames,
+                    ) : [];
+                    if (starts.length) block.start_frame = nearestNativeContextWindowStart(
+                        starts, prior.startFrame,
+                    );
                 }
+                prefixFrames += Number(frames);
                 return block;
             });
             clearLegacyVisualFields();
@@ -5132,6 +5141,7 @@ function mount(node) {
             ? String(shot.context_length) : "";
         visualTotal.title = "Total picture prefix entering this scene. The builder divides this exact H3-safe total into ordered source blocks.";
         visualTotal.addEventListener("change", () => {
+            const previous = currentVisualBlocks();
             if (visualTotal.value === "") delete shot.context_length;
             else shot.context_length = Number(visualTotal.value);
             const total = sceneContextLength(shot, settings().contextLength);
@@ -5140,11 +5150,12 @@ function mount(node) {
                 clearLegacyVisualFields();
             } else {
                 const count = Math.min(
-                    Math.max(1, currentVisualBlocks().length || 1),
+                    Math.max(1, previous.length || 1),
                     visualContextMaximumBlocks(total),
                 );
                 writeVisualBuilder(
                     visualContextDefaultPartition(total, count),
+                    {preserveStarts:true, previous},
                 );
             }
             writePlan();
@@ -5428,12 +5439,18 @@ function mount(node) {
             }
             const rangeWrap = element("div", "h3studio-context-range");
             const movieTrack = element("div", "h3studio-context-movie-track");
+            const fixedPosition = validStarts.length === 1;
             movieTrack.tabIndex = 0;
             movieTrack.setAttribute("role", "slider");
+            movieTrack.setAttribute("aria-disabled", String(fixedPosition));
             movieTrack.setAttribute("aria-label", `${block.label} position in source movie`);
             movieTrack.setAttribute("aria-valuemin", "0");
             movieTrack.setAttribute("aria-valuemax", String(latest));
-            movieTrack.title = `Drag the fixed ${block.span}-frame context zone across ${validStarts.length} native latent-aligned positions`;
+            movieTrack.title = fixedPosition
+                ? block.span === 1 && block.prefixFrames === 0
+                    ? "One-frame context uses the final latent anchor; its position cannot be moved. Choose 5 or more picture frames for a movable window."
+                    : "Only one native latent-aligned position fits this source and context window."
+                : `Drag the fixed ${block.span}-frame context zone across ${validStarts.length} native latent-aligned positions`;
             const selectedZone = element(
                 "div", "h3studio-context-window", `${block.span}f`,
             );
@@ -5451,6 +5468,7 @@ function mount(node) {
             const playhead = element("div", "h3studio-context-playhead");
             movieTrack.append(phaseTail, selectedZone, playhead);
             const rangeLabel = element("span", "h3studio-context-range-label");
+            if (fixedPosition) card.append(element("div", "h3studio-context-help", movieTrack.title));
             const movieLength = element(
                 "span", "h3studio-context-movie-length",
                 `source movie · ${sourceRow.deliveredFrames}f · ${(sourceRow.deliveredFrames / FPS).toFixed(3)}s`,
@@ -5501,7 +5519,7 @@ function mount(node) {
             };
             let drag = null;
             movieTrack.addEventListener("pointerdown", (event) => {
-                if (event.button !== 0) return;
+                if (event.button !== 0 || fixedPosition) return;
                 event.preventDefault();
                 const bounds = movieTrack.getBoundingClientRect();
                 if (event.target !== selectedZone) {
@@ -5538,6 +5556,7 @@ function mount(node) {
             movieTrack.addEventListener("pointerup", finishDrag);
             movieTrack.addEventListener("pointercancel", finishDrag);
             movieTrack.addEventListener("keydown", (event) => {
+                if (fixedPosition) return;
                 let next = null;
                 const currentSlot = Math.max(0, validStarts.indexOf(selectedStart));
                 const step = event.shiftKey ? 5 : 1;
