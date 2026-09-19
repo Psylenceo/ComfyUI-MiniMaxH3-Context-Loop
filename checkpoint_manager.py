@@ -1586,7 +1586,8 @@ class CheckpointGraphManager:
 
     def deletion_preview(self, run_name: Any, scene: Any,
                          revision: Any, *, _scan=None,
-                         _skip_dependency_check=False, _deleting=()) -> dict[str, Any]:
+                         _skip_dependency_check=False, _deleting=(),
+                         _release_editorial=False) -> dict[str, Any]:
         run_dir, run = self._run_dir(run_name)
         scene_number = int(scene)
         token = str(revision or "").strip().lower()
@@ -1623,6 +1624,8 @@ class CheckpointGraphManager:
                     "continuation_mode": child["continuation_mode"],
                     "context_length": child["context_length"],
                     "audio_context_length": child["audio_context_length"],
+                    "take_kind": child.get("take_kind"),
+                    "alternate_of_revision": child.get("alternate_of_revision"),
                 })
             dependents.sort(key=lambda item: (
                 not item["leaf"], -int(item["scene"]), item["revision"]))
@@ -1691,15 +1694,15 @@ class CheckpointGraphManager:
                     AttributeError):
                 selected_in_cut = False
                 selected_base = False
-            if selected_in_cut:
+            if selected_in_cut and not _release_editorial:
                 blockers.append(
-                    "This alternate is selected in the final cut. Restore the "
-                    "original take in Plan Studio before deleting it.")
-            if selected_base:
+                    "This alternate is selected in this branch's final cut. "
+                    "Use Remove from cut and delete to preview clearing that selection.")
+            if selected_base and not _release_editorial:
                 blockers.append(
                     "This generation revision is the immutable base of the "
-                    "selected final-cut alternate. Restore the original take "
-                    "in Plan Studio before rolling it back.")
+                    "selected final-cut alternate. Select the base and its unused "
+                    "ALTs together to preview batch deletion.")
             later_active = sorted(
                 item["scene"] for item in scan["records"].values()
                 if (item["active"] and item["scene"] > scene_number and
@@ -1753,6 +1756,7 @@ class CheckpointGraphManager:
                 "scope_start_scene": chapter_start,
                 "scope_end_scene": chapter_end,
                 "allowed": not blockers,
+                "final_cut_selection": selected_in_cut or selected_base,
                 "blockers": blockers,
                 "dependents": dependents,
                 "chapter_references": chapter_references,

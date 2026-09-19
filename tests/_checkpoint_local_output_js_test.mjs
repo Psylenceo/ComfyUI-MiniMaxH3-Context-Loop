@@ -1032,6 +1032,17 @@ cutSelect.value=cutBranch;cutSelect.listeners.change();
 cutNode._h3CheckpointManagerRefresh();await settle();
 assert.equal(JSON.parse(value(cutNode)).final_cut_branch_id,cutBranch);
 assert.ok(byClass(cutNode,"h3cm-alternate-used"));
+const stickyCut = makeNode(value(cutNode)); await settle();
+const assignmentSelect = elements(stickyCut).find(item => item["aria-label"] === "Working branch whose assignments are shown");
+assignmentSelect.value=cutBranch; await assignmentSelect.listeners.change(); await settle();
+assert.equal(byClass(stickyCut,"h3cm-final-cut-select").value,cutBranch,
+    "Switching assignments must not reset an explicit final-cut choice to Auto");
+assert.equal(JSON.parse(value(stickyCut)).final_cut_branch_id,cutBranch);
+assignmentSelect.value="main"; await assignmentSelect.listeners.change(); await settle();
+assert.equal(JSON.parse(await stickyCut.widgets[0].serializeValue()).final_cut_branch_id,cutBranch,
+    "Returning to Original keeps the independently chosen cut in serialized output");
+const stickyReopened = makeNode(value(stickyCut)); await settle();
+assert.equal(byClass(stickyReopened,"h3cm-final-cut-select").value,cutBranch);
 cutNode.widgets[0].value=cutBefore;cutNode._h3CheckpointManagerConfigured();
 cutNode._h3CheckpointManagerRefresh();await settle();
 assert.equal(byClass(cutNode,"h3cm-final-cut-select").value,"auto","Configure/undo restores the serialized choice");
@@ -1070,7 +1081,9 @@ for (const code of [409, 423]) {
     obsoleteError = code;
     byText(obsoleteNode, "Confirm obsolete path deletion").click(); await settle();
     assert.match(byClass(obsoleteNode, "h3cm-status").textContent, /preview changed|read only/);
-    assert.equal(byClass(obsoleteNode, "h3cm-obsolete-preview").hidden, true);
+    assert.equal(byClass(obsoleteNode, "h3cm-obsolete-preview").hidden, false);
+    assert.ok(elements(obsoleteNode).some(item => item.textContent === "Obsolete path cleanup failed"));
+    assert.equal(byText(obsoleteNode, "Confirm obsolete path deletion"), undefined);
     assert.equal(value(obsoleteNode), obsoletePin);
     byText(obsoleteNode, "Delete obsolete path…").click(); await settle();
 }

@@ -519,6 +519,9 @@ export function checkpointActivationMode(payload, selected, range = null) {
 export function checkpointDependencyText(item) {
     const scene = Number(item?.scene) || 0;
     const id = String(item?.scene_id ?? `clip_${String(scene).padStart(4, "0")}`);
+    if (item?.take_kind === "editorial_alternate") {
+        return `Scene ${scene} · ${id} · ALT ${String(item.revision).slice(0, 8)} depends on base take ${String(item.alternate_of_revision).slice(0, 8)}`;
+    }
     const video = Math.max(0, Number(item?.context_length) || 0);
     const audio = Math.max(0, Number(item?.audio_context_length) || 0);
     const mode = String(item?.continuation_mode ?? "guide");

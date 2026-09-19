@@ -64,6 +64,7 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         let storageRequests = 0;
         const bulkRequests = [];
         let bulkAllowed = true;
+        let releaseCutPreview = false;
         let bulkDeletes = 0, bulkDeleteError = false;
         let obsoleteAllowed = true, obsoleteError = "", obsoleteDeleteError = "", obsoleteDeletes = 0;
         const obsoleteRequests = [];
@@ -120,6 +121,7 @@ async function browserChecks(extensionSource, keepStorageOpen) {
                 const body = JSON.parse(options.body);
                 bulkRequests.push(body);
                 data = {allowed:bulkAllowed, revisions:body.revisions, snapshot:'bulk-test', rollback_scenes:[],
+                    editorial_releases:releaseCutPreview ? [{scene:1,alternate_revision:alternate.revision,base_revision:seven[0].revision}] : [],
                     blockers:bulkAllowed ? [] : ['An unselected scene still uses this take.'],
                     owned_file_count:2,reclaimed_bytes:2048,files:[],not_deleted:['Shared media']};
             }
@@ -137,6 +139,7 @@ async function browserChecks(extensionSource, keepStorageOpen) {
                 data = storageReport;
             }
             else if (path.endsWith("/delete-preview")) data = {allowed:false,blockers:["A saved dependency uses this take."],
+                final_cut_selection:releaseCutPreview && JSON.parse(options.body).revision === alternate.revision,
                 files:Array.from({length:50},(_,i)=>({exists:true,label:"checkpoint",path:`demo/checkpoints/file_${i}`,size_bytes:100}))};
             else throw new Error("Unexpected request " + path);
             return {ok:true,json:async()=>data};
@@ -290,10 +293,14 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         check(selectedKeys().length === 0, 'Normal click clears bulk selection and previews normally');
         modifiedClick(4,{shiftKey:true});
         check(selectedKeys().map(key=>key.split(':')[0]).join(',') === '2,3,4', 'Normal preview click establishes the range anchor');
-        root.querySelector('.h3cm-bulk-delete').click(); await new Promise(resolve=>setTimeout(resolve,20));
+        const batchFooter = [...root.querySelectorAll('button')].find(item=>item.textContent === 'Delete selected (3)…');
+        check(batchFooter && !batchFooter.disabled, 'Footer delete operates on the batch, not a disabled single take');
+        batchFooter.click(); await new Promise(resolve=>setTimeout(resolve,20));
         check(bulkRequests.length === 1 && bulkRequests[0].revisions.map(item=>item.scene).join(',') === '2,3,4',
             'One bulk preview contains precisely the explicit selection');
         check(root.querySelector('.h3cm-bulk-preview').textContent.includes('Confirm bulk deletion'), 'Allowed preview requires explicit confirmation');
+        check(root.querySelector('.h3cm-bulk-tools').nextElementSibling === root.querySelector('.h3cm-bulk-preview'),
+            'Batch confirmation appears beside selection controls, not below the entire saved graph');
         modifiedClick(4,{ctrlKey:true});
         check(root.querySelector('.h3cm-bulk-preview').hidden, 'Selection change invalidates the prior confirmation');
         bulkAllowed = false;
@@ -302,6 +309,24 @@ async function browserChecks(extensionSource, keepStorageOpen) {
             'Protected selection displays the reason without a confirm button');
         root.querySelector('.h3cm-branches').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
         check(selectedKeys().length === 0, 'Escape clears selection');
+        releaseCutPreview = true; bulkAllowed = true;
+        root.querySelector(`[data-bulk-key="1:${alternate.revision}"]`).click();
+        await new Promise(resolve=>setTimeout(resolve,20));
+        const releaseAlt = [...root.querySelectorAll('button')].find(item=>item.textContent === 'Remove from cut and delete…');
+        check(releaseAlt && !releaseAlt.disabled, 'Selected final-cut ALT offers a combined release/delete preview');
+        releaseAlt.click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(bulkRequests.at(-1).revisions.length === 1 && bulkRequests.at(-1).revisions[0].revision === alternate.revision,
+            'Single ALT release uses the exact same batch transaction with one target');
+        check(root.querySelector('.h3cm-bulk-preview').textContent.includes('Removes final-cut ALT selections in Original'),
+            'Preview identifies which branch cut will change');
+        let releaseConfirmation = '';
+        window.confirm = message => { releaseConfirmation = message; return false; };
+        root.querySelector('.h3cm-bulk-preview button').click(); await new Promise(resolve=>setTimeout(resolve,20));
+        check(releaseConfirmation.includes('Final-cut ALT selections in Original') && bulkDeletes === 0,
+            'Final-cut changes require explicit confirmation; cancelling changes nothing');
+        window.confirm = () => true;
+        releaseCutPreview = false;
+        bulkCard(2).click(); await new Promise(resolve=>setTimeout(resolve,20));
         await setZoom(50);
         document.getElementById('host').style.transform='scale(0.7)';
         document.getElementById('host').style.transformOrigin='top left';
@@ -473,8 +498,10 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         window.confirm = () => true;
         bulkDeleteError = true;
         root.querySelector('.h3cm-bulk-preview button').click(); await new Promise(resolve=>setTimeout(resolve,20));
-        check(bulkDeletes === 1 && root.querySelector('.h3cm-bulk-preview').hidden,
-            'Server conflict discards the old confirmation, retaining the selection');
+        check(bulkDeletes === 1 && !root.querySelector('.h3cm-bulk-preview').hidden
+            && !root.querySelector('.h3cm-bulk-preview button')
+            && root.querySelector('.h3cm-bulk-preview').textContent.includes('Preview changed'),
+            'Server conflict keeps its error visible and discards the stale confirmation');
         check(selectedKeys().length === 1, 'A rejected deletion keeps the selection available for another preview');
         bulkDeleteError = false;
         root.querySelector('.h3cm-bulk-delete').click(); await new Promise(resolve=>setTimeout(resolve,20));

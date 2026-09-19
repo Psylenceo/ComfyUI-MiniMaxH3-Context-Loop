@@ -117,6 +117,7 @@ export function mountCheckpointMultiSelect(container, {enabled, onChange}) {
     window.addEventListener('blur', blur);
     return {
         keys:() => [...selected],
+        select(keys) { finish(null, true); anchor = keys.at(-1) ?? null; update(new Set(keys)); },
         clear() { finish(null, true); anchor = null; update(new Set()); },
         reconcile() {
             finish(null, true);

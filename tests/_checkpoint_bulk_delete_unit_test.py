@@ -147,6 +147,83 @@ async def check():
         assert (2,attached['revision']) in manager.graph._scan(reuse.name)['records']
         print('Bulk checkpoint deletion: sealed chapters, retained aliases/shared media, legacy and organized duplicate storage pass')
 
+        # An ALT selected in this branch's cut can be removed in the same
+        # confirmed transaction, without editing another branch or the Plan.
+        cut = root / 'h3_chains' / 'cut'
+        base, _ = h.write_revision(cut, 1, 'a'*32, 1, active=True, run_name=cut.name)
+        alt, _ = h.write_revision(cut, 1, 'b'*32, 2, run_name=cut.name)
+        alt['segment'].update(take_kind='editorial_alternate', alternate_of_revision='a'*32)
+        (cut / 'checkpoints' / ('clip_0001.' + 'b'*32 + '.json')).write_text(json.dumps(alt))
+        replacement = {'scene':1,'base_revision':'a'*32,'alternate_revision':'b'*32}
+        unrelated = {'scene':2,'base_revision':'c'*32,'alternate_revision':'d'*32}
+        editorial_path = cut / 'editorial.json'
+        editorial = {'run_name':cut.name, 'replacements':[replacement, unrelated], 'timeline':{'keep':'exact'}}
+        editorial_path.write_text(json.dumps(editorial))
+        targets = [{'scene':1,'revision':'b'*32}]
+        before = snapshot(cut)
+        assert manager.graph.deletion_preview(cut.name, 1, 'b'*32)['final_cut_selection']
+        plan = manager.preview(cut.name, targets)
+        assert plan['allowed'], plan['blockers']
+        assert plan['editorial_releases'] == [replacement]
+        assert snapshot(cut) == before, 'editorial preview mutated the cut'
+        base_only = manager.preview(cut.name, [{'scene':1,'revision':'a'*32}])
+        assert not base_only['allowed'], 'an unselected ALT still protects its base'
+        both = targets + [{'scene':1,'revision':'a'*32}]
+        assert manager.preview(cut.name, both)['allowed'], 'base and ALT must be deletable together'
+
+        # Changing even an unrelated cut setting invalidates the confirmation.
+        editorial_path.write_text(json.dumps(dict(editorial, timeline={'keep':'changed'})))
+        try:
+            manager.delete(cut.name, targets, plan['snapshot'])
+        except bulk.CheckpointDeleteBlocked:
+            pass
+        else:
+            raise AssertionError('a stale final-cut preview was accepted')
+        editorial_path.write_bytes(before['editorial.json'])
+        other_cut = cut / 'branches' / ('e'*32) / 'editorial.json'
+        other_cut.parent.mkdir(parents=True)
+        other_cut.write_bytes(editorial_path.read_bytes())
+        assert not manager.preview(cut.name, targets)['allowed'], 'another branch still uses this ALT'
+        other_cut.write_text(json.dumps({'replacements':[unrelated]}))
+        before = snapshot(cut)
+        plan = manager.preview(cut.name, targets)
+        with patch.object(manager.graph, '_atomic_json', side_effect=OSError('synthetic cut write failure')):
+            try:
+                manager.delete(cut.name, targets, plan['snapshot'])
+            except OSError:
+                pass
+            else:
+                raise AssertionError('cut write failure was not raised')
+        assert snapshot(cut) == before, 'cut write failure must restore media and editorial bytes'
+        manager.delete(cut.name, targets, plan['snapshot'])
+        assert json.loads(editorial_path.read_text()) == dict(editorial, replacements=[unrelated])
+        assert other_cut.read_bytes() == before[str(other_cut.relative_to(cut))]
+        assert (cut / 'checkpoints' / 'clip_0001.json').exists(), 'deleting ALT must retain original assignment'
+        assert manager.graph._scan(cut.name)['records'][(1,'a'*32)]['active']
+
+        # Repeat under a named branch: Original's cut stays byte-for-byte
+        # unchanged, even when it references a different ALT in the same scene.
+        alt, _ = h.write_revision(cut, 1, 'b'*32, 2, run_name=cut.name)
+        alt['segment'].update(take_kind='editorial_alternate', alternate_of_revision='a'*32)
+        (cut / 'checkpoints' / ('clip_0001.' + 'b'*32 + '.json')).write_text(json.dumps(alt))
+        branch = cut / 'branches' / ('f'*32)
+        (branch / 'checkpoints').mkdir(parents=True)
+        (branch / 'branch.json').write_text(json.dumps({'id':'f'*32,'name':'Obsolete'}))
+        (branch / 'checkpoints' / 'clip_0001.json').write_text(json.dumps(base))
+        (branch / 'editorial.json').write_text(json.dumps(editorial))
+        scope = importlib.import_module(h.PACKAGE + '.branch_scope')
+        before = snapshot(cut)
+        with scope.branch_scope(cut.name, 'f'*32):
+            plan = manager.preview(cut.name, targets)
+            assert plan['allowed'], plan['blockers']
+            manager.delete(cut.name, targets, plan['snapshot'])
+        assert editorial_path.read_bytes() == before['editorial.json']
+        assert json.loads((branch / 'editorial.json').read_text()) == dict(editorial, replacements=[unrelated])
+        for path, data in before.items():
+            if path.startswith('branches/' + 'e'*32):
+                assert (cut / path).read_bytes() == data
+        print('Bulk final-cut deletion: exact releases, base/ALT selection, other branches, stale preview and atomic rollback pass')
+
 
 if __name__ == '__main__':
     asyncio.run(check())

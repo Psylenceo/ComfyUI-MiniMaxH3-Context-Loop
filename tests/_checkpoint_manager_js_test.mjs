@@ -144,6 +144,9 @@ assert.match(checkpointDependencyText(payload.revisions[1]),
     /Scene 2 · hall uses Video 39f \/ Audio 44f via guide/);
 assert.match(checkpointDependencyText(payload.revisions[2]),
     /structural continuation edge \(Video 0f \/ Audio 0f\)/);
+assert.match(checkpointDependencyText({scene:1,scene_id:"arrival",take_kind:"editorial_alternate",
+    revision:"b".repeat(32),alternate_of_revision:"a".repeat(32)}),
+    /ALT bbbbbbbb depends on base take aaaaaaaa/);
 assert.match(checkpointDeletionTitle({allowed:true, owned_file_count:5,
     reclaimed_bytes:1536}), /Safe leaf deletion · 5 files · 1.5 KB/);
 assert.match(checkpointDeletionTitle({allowed:true, rollback:true,

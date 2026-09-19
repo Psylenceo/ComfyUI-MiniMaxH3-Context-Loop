@@ -4,7 +4,7 @@ import {api} from "/scripts/api.js";
 import {mountStorageInspector} from "./h3_storage_inspector.mjs?v=0.1.0";
 import {branchRequestPath, branchSelectionJson} from "./h3_working_branches.mjs?v=0.7.18";
 import {checkpointForkGraph, checkpointGraphKey, checkpointSaveOrder, checkpointGraphOutput, mountCheckpointGraphEdges} from "./h3_checkpoint_graph.mjs?v=0.7.20";
-import {mountCheckpointMultiSelect} from "./h3_checkpoint_multiselect.mjs?v=1";
+import {mountCheckpointMultiSelect} from "./h3_checkpoint_multiselect.mjs?v=2";
 import {
     CHECKPOINT_STAGES,
     checkpointStageVariants,
@@ -30,7 +30,7 @@ import {
     checkpointSetContinuity,
     formatCheckpointBytes,
     selectedCheckpointRevision,
-} from "./h3_checkpoint_manager_core.mjs?v=pixel-continuity-1";
+} from "./h3_checkpoint_manager_core.mjs?v=cut-cleanup-2";
 import {
     parsePlanJson,
     planToJson,
@@ -419,7 +419,6 @@ function mount(node) {
             workingSelect.value = selectedWorkingBranch(); return;
         }
         node.properties.h3_working_branch_id = workingSelect.value;
-        state.finalCutBranch = "auto";
         if (selectionWidget) selectionWidget.value = "";
         state.outputTip = null; state.selected = null;
         await refreshCheckpoints();
@@ -544,7 +543,10 @@ function mount(node) {
         bulkClear.disabled = state.busy || !count;
         bulkDelete.disabled = state.busy || !count;
         if (bulkConfirm) bulkConfirm.disabled = state.busy;
-        remove.disabled = state.busy || count > 0 || Boolean(state.attribution) || !state.deletion?.allowed;
+        const releaseCut = state.stage === "original" && state.deletion?.final_cut_selection;
+        remove.disabled = state.busy || Boolean(state.attribution) || (!count && !releaseCut && !state.deletion?.allowed);
+        remove.textContent = count ? `Delete selected (${count})…` : releaseCut ? "Remove from cut and delete…"
+            : state.stage === "original" ? "Delete selected revision" : "Delete processed version";
         removeObsolete.disabled = state.busy || count > 0 || Boolean(state.attribution) || !obsoletePathIdentity();
     }
     async function bulkDeleteAction(confirm = false) {
@@ -560,6 +562,7 @@ function mount(node) {
             preview.revisions.map(item => `S${item.scene} · ${item.revision.slice(0, 8)}`).join("\n") +
             `\n\n${preview.owned_file_count} files · ${formatCheckpointBytes(preview.reclaimed_bytes)}. ` +
             (preview.rollback_scenes.length ? `Active assignments for scenes ${preview.rollback_scenes.join(", ")} will be cleared. ` : "") +
+            ((preview.editorial_releases ?? []).length ? `Final-cut ALT selections in ${workingBranchName()} for scenes ${preview.editorial_releases.map(item => item.scene).join(", ")} will be removed. Other branches' cuts stay unchanged. ` : "") +
             "Unselected takes and shared files are kept. This cannot be undone."))) return;
         if (!confirm) invalidateBulkPreview();
         const epoch = bulkEpoch, run = state.runName, branch = selectedWorkingBranch();
@@ -582,6 +585,8 @@ function mount(node) {
                 bulkPanel.append(element("div", "", result.revisions.map(item => `S${item.scene} · ${item.revision.slice(0, 8)}`).join("; ")));
                 if (result.rollback_scenes.length) bulkPanel.append(element("div", "h3cm-error",
                     `Clears active assignments: ${result.rollback_scenes.join(", ")}`));
+                if (result.editorial_releases?.length) bulkPanel.append(element("div", "h3cm-error",
+                    `Removes final-cut ALT selections in ${workingBranchName(branch)}: ${result.editorial_releases.map(item => `S${item.scene} · ALT ${item.alternate_revision.slice(0, 8)}`).join("; ")}. Other branches' cuts are unchanged.`));
                 for (const reason of result.blockers) bulkPanel.append(element("div", "h3cm-error", reason));
                 if (result.allowed) {
                     bulkConfirm = button("Confirm bulk deletion", "Delete only the previewed selection", () => void bulkDeleteAction(true));
@@ -594,13 +599,19 @@ function mount(node) {
                 details.append(element("summary", "", "Files to delete / keep"), inventory);
                 bulkPanel.append(details, element("div", "h3cm-muted", `Kept: ${result.not_deleted.join("; ")}`));
                 bulkPanel.hidden = false;
+                bulkPanel.scrollIntoView?.({block:"nearest"});
                 status.textContent = result.allowed ? "Bulk deletion preview ready; nothing deleted yet." : "Selection is protected; see the bulk preview for details.";
             }
         } catch (error) {
-            if (epoch === bulkEpoch) { invalidateBulkPreview(); status.textContent = error.message; }
+            if (epoch === bulkEpoch) {
+                invalidateBulkPreview();
+                bulkPanel.replaceChildren(element("strong", "", "Batch deletion failed"), element("div", "h3cm-error", error.message));
+                bulkPanel.hidden = false;
+                status.textContent = error.message;
+            }
         } finally { setBusy(false); }
     }
-    branchesPanel.append(branchesTitle, graphTools, bulkTools, planContext, branches);
+    branchesPanel.append(branchesTitle, graphTools, bulkTools, bulkPanel, planContext, branches);
 
     function updateGraphZoomControls() {
         zoomInput.value = String(state.graphZoom);
@@ -683,7 +694,7 @@ function mount(node) {
     assignmentActions.append(activate, assignPlan, load);
     assignmentPanel.append(assignmentContext, assignmentActions);
     deletionActions.append(remove, removeObsolete);
-    deletion.append(bulkPanel, deletionActions, obsoletePanel, deletionTitle, deletionDetails);
+    deletion.append(deletionActions, obsoletePanel, deletionTitle, deletionDetails);
     root.append(head, runRow, storagePanel, workingRow, workingHelp, branchCleanupPanel, finalCutRow, outputRow, stageTabs, stageNote, chapterTabs, scenes,
         assignmentPanel, status, main, deletion);
 
@@ -2609,6 +2620,11 @@ function mount(node) {
 
     async function deleteSelected() {
         if (state.stage !== "original") return deleteProcessedVersion();
+        if (bulkSelection.keys().length) return bulkDeleteAction();
+        if (state.selected && state.deletion?.final_cut_selection && !state.busy) {
+            bulkSelection.select([checkpointRevisionKey(state.selected.scene, state.selected.revision)]);
+            return bulkDeleteAction();
+        }
         const record = state.selected;
         const plan = state.deletion;
         if (!record || !plan?.allowed || state.busy) return;
