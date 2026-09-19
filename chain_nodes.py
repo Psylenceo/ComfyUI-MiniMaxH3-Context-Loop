@@ -30207,8 +30207,10 @@ async def _preview_checkpoint_revision_deletion(request):
             {"error": "Checkpoint deletion preview requires JSON."},
             status=400)
     try:
-        payload = CheckpointGraphManager(_output_root()).deletion_preview(
-            body.get("run_name"), body.get("scene"), body.get("revision"))
+        # Preview scans and the Run lock can wait on slow project storage too.
+        payload = await asyncio.to_thread(
+            lambda: CheckpointGraphManager(_output_root()).deletion_preview(
+                body.get("run_name"), body.get("scene"), body.get("revision")))
     except FileNotFoundError as exc:
         return web.json_response({"error": str(exc)}, status=404)
     except (OSError, TypeError, ValueError, json.JSONDecodeError, KeyError) as exc:
@@ -32507,19 +32509,51 @@ async def _release_handoff(request):
     return web.json_response({"handoff": _handoff_record_view(record)})
 
 
+def _working_branch_store_command(output_root, run, selected, action, body,
+                                  ownership_proof=None):
+    """Keep branch disk I/O and whole lock lifetimes off the request loop."""
+    store = WorkingBranches(output_root, run)
+    if action == "list":
+        return store.listing()
+    if action == "load":
+        return store.load(selected)
+    with checkpoint_run_lock(output_root, run), project_write_guard(
+            output_root, run, ownership_proof, "edit a working branch"):
+        if action == "save":
+            return store.save(selected, body.get("authoring"), body.get("revision"),
+                              body.get("operation_id", ""))
+        if action == "create":
+            through = body.get("through_scene", 0)
+            recovered = store.retry_create(selected, body.get("name"), body.get("authoring"),
+                                           through, body.get("operation_id", ""))
+            if recovered is not None:
+                return recovered
+            with checkpoint_run_lock(output_root, run), branch_scope(run, selected):
+                active, stale = CheckpointGraphManager(output_root).active_selection(run)
+                if (type(through) is not int or through < 0 or through > MAX_SHOTS or
+                        any(i not in active or i in stale for i in range(1, through + 1))):
+                    raise ValueError("Fork requires a coherent saved prefix of the selected branch.")
+                for i in range(1, through + 1):
+                    _load_checkpoint_revision(run, i, active[i])
+                return store.create(selected, body.get("name"), body.get("authoring"), through,
+                                    body.get("operation_id", ""))
+        if action == "default":
+            return store.make_default(selected)
+        raise ValueError("Unknown working branch action.")
+
+
 async def _working_branch_command(request):
     try:
         body = dict(request.query) if request.method == "GET" else await request.json()
         if not isinstance(body, dict):
             raise ValueError("Working branch request must be a JSON object.")
         run = _strict_run_name(body.get("run_name"))
-        store = WorkingBranches(_output_root(), run)
         action = body.get("action", "list")
         selected = _working_branch_id(body.get("branch_id", "main"))
-        if action == "list":
-            return web.json_response(store.listing())
-        if action == "load":
-            return web.json_response(store.load(selected))
+        if action in ("list", "load"):
+            result = await asyncio.to_thread(
+                _working_branch_store_command, _output_root(), run, selected, action, body)
+            return web.json_response(result)
         if action in ("delete-path-preview", "delete-path"):
             if request.method != "POST":
                 return web.json_response({"error": "Branch cleanup requires POST."}, status=405)
@@ -32543,33 +32577,13 @@ async def _working_branch_command(request):
             return web.json_response(result)
         if request.method != "POST":
             return web.json_response({"error": "Branch changes require POST."}, status=405)
-        rejection = _project_write_rejection(request, run, "edit a working branch")
+        rejection = await asyncio.to_thread(
+            _project_write_rejection, request, run, "edit a working branch")
         if rejection is not None:
             return rejection
-        with checkpoint_run_lock(_output_root(), run), project_write_guard(_output_root(), run,
-                _request_project_ownership(request), "edit a working branch"):
-            if action == "save":
-                result = store.save(selected, body.get("authoring"), body.get("revision"),
-                                    body.get("operation_id", ""))
-            elif action == "create":
-                through = body.get("through_scene", 0)
-                recovered = store.retry_create(selected, body.get("name"), body.get("authoring"),
-                                               through, body.get("operation_id", ""))
-                if recovered is not None:
-                    return web.json_response(recovered)
-                with checkpoint_run_lock(_output_root(), run), branch_scope(run, selected):
-                    active, stale = CheckpointGraphManager(_output_root()).active_selection(run)
-                    if (type(through) is not int or through < 0 or through > MAX_SHOTS or
-                            any(i not in active or i in stale for i in range(1, through + 1))):
-                        raise ValueError("Fork requires a coherent saved prefix of the selected branch.")
-                    for i in range(1, through + 1):
-                        _load_checkpoint_revision(run, i, active[i])
-                    result = store.create(selected, body.get("name"), body.get("authoring"), through,
-                                          body.get("operation_id", ""))
-            elif action == "default":
-                result = store.make_default(selected)
-            else:
-                raise ValueError("Unknown working branch action.")
+        result = await asyncio.to_thread(
+            _working_branch_store_command, _output_root(), run, selected, action, body,
+            _request_project_ownership(request))
         return web.json_response(result)
     except CheckpointDeleteBlocked as exc:
         return web.json_response({"error": str(exc), "preview": exc.preview}, status=409)
