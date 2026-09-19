@@ -519,9 +519,8 @@ function mount(node) {
     const bulkTools = element("div", "h3cm-bulk-tools");
     const bulkCount = element("span", "h3cm-bulk-count", "0 selected");
     const bulkClear = button("Clear selection", "Clear the bulk selection (Escape also works)", () => bulkSelection.clear());
-    const bulkDelete = button("Delete selected…", "Preview deletion of exactly the selected saved takes", () => void bulkDeleteAction(), "h3cm-bulk-delete");
     const bulkHelp = element("small", "h3cm-muted", "Ctrl/Cmd-click: toggle · Shift-click: range · Shift-drag: rectangle");
-    bulkTools.append(bulkCount, bulkClear, bulkDelete, bulkHelp);
+    bulkTools.append(bulkCount, bulkClear, bulkHelp);
     const bulkPanel = element("div", "h3cm-bulk-preview");
     bulkPanel.hidden = true;
     let bulkPreview = null, bulkEpoch = 0, bulkScope = "", bulkConfirm = null;
@@ -537,16 +536,22 @@ function mount(node) {
         bulkPanel.hidden = true;
     }
     function updateBulkControls() {
-        const count = bulkSelection.keys().length;
+        const keys = bulkSelection.keys(), count = keys.length;
         bulkTools.hidden = state.stage !== "original";
         bulkCount.textContent = `${count} selected`;
         bulkClear.disabled = state.busy || !count;
-        bulkDelete.disabled = state.busy || !count;
         if (bulkConfirm) bulkConfirm.disabled = state.busy;
         const releaseCut = state.stage === "original" && state.deletion?.final_cut_selection;
+        const singleCut = releaseCut && (!count || (count === 1 && state.selected
+            && keys[0] === checkpointRevisionKey(state.selected.scene, state.selected.revision)));
         remove.disabled = state.busy || Boolean(state.attribution) || (!count && !releaseCut && !state.deletion?.allowed);
-        remove.textContent = count ? `Delete selected (${count})…` : releaseCut ? "Remove from cut and delete…"
+        remove.textContent = singleCut ? "Remove from cut and delete…" : count ? `Delete selected (${count})…`
             : state.stage === "original" ? "Delete selected revision" : "Delete processed version";
+        // A batch preview replaces the single-take warning and inventory.
+        // Keep all actions and their feedback in this same deletion panel.
+        deletionTitle.hidden = deletionDetails.hidden = count > 0 || !bulkPanel.hidden;
+        deletion.classList.toggle("h3cm-delete-blocked", count > 0
+            ? bulkPreview?.allowed === false : Boolean(state.deletion && !state.deletion.allowed));
         removeObsolete.disabled = state.busy || count > 0 || Boolean(state.attribution) || !obsoletePathIdentity();
     }
     async function bulkDeleteAction(confirm = false) {
@@ -590,7 +595,12 @@ function mount(node) {
                 for (const reason of result.blockers) bulkPanel.append(element("div", "h3cm-error", reason));
                 if (result.allowed) {
                     bulkConfirm = button("Confirm bulk deletion", "Delete only the previewed selection", () => void bulkDeleteAction(true));
-                    bulkPanel.append(bulkConfirm);
+                    const actions = element("div", "h3cm-delete-actions");
+                    actions.append(bulkConfirm, button("Cancel", "Close this preview without deleting anything", () => {
+                        if (state.busy) return;
+                        invalidateBulkPreview(); updateBulkControls();
+                    }, "h3cm-bulk-cancel"));
+                    bulkPanel.append(actions);
                 }
                 const details = element("details", "h3cm-delete-details");
                 const inventory = element("div", "h3cm-delete-body");
@@ -611,7 +621,7 @@ function mount(node) {
             }
         } finally { setBusy(false); }
     }
-    branchesPanel.append(branchesTitle, graphTools, bulkTools, bulkPanel, planContext, branches);
+    branchesPanel.append(branchesTitle, graphTools, planContext, branches);
 
     function updateGraphZoomControls() {
         zoomInput.value = String(state.graphZoom);
@@ -694,7 +704,7 @@ function mount(node) {
     assignmentActions.append(activate, assignPlan, load);
     assignmentPanel.append(assignmentContext, assignmentActions);
     deletionActions.append(remove, removeObsolete);
-    deletion.append(deletionActions, obsoletePanel, deletionTitle, deletionDetails);
+    deletion.append(bulkTools, deletionActions, bulkPanel, obsoletePanel, deletionTitle, deletionDetails);
     root.append(head, runRow, storagePanel, workingRow, workingHelp, branchCleanupPanel, finalCutRow, outputRow, stageTabs, stageNote, chapterTabs, scenes,
         assignmentPanel, status, main, deletion);
 

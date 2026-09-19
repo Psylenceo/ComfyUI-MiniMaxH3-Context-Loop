@@ -167,7 +167,7 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         check(JSON.parse(node.widgets[0].value).lineage.length === 1,"Preview cannot expand output");
         check(action.getBoundingClientRect().bottom <= root.querySelector(".h3cm-main").getBoundingClientRect().top,
             "Assignment is visible above the graph");
-        const deletion = root.querySelector(".h3cm-delete"), remove = deletion.querySelector("button");
+        const deletion = root.querySelector(".h3cm-delete"), remove = deletion.querySelector(".h3cm-delete-actions .h3cm-delete-button");
         const details = deletion.querySelector("details");
         check(!details.open,"The file inventory starts collapsed, with its controls still visible");
         details.open = true;
@@ -299,12 +299,19 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         check(bulkRequests.length === 1 && bulkRequests[0].revisions.map(item=>item.scene).join(',') === '2,3,4',
             'One bulk preview contains precisely the explicit selection');
         check(root.querySelector('.h3cm-bulk-preview').textContent.includes('Confirm bulk deletion'), 'Allowed preview requires explicit confirmation');
-        check(root.querySelector('.h3cm-bulk-tools').nextElementSibling === root.querySelector('.h3cm-bulk-preview'),
-            'Batch confirmation appears beside selection controls, not below the entire saved graph');
+        const deletionPanel = root.querySelector('.h3cm-delete');
+        const deletionActions = deletionPanel.querySelector('.h3cm-delete-actions');
+        check(deletionActions.nextElementSibling === root.querySelector('.h3cm-bulk-preview')
+            && deletionPanel.contains(root.querySelector('.h3cm-bulk-tools')),
+            'Selection, delete and confirmation controls stay together below the graph');
+        check(!root.querySelector('.h3cm-bulk-delete'), 'No duplicate batch-delete button above the graph');
+        check(deletionPanel.querySelector(':scope > .h3cm-delete-title').hidden
+            && deletionPanel.querySelector(':scope > .h3cm-delete-details').hidden,
+            'Batch preview replaces stale single-take warnings and inventory');
         modifiedClick(4,{ctrlKey:true});
         check(root.querySelector('.h3cm-bulk-preview').hidden, 'Selection change invalidates the prior confirmation');
         bulkAllowed = false;
-        root.querySelector('.h3cm-bulk-delete').click(); await new Promise(resolve=>setTimeout(resolve,20));
+        deletionActions.querySelector('button').click(); await new Promise(resolve=>setTimeout(resolve,20));
         check(!root.querySelector('.h3cm-bulk-preview button') && root.querySelector('.h3cm-bulk-preview').textContent.includes('unselected scene'),
             'Protected selection displays the reason without a confirm button');
         root.querySelector('.h3cm-branches').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
@@ -319,6 +326,19 @@ async function browserChecks(extensionSource, keepStorageOpen) {
             'Single ALT release uses the exact same batch transaction with one target');
         check(root.querySelector('.h3cm-bulk-preview').textContent.includes('Removes final-cut ALT selections in Original'),
             'Preview identifies which branch cut will change');
+        check(releaseAlt.textContent === 'Remove from cut and delete…',
+            'Single ALT action keeps its label after becoming a one-item batch');
+        check(deletionPanel.contains(root.querySelector('.h3cm-bulk-preview'))
+            && !deletionPanel.classList.contains('h3cm-delete-blocked'),
+            'Allowed ALT confirmation is in the clicked panel without the stale blocked state');
+        const confirmationGap = root.querySelector('.h3cm-bulk-preview button').getBoundingClientRect().top
+            - releaseAlt.getBoundingClientRect().bottom;
+        check(confirmationGap >= 0 && confirmationGap < 180,
+            'ALT confirmation appears directly below the clicked button, not across the graph');
+        root.querySelector('.h3cm-bulk-cancel').click();
+        check(root.querySelector('.h3cm-bulk-preview').hidden && bulkDeletes === 0 && selectedKeys().length === 1,
+            'Cancel closes the inline preview without deleting or losing the selection');
+        releaseAlt.click(); await new Promise(resolve=>setTimeout(resolve,20));
         let releaseConfirmation = '';
         window.confirm = message => { releaseConfirmation = message; return false; };
         root.querySelector('.h3cm-bulk-preview button').click(); await new Promise(resolve=>setTimeout(resolve,20));
@@ -491,7 +511,7 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         chapter('Chapter 2');
         bulkAllowed = true;
         toggleLast();
-        root.querySelector('.h3cm-bulk-delete').click(); await new Promise(resolve=>setTimeout(resolve,20));
+        deletionActions.querySelector('button').click(); await new Promise(resolve=>setTimeout(resolve,20));
         window.confirm = () => false;
         root.querySelector('.h3cm-bulk-preview button').click(); await new Promise(resolve=>setTimeout(resolve,20));
         check(bulkDeletes === 0, 'Cancelled bulk confirmation sends no delete');
@@ -504,7 +524,7 @@ async function browserChecks(extensionSource, keepStorageOpen) {
             'Server conflict keeps its error visible and discards the stale confirmation');
         check(selectedKeys().length === 1, 'A rejected deletion keeps the selection available for another preview');
         bulkDeleteError = false;
-        root.querySelector('.h3cm-bulk-delete').click(); await new Promise(resolve=>setTimeout(resolve,20));
+        deletionActions.querySelector('button').click(); await new Promise(resolve=>setTimeout(resolve,20));
         root.querySelector('.h3cm-bulk-preview button').click(); await new Promise(resolve=>setTimeout(resolve,50));
         check(bulkDeletes === 2 && selectedKeys().length === 0, 'Successful bulk deletion clears selection and refreshes');
         check(node.widgets[0].value === output, 'Bulk deletion never rewrites a pinned output');
