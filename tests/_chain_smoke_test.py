@@ -1087,13 +1087,13 @@ def main():
     print("trim: AV tails frame-locked; optional visual overlap is clamped and "
           "scene state overrides the legacy Plan-default wire")
 
-    real_st_load = chain._st_load
+    real_audio_load = chain._load_checkpoint_audio
     try:
         loads = iter([
             {"delivered_audio": torch.ones((1, 2, 1667))},
             {"delivered_audio": torch.ones((1, 2, 1667))},
         ])
-        chain._st_load = lambda _path: next(loads)
+        chain._load_checkpoint_audio = lambda _path: next(loads)
         cumulative_trimmed = chain._generated_audio({"segments": [
             {"index": 1, "checkpoint": "one", "sample_rate": 8000,
              "delivered_frames": 5},
@@ -1127,7 +1127,7 @@ def main():
             chain._prelude_audio = real_prelude_audio
         assert joined["waveform"].shape[-1] == round(10 / 24 * 8000)
     finally:
-        chain._st_load = real_st_load
+        chain._load_checkpoint_audio = real_audio_load
     print("generated audio: per-scene rounding reconciled at cumulative frame "
           "boundaries for both trim and pad cases")
 

@@ -29,10 +29,11 @@ import shutil
 import subprocess
 import struct
 import sys
+import threading
 import time
 import uuid
 import wave
-from collections import deque
+from collections import OrderedDict, deque
 from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from fractions import Fraction
@@ -61,9 +62,10 @@ except ImportError:  # Pillow ships with ComfyUI.
     Image = ImageOps = PngImagePlugin = None
 
 try:
+    from safetensors import safe_open as _st_safe_open
     from safetensors.torch import load_file as _st_load, save_file as _st_save
 except ImportError:
-    _st_load = _st_save = None
+    _st_safe_open = _st_load = _st_save = None
 
 try:
     from comfy_execution.graph_utils import GraphBuilder, ExecutionBlocker, is_link
@@ -8478,6 +8480,50 @@ class _ResumeArtifactVerification:
                 "H3 resume artifact changed during integrity verification: "
                 "%s. Retry after the file has finished changing." % path)
         self._hashes[path] = (before, digest)
+        self.hashed_files += 1
+        self.hashed_bytes += before[2]
+        return digest
+
+
+class _AssemblyArtifactVerification(_ResumeArtifactVerification):
+    """Bounded process-local digest reuse for immutable export artifacts.
+
+    Never trust persisted cache data or an expected hash from a manifest.
+    Resume and standalone verification keep their independent strict checks.
+    """
+
+    _cache = OrderedDict()
+    _cache_lock = threading.Lock()
+    _cache_limit = 4096
+
+    def sha256(self, path):
+        _throw_if_review_interrupted()
+        path = os.path.normcase(os.path.abspath(path))
+        try:
+            before = self._stamp(path)
+        except OSError:
+            with self._cache_lock:
+                self._cache.pop(path, None)
+            raise
+        with self._cache_lock:
+            saved = self._cache.pop(path, None)
+            if saved is not None and saved[0] == before:
+                self._cache[path] = saved
+                self.reused_files += 1
+                return saved[1]
+        # Do not hold the cache lock during disk I/O. Independent exports
+        # can verify different files without serializing behind this read.
+        digest = _file_sha256(
+            path, check_interrupted=_throw_if_review_interrupted)
+        if self._stamp(path) != before:
+            raise ValueError(
+                "H3 assembly artifact changed during integrity verification: "
+                "%s. Retry after the file has finished changing." % path)
+        with self._cache_lock:
+            self._cache[path] = (before, digest)
+            self._cache.move_to_end(path)
+            while len(self._cache) > self._cache_limit:
+                self._cache.popitem(last=False)
         self.hashed_files += 1
         self.hashed_bytes += before[2]
         return digest
@@ -22765,9 +22811,21 @@ class MiniMaxH3ChainChapterLoad:
             status)
 
 
-def _generated_audio(manifest: dict[str, Any]) -> dict[str, Any]:
-    if _st_load is None or torch is None:
+def _load_checkpoint_audio(path: str) -> dict[str, Any]:
+    """Read PCM only; do not materialize video/RGB/latent checkpoint tensors."""
+    if _st_safe_open is None or torch is None:
         raise RuntimeError("Generated-audio assembly requires safetensors and torch.")
+    with _st_safe_open(path, framework="pt", device="cpu") as saved:
+        available = set(saved.keys())
+        # Small clones release the checkpoint's mapped storage after reading,
+        # rather than keeping every scene's entire mapping alive for its PCM.
+        return {key: saved.get_tensor(key).clone()
+                for key in ("delivered_audio", "audio_with_overlap")
+                if key in available}
+
+
+def _generated_audio(manifest: dict[str, Any]) -> dict[str, Any]:
+    started = time.perf_counter()
     segments = list(manifest["segments"])
     if not segments:
         raise ValueError("Generated-audio assembly requires at least one scene.")
@@ -22778,7 +22836,7 @@ def _generated_audio(manifest: dict[str, Any]) -> dict[str, Any]:
         compatibility.get("continuation_mode", "guide"))
     for segment in segments:
         checkpoint = _absolute_output_path(segment["checkpoint"])
-        tensors = _st_load(checkpoint)
+        tensors = _load_checkpoint_audio(checkpoint)
         if "delivered_audio" not in tensors:
             raise ValueError(
                 "Checkpoint for clip %d has no delivered audio. Wire decoded "
@@ -22835,7 +22893,11 @@ def _generated_audio(manifest: dict[str, Any]) -> dict[str, Any]:
             "mode": mode,
         })
 
-    return _assemble_generated_audio_records(records, int(sample_rate))
+    result = _assemble_generated_audio_records(records, int(sample_rate))
+    _LOG.info(
+        "H3 assembly audio: read PCM tensors only and joined %d scenes in %.2fs.",
+        len(segments), time.perf_counter() - started)
+    return result
 
 
 def _assemble_generated_audio_records(
@@ -22999,6 +23061,7 @@ def _audio_with_editorial_timeline(
 
 
 def _validate_prelude(manifest: dict[str, Any]) -> dict[str, Any] | None:
+    verifier = _AssemblyArtifactVerification()
     value = manifest.get("prelude")
     if value is None:
         return None
@@ -23021,7 +23084,7 @@ def _validate_prelude(manifest: dict[str, Any]) -> dict[str, Any] | None:
     video_path = _absolute_output_path(video_value)
     if not os.path.isfile(video_path):
         raise FileNotFoundError("H3 chain prelude video is missing: %s" % video_path)
-    if _file_sha256(video_path) != expected_video_hash:
+    if verifier.sha256(video_path) != expected_video_hash:
         raise ValueError("H3 chain prelude video failed its SHA-256 integrity check.")
     audio_value = value.get("audio")
     if audio_value is not None:
@@ -23032,7 +23095,7 @@ def _validate_prelude(manifest: dict[str, Any]) -> dict[str, Any] | None:
         if not os.path.isfile(audio_path):
             raise FileNotFoundError(
                 "H3 chain prelude audio is missing: %s" % audio_path)
-        if _file_sha256(audio_path) != expected_audio_hash:
+        if verifier.sha256(audio_path) != expected_audio_hash:
             raise ValueError(
                 "H3 chain prelude audio failed its SHA-256 integrity check.")
     return value
@@ -23162,6 +23225,8 @@ def _audio_with_prelude(
 
 
 def _validate_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    started = time.perf_counter()
+    verifier = _AssemblyArtifactVerification()
     segments = manifest.get("segments") or []
     clip_count = int(manifest.get("clip_count", 0))
     if clip_count < 1 or len(segments) != clip_count:
@@ -23172,13 +23237,20 @@ def _validate_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     total_frames = 0
     for segment in segments:
         index = int(segment["index"])
-        _verify_segment_artifacts(segment, index)
+        _verify_segment_artifacts(
+            segment, index, artifact_verification=verifier)
         total_frames += int(segment.get("delivered_frames", 0))
     expected_frames = int(manifest.get("total_delivered_frames", -1))
     if total_frames != expected_frames:
         raise ValueError(
             "H3 chain manifest segment durations total %d frames; expected %d."
             % (total_frames, expected_frames))
+    _LOG.info(
+        "H3 assembly verification: checked %d scenes in %.2fs; hashed %d "
+        "files (%.2f GiB), reused %d unchanged file hashes.",
+        len(segments), time.perf_counter() - started,
+        verifier.hashed_files, verifier.hashed_bytes / (1024 ** 3),
+        verifier.reused_files)
     return segments
 
 
