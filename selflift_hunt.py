@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
 import threading
 
 _ACTIVE = set()
@@ -173,6 +174,13 @@ class MiniMaxH3SelfLiftSeedHunt:
                        "Middle passes still save for recovery; no Tiny-VAE preview is required. "
                        "Applies when queued; does not change an already running hunt or the final Review Gate.",
         })
+        schema["optional"]["run_mode"] = (["resume", "regenerate"], {
+            "default": "resume",
+            "tooltip": "Resume reuses this scene's latest saved attempt (including finished results). "
+                       "Regenerate starts a fresh attempt each time this node executes, keeping older takes "
+                       "and saved clips. After a failure, switch back to Resume to recover the new attempt. "
+                       "Applies to each scene in the queued range; seed and sampling settings stay unchanged.",
+        })
         schema["hidden"] = {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO",
                             "unique_id": "UNIQUE_ID", "dynprompt": "DYNPROMPT"}
         return schema
@@ -197,7 +205,7 @@ class MiniMaxH3SelfLiftSeedHunt:
                      cfg=1.0, negative=None, candidate_count=4, batch_name="hunt_1",
                      tiny_vae="taeh3.safetensors", prompt=None, extra_pnginfo=None,
                      unique_id=None, dynprompt=None, auto_remove_saved_takes=False, review_enabled=True,
-                     model_hires=None):
+                     model_hires=None, run_mode="resume"):
         import folder_paths
         import torch
         import comfy.nested_tensor
@@ -208,6 +216,8 @@ class MiniMaxH3SelfLiftSeedHunt:
         from .selflift_preview import check_preview, save_preview
 
         plan = state["plan"]
+        if run_mode not in ("resume", "regenerate"):
+            raise ValueError("SelfLift run_mode must be resume or regenerate.")
         settings = plan.get("selflift_sampling", {})
         if not settings.get("enabled"):
             def ordinary():
@@ -254,12 +264,23 @@ class MiniMaxH3SelfLiftSeedHunt:
         if sampler_contract is not None:
             # Euler identities remain byte-for-byte compatible with old hunts.
             contract["sampler_contract"] = sampler_contract
-        key = digest(contract)
+        base_key = digest(contract)
         with _ACTIVE_LOCK:
-            if key in _ACTIVE or key in _CLEANING:
+            if base_key in _ACTIVE or base_key in _CLEANING:
                 raise ValueError("This SelfLift hunt is already running.")
-            _ACTIVE.add(key)
+            _ACTIVE.add(base_key)
+        key = base_key
+        claimed = False
         try:
+            key = await _work(store.attempt_key, {"id": base_key,
+                "run_name": plan["run_name"], "branch_id": contract["branch_id"]},
+                regenerate=run_mode == "regenerate")
+            with _ACTIVE_LOCK:
+                if key != base_key and (key in _ACTIVE or key in _CLEANING):
+                    raise ValueError("This SelfLift attempt is already running or being cleaned.")
+                _ACTIVE.add(key)
+                claimed = True
+            logging.info("[SelfLift] scene %d: %s attempt %s", scene, run_mode, key[:12])
             record = await _work(store.create, {"id": key, "run_name": plan["run_name"],
                 "branch_id": contract["branch_id"], "scene": scene, "scene_name": shot.get("id", str(scene)),
                 "batch_name": str(batch_name), "base_seed": str(int(seed)), "phase": "saved",
@@ -374,6 +395,7 @@ class MiniMaxH3SelfLiftSeedHunt:
             await _work(update, phase="high", error=None)
             notify()
             if finished_path.is_file():
+                logging.info("[SelfLift] scene %d: reusing finished take %d; no sampling", scene, selected["ordinal"])
                 output = await _work(load_bundle, finished_path)
             else:
                 middle = await _work(load_bundle, folder / selected["checkpoint"])
@@ -389,6 +411,7 @@ class MiniMaxH3SelfLiftSeedHunt:
             notify()
             status = "SelfLift take %d; seed %s; %d low + %d high steps" % (
                 selected["ordinal"], selected["seed"], total-high, high)
+            status += "; %s attempt %s" % (run_mode, key[:12])
             if model_hires is not None:
                 status += "; separate finishing checkpoint"
             if not review_enabled:
@@ -399,13 +422,16 @@ class MiniMaxH3SelfLiftSeedHunt:
                 status, chosen_state)}
         except BaseException as exc:
             try:
-                await _work(store.update, key, lambda r: r.update(phase="paused", error=str(exc)[:500]))
+                if claimed:
+                    await _work(store.update, key, lambda r: r.update(phase="paused", error=str(exc)[:500]))
             except Exception:
                 pass
             raise
         finally:
             with _ACTIVE_LOCK:
-                _ACTIVE.discard(key)
+                if claimed:
+                    _ACTIVE.discard(key)
+                _ACTIVE.discard(base_key)
 
 
 def register_routes():

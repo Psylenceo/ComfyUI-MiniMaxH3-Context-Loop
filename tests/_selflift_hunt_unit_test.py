@@ -112,8 +112,90 @@ class HuntTests(unittest.IsolatedAsyncioTestCase):
     async def test_review_gate_schema_appends_default_on_for_old_workflows(self):
         with patch.object(preview, "tiny_models", return_value=["taeh3.safetensors"]):
             optional = hunt.MiniMaxH3SelfLiftSeedHunt.INPUT_TYPES()["optional"]
-        self.assertEqual(list(optional)[-2:], ["auto_remove_saved_takes", "review_enabled"])
+        self.assertEqual(list(optional)[-3:], ["auto_remove_saved_takes", "review_enabled", "run_mode"])
         self.assertIs(optional["review_enabled"][1]["default"], True)
+        self.assertEqual(optional["run_mode"][1]["default"], "resume")
+
+    async def test_regenerate_keeps_old_attempt_and_resume_reuses_new_finished_result(self):
+        def prompt(mode):
+            return {"model": {"class_type": "UNETLoader", "inputs": {"unet_name": "test"}},
+                    "hunt": {"class_type": "MiniMaxH3SelfLiftSeedHunt",
+                             "inputs": {"model": ["model", 0], "run_mode": mode}}}
+        await self.run_node(1, review_enabled=False, prompt=prompt("resume"), unique_id="hunt")
+        old = self.store.list()[0]
+        old_folder = self.store.locate(old["id"])
+        old_files = {p.name: p.read_bytes() for p in old_folder.iterdir()}
+        CALLS.clear()
+        await self.run_node(1, review_enabled=False, run_mode="regenerate",
+                            prompt=prompt("regenerate"), unique_id="hunt")
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(4, 6), (8, 12)])
+        latest = self.store.list()[0]
+        self.assertNotEqual(latest["id"], old["id"])
+        self.assertEqual({p.name: p.read_bytes() for p in old_folder.iterdir()}, old_files)
+        self.store = HuntStore(self.root)
+        CALLS.clear()
+        resumed = await self.run_node(1, review_enabled=False, run_mode="resume",
+                                      prompt=prompt("resume"), unique_id="hunt")
+        self.assertEqual(resumed["ui"]["h3_selflift_hunt"], [latest["id"]])
+        self.assertEqual(CALLS, [])
+        self.assertEqual(len(self.store.list()), 2)
+
+    async def test_each_explicit_regeneration_creates_another_attempt(self):
+        first = await self.run_node(1, review_enabled=False, run_mode="regenerate")
+        CALLS.clear()
+        second = await self.run_node(1, review_enabled=False, run_mode="regenerate")
+        self.assertNotEqual(first["ui"], second["ui"])
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(4, 6), (8, 12)])
+        self.assertEqual(len(self.store.list()), 2)
+
+    async def test_invalid_attempt_pointer_fails_without_sampling_or_falling_back(self):
+        await self.run_node(1, review_enabled=False, run_mode="regenerate")
+        latest = self.store.list()[0]
+        pointers = self.store.locate(latest["id"]).parent / "attempts"
+        pointer = next(pointers.glob("*.json"))
+        original = json.loads(pointer.read_text())
+        for invalid in ({**original, "id": "../escape"}, {**original, "base": "wrong"}):
+            store_module.atomic_json(pointer, invalid)
+            CALLS.clear()
+            with self.assertRaisesRegex(ValueError, "attempt pointer"):
+                await self.run_node(1, review_enabled=False)
+            self.assertEqual(CALLS, [])
+            self.assertFalse(hunt._ACTIVE)
+            self.assertEqual(self.store.read(latest["id"])["phase"], "finished")
+
+    async def test_regenerated_attempt_resumes_after_high_failure_without_repeating_low(self):
+        await self.run_node(1, review_enabled=False)
+        old = self.store.list()[0]
+        original = runtime.progressive_sample
+        def fail_high(*args, **kwargs):
+            if kwargs.get("handoff") is not None:
+                raise RuntimeError("new attempt high OOM")
+            return original(*args, **kwargs)
+        with patch.object(runtime, "progressive_sample", side_effect=fail_high):
+            with self.assertRaisesRegex(RuntimeError, "new attempt high OOM"):
+                await self.run_node(1, review_enabled=False, run_mode="regenerate")
+        latest = self.store.list()[0]
+        self.assertNotEqual(latest["id"], old["id"])
+        self.store = HuntStore(self.root)
+        CALLS.clear()
+        result = await self.run_node(1, review_enabled=False, run_mode="resume")
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(8, 12)])
+        self.assertEqual(result["ui"]["h3_selflift_hunt"], [latest["id"]])
+        self.assertEqual(self.store.read(old["id"])["phase"], "finished")
+        self.assertFalse(hunt._ACTIVE)
+
+    async def test_cleanup_of_new_attempt_never_falls_back_to_old_finished_result(self):
+        await self.run_node(1, review_enabled=False)
+        old = self.store.list()[0]
+        result = await self.run_node(1, review_enabled=False, run_mode="regenerate",
+                                     auto_remove_saved_takes=True)
+        latest = self.store.list()[0]
+        hunt.cleanup_after_segment_save(result["result"][2], self.root, logging.getLogger("hunt-test"))
+        self.assertTrue(self.store.locate(old["id"]).is_dir())
+        CALLS.clear()
+        resumed = await self.run_node(1, review_enabled=False)
+        self.assertEqual([v["shape"][-2:] for v in CALLS], [(4, 6), (8, 12)])
+        self.assertEqual(resumed["ui"]["h3_selflift_hunt"], [latest["id"]])
 
     async def test_gate_off_runs_one_take_without_preview_and_keeps_recovery(self):
         with patch.object(preview, "check_preview", side_effect=AssertionError("No decoder needed")), \

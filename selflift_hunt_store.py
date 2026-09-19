@@ -160,6 +160,35 @@ class HuntStore:
     def read(self, key):
         return json.loads((self.locate(key) / "batch.json").read_text(encoding="utf-8"))
 
+    def attempt_key(self, record, regenerate=False):
+        """Select the latest attempt without changing the sampling contract.
+
+        Publish before sampling so a restart can recover even an interrupted
+        batch creation. Keep the pointer after cleanup: never fall back to an
+        older finished result when the latest attempt's scratch was removed.
+        """
+        from .chain_layout import create_project
+        run = _strict_run_name(record["run_name"])
+        if regenerate:
+            create_project(self.root / "h3_chains" / run)
+        base = record["id"]
+        pointer = self.directory(record).parent / "attempts" / (base + ".json")
+        with checkpoint_run_lock(str(self.root), run):
+            if regenerate:
+                attempt = uuid.uuid4().hex
+                key = digest({"base": base, "attempt": attempt})
+                atomic_json(pointer, {"base": base, "attempt": attempt, "id": key})
+                return key
+            try:
+                saved = json.loads(pointer.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                return base  # Preserve all pre-switch recovery identities.
+            if (not isinstance(saved, dict) or saved.get("base") != base
+                    or not re.fullmatch(r"[0-9a-f]{32}", str(saved.get("attempt", "")))
+                    or saved.get("id") != digest({"base": base, "attempt": saved["attempt"]})):
+                raise ValueError("Invalid SelfLift attempt pointer; saved takes were not changed.")
+            return saved["id"]
+
     def create(self, record):
         from .chain_layout import create_project
         create_project(self.root / "h3_chains" / _strict_run_name(record["run_name"]))
