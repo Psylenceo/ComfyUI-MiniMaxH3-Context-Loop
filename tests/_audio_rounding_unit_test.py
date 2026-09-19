@@ -43,7 +43,7 @@ def generated_audio_case(frames, saved_samples):
         {"delivered_audio": torch.ones((1, 2, count))}
         for count in saved_samples
     ])
-    chain._st_load = lambda _path: next(loads)
+    chain._load_checkpoint_audio = lambda _path: next(loads)
     return chain._generated_audio({"segments": [
         {
             "index": index,
@@ -56,7 +56,7 @@ def generated_audio_case(frames, saved_samples):
 
 
 def main():
-    original_st_load = chain._st_load
+    original_audio_load = chain._load_checkpoint_audio
     original_prelude_audio = chain._prelude_audio
     try:
         trimmed = generated_audio_case([5, 5], [1667, 1667])
@@ -79,7 +79,7 @@ def main():
                 ), dim=-1),
             },
         ])
-        chain._st_load = lambda _path: next(loads)
+        chain._load_checkpoint_audio = lambda _path: next(loads)
         owned = chain._generated_audio({
             "compatibility": {"continuation_mode": "guide"},
             "segments": [
@@ -109,7 +109,7 @@ def main():
                 torch.full((1, 1, 61), 3.0),
             ), dim=-1),
         }])
-        chain._st_load = lambda _path: next(loads)
+        chain._load_checkpoint_audio = lambda _path: next(loads)
         first_owned = chain._generated_audio({
             "compatibility": {
                 "continuation_mode": "audio_feathered_av",
@@ -154,7 +154,7 @@ def main():
         else:
             raise AssertionError("PyAV accepted an audio deficit above one sample")
     finally:
-        chain._st_load = original_st_load
+        chain._load_checkpoint_audio = original_audio_load
         chain._prelude_audio = original_prelude_audio
 
     print("H3 audio rounding: cumulative scene and prelude boundaries are exact")

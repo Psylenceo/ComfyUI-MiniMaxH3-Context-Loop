@@ -1116,7 +1116,10 @@ def _load_upscale_prefix(state: dict[str, Any], start_clip: int
     return values
 
 
-def _verify_upscale_segment(segment: dict[str, Any], index: int) -> None:
+def _verify_upscale_segment(
+        segment: dict[str, Any], index: int, *, artifact_verification=None) -> None:
+    hash_file = (chain._file_sha256 if artifact_verification is None
+                 else artifact_verification.sha256)
     if int(segment.get("index", -1)) != int(index):
         raise ValueError("Upscale segment slot %d has the wrong scene index." % index)
     for key, hash_key in (("segment", "segment_sha256"),
@@ -1129,14 +1132,14 @@ def _verify_upscale_segment(segment: dict[str, Any], index: int) -> None:
         if not os.path.isfile(path):
             raise FileNotFoundError("Upscale scene %d %s is missing: %s" %
                                     (index, key, path))
-        if chain._file_sha256(path) != expected:
+        if hash_file(path) != expected:
             raise ValueError("Upscale scene %d %s failed SHA-256 verification." %
                              (index, key))
     audio = segment.get("generated_audio")
     if audio is not None:
         expected = str(segment.get("generated_audio_sha256") or "")
         path = chain._absolute_output_path(audio)
-        if not expected or not os.path.isfile(path) or chain._file_sha256(path) != expected:
+        if not expected or not os.path.isfile(path) or hash_file(path) != expected:
             raise ValueError("Upscale scene %d generated audio is invalid." % index)
 
 
@@ -3145,6 +3148,7 @@ class MiniMaxH3ChainUpscaleAdvance:
 
 
 def _validate_upscale_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    verifier = chain._AssemblyArtifactVerification()
     partial = manifest.get("format") == "h3_chain_upscale_partial_manifest_v1"
     if not partial and manifest.get("format") != "h3_chain_upscale_manifest_v1":
         raise ValueError("H3 Chain Assemble requires a complete or partial upscale manifest.")
@@ -3170,7 +3174,8 @@ def _validate_upscale_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]
     if int(manifest.get("last_completed_clip", saved_last)) != saved_last:
         raise ValueError("Upscale manifest last completed scene is inconsistent.")
     for index, segment in enumerate(segments, start=first):
-        _verify_upscale_segment(segment, index)
+        _verify_upscale_segment(
+            segment, index, artifact_verification=verifier)
         total += int(segment.get("delivered_frames", 0))
     if total != int(manifest.get("total_delivered_frames", -1)):
         raise ValueError("Upscale manifest delivered-frame total is inconsistent.")
