@@ -224,11 +224,12 @@ function injectStyles() {
           background:var(--h3pa-bg);font:12px/1.35 system-ui}
         .h3pa-root.h3pa-tree-layout{
           display:grid;grid-template-columns:minmax(220px,280px) minmax(0,1fr);
-          grid-template-areas:"top top" "status status" "tabs tabs" "source stage" "source expanded";
-          grid-template-rows:auto auto auto minmax(0,1fr) auto;gap:10px;overflow:hidden;color:var(--h3pa-text);
+          grid-template-areas:"top top" "ownership ownership" "status status" "tabs tabs" "source stage" "source expanded";
+          grid-template-rows:auto auto auto auto minmax(0,1fr) auto;gap:10px;overflow:hidden;color:var(--h3pa-text);
           background:var(--h3pa-bg);font:12px/1.35 system-ui}
         .h3pa-root *{box-sizing:border-box}.h3pa-row{display:flex;gap:7px;align-items:center;min-width:0}
-        .h3pa-tree-layout>.h3pa-row{grid-area:top}.h3pa-tree-layout>.h3pa-status{grid-area:status}.h3pa-tree-layout>.h3pa-tabs{grid-area:tabs}
+        .h3pa-tree-layout>.h3pa-toolbar{grid-area:top}.h3pa-tree-layout>.h3pa-ownership{grid-area:ownership}
+        .h3pa-tree-layout>.h3pa-status{grid-area:status}.h3pa-tree-layout>.h3pa-tabs{grid-area:tabs}
         .h3pa-source-col{grid-area:source;display:flex;flex-direction:column;gap:8px;min-height:0;overflow:hidden}
         .h3pa-source-col .h3pa-carousel{flex-direction:column;align-items:stretch;overflow-x:hidden;overflow-y:auto}
         .h3pa-source-col .h3pa-folder-card,.h3pa-source-col .h3pa-folder-group,
@@ -241,7 +242,7 @@ function injectStyles() {
         .h3pa-row input,.h3pa-row select,.h3pa-editor input,.h3pa-editor select,.h3pa-editor textarea{
           min-width:0;padding:6px 8px;border:1px solid var(--h3pa-border);border-radius:6px;
           background:var(--h3pa-panel);color:var(--h3pa-text)}.h3pa-project-picker{display:flex;flex:1;min-width:160px}.h3pa-project{flex:1;font-weight:650;border-radius:6px 0 0 6px!important}.h3pa-project-menu{flex:0 0 38px;width:38px;padding:6px 4px!important;border-left:0!important;border-radius:0 6px 6px 0!important;cursor:pointer}
-        @media(max-width:800px){.h3pa-root.h3pa-tree-layout{grid-template-columns:1fr;grid-template-areas:"top" "status" "tabs" "stage" "source" "expanded"}}
+        @media(max-width:800px){.h3pa-root.h3pa-tree-layout{grid-template-columns:1fr;grid-template-areas:"top" "ownership" "status" "tabs" "stage" "source" "expanded";grid-template-rows:auto auto auto auto minmax(0,1fr) auto auto}}
         .h3pa-button{padding:6px 9px;border:1px solid var(--h3pa-border);border-radius:6px;
           background:var(--h3pa-panel);color:var(--h3pa-text);cursor:pointer}.h3pa-button:hover{border-color:var(--h3pa-accent)}
         .h3pa-status{min-height:18px;color:var(--h3pa-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -440,7 +441,7 @@ function mount(node) {
     bindNodeWheel(root, node, app);
     const sourceCol = el("div", "h3pa-source-col");
     const stageCol = el("div", "h3pa-stage-col");
-    const top = el("div", "h3pa-row");
+    const top = el("div", "h3pa-row h3pa-toolbar");
     const runNameInput = el("input", "h3pa-project");
     runNameInput.placeholder = "Run name";
     runNameInput.title = "Type a new Run name, then press Enter or leave the field to load it. Spaces are converted to underscores when the name is committed, or choose an existing Asset Carousel project to switch this Carousel and its connected Plan.";
