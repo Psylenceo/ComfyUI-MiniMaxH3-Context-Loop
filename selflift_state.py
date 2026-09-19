@@ -6,6 +6,8 @@ import json
 
 import torch
 
+from .selflift_settings import canonical_settings, lift_settings
+
 LOW_CARRY = "selflift_low_resolution_carry"
 SIGNATURE = "selflift_signature"
 PREVIOUS_LOW = "selflift_previous_low_resolution_carry"
@@ -14,8 +16,11 @@ PREFIX_STEPS = "selflift_previous_prefix_steps"
 
 def settings_signature(settings):
     # A change of lifter/grid must not reuse an unrelated native low-res chain.
-    payload = {"version": 1, "scale": 0.5,
+    controls = lift_settings(settings)
+    payload = {"version": 1, "scale": controls["lowres_scale"],
                "upscaler_model": str(settings.get("upscaler_model", ""))}
+    payload.update({key: value for key, value in canonical_settings(controls).items()
+                    if key != "lowres_scale"})
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
@@ -65,7 +70,8 @@ def prepare_previous_context(latent, settings):
     low = result.get(PREVIOUS_LOW)
     samples = result["samples"]
     video = list(samples.unbind())[0] if hasattr(samples, "unbind") else samples[0]
-    h, w = (max(2, round(int(size) * 0.5 / 2) * 2)
+    scale = lift_settings(settings)["lowres_scale"]
+    h, w = (max(2, round(int(size) * scale / 2) * 2)
             for size in video.shape[-2:])
     compatible = (torch.is_tensor(low) and low.ndim == 5
                   and tuple(low.shape[:2]) == tuple(video.shape[:2])

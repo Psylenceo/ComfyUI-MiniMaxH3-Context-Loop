@@ -212,6 +212,7 @@ class MiniMaxH3SelfLiftSeedHunt:
         from comfy.model_management import throw_exception_if_processing_interrupted
         from .selflift_nodes import MiniMaxH3ChainSelfLiftSampler, _stage_model, upscaler_models
         from .selflift_upscalers import validate_upscaler_grid
+        from .selflift_settings import canonical_settings, lift_settings
         from .selflift_state import prepare_previous_context, settings_signature, SIGNATURE
         from .selflift_hunt_store import HuntStore, digest, save_bundle, load_bundle, atomic_json
         from .selflift_preview import check_preview, save_preview
@@ -234,7 +235,8 @@ class MiniMaxH3SelfLiftSeedHunt:
         name = str(settings.get("upscaler_model", "none"))
         if name == "none" or name not in upscaler_models():
             raise ValueError("Select tridae, bilinear, or an installed H3 latent upscaler on SelfLift Project.")
-        validate_upscaler_grid(name, latent)
+        controls = lift_settings(settings)
+        validate_upscaler_grid(name, latent, controls["lowres_scale"])
         if not 1 <= int(candidate_count) <= 100:
             raise ValueError("SelfLift candidate count must be 1..100.")
         from .selflift_runtime.nodes import progressive_sample, _validate_sampling, _validate_hires_model
@@ -258,7 +260,7 @@ class MiniMaxH3SelfLiftSeedHunt:
             # Memory policy does not change a take's sampling identity. Also
             # preserve the exact settings contract of older saved hunts.
             "compatibility": plan.get("compatibility", {}),
-            "settings": {k: v for k, v in settings.items() if k != "cleanup_between_stages"},
+            "settings": {k: v for k, v in canonical_settings(settings).items() if k != "cleanup_between_stages"},
             "history": [{k: s.get(k) for k in ("index", "revision", "checkpoint")}
                         for s in state.get("segments", [])],
             "recipe": recipe, "seed": str(int(seed)), "cfg": float(cfg),
@@ -333,7 +335,8 @@ class MiniMaxH3SelfLiftSeedHunt:
                                     if model_hires is not None and not options.get("stop_after_low") else None)
                     return progressive_sample(staged, source["positive"], source["negative"], vae,
                         source["latent"], sampler, sigmas, take_seed, float(cfg), total-high,
-                        .5, 0., .5, 1., "nearest", latent_lifter=lift, model_hires=staged_hires,
+                        controls["lowres_scale"], controls["rho"], controls["w_min"], controls["w_max"],
+                        "nearest", latent_lifter=lift, model_hires=staged_hires,
                         cleanup_between_stages=cleanup, **options)
 
             # An already approved batch jumps directly to the selected high pass.

@@ -10,7 +10,7 @@ TRIDAE_URL = (
 )
 
 
-def validate_upscaler_grid(name, latent):
+def validate_upscaler_grid(name, latent, lowres_scale=0.5):
     """Reject a fixed-2x mismatch before spending time on the low pass."""
     if name != TRIDAE:
         return
@@ -20,9 +20,9 @@ def validate_upscaler_grid(name, latent):
     if video.ndim != 5 or video.shape[1] != 24:
         raise ValueError("Tr1dae requires an H3 video latent with shape Bx24xTxHxW.")
     target = tuple(int(size) for size in video.shape[-2:])
-    low = tuple(max(2, round(size * 0.5 / 2) * 2) for size in target)
+    low = tuple(max(2, round(size * lowres_scale / 2) * 2) for size in target)
     if target != tuple(size * 2 for size in low):
         raise ValueError(
-            "Tr1dae requires an exact 2x spatial latent grid. Set the final Plan width and "
+            "Tr1dae requires an exact 2x spatial latent grid. Set lowres_scale to 0.5 and the final Plan width and "
             "height to multiples of 64 (for example 1920x1088), or select bilinear/an LBH checkpoint."
         )

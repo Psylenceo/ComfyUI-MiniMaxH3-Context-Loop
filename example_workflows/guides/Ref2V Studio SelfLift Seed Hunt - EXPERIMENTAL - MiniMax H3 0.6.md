@@ -12,12 +12,12 @@ Open this separate workflow; your existing workflows do not need rewiring. It re
 ## Project switch
 SelfLift Project is after Plan Studio and before Loop Start.
 - OFF (the shipped default): ordinary single-stage Euler sampling at Plan resolution.
-- ON: early steps at half spatial resolution, learned H3 latent lift, then the selected number of final steps at Plan resolution.
+- ON: early steps at lowres_scale times the final width/height (default 0.5), the selected latent lift, then the final steps at Plan resolution.
 - Plan width/height are the FINAL dimensions. The low latent grid is rounded to H3's even spatial token grid.
 - Pick a compatible H3 3D-convolution learned checkpoint in models/latent_upscale_models. The live smoke test used minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors from https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler. Generic image/LTX and H3 2D upscalers are not interchangeable with this 3D runtime.
 - high_resolution_steps must be less than the scene's total steps, including scene overrides. Example: 20 total / 5 high = 15 low + 5 high; for an 8-step model use 2 high.
 - Euler is required when ON. This first integration does not use TST or spatial tiling.
-- This is an experimental H3 adaptation of SelfLift's progressive sampling, using the learned latent route (rho=0), not the paper's pixel/VAE correction route or a guarantee of equal quality.
+- This experimental H3 adaptation defaults to the direct latent route (rho=0). SelfLift Project exposes lowres_scale, rho, w_min and w_max. Enabling rho adds a video VAE decode / pixel resize / VAE encode; it costs time/memory and is not a guaranteed artifact fix. Keep 0 <= w_min <= w_max <= 1; defaults are 0.5 / 0 / 0.5 / 1.
 
 ## References, masks and audio
 Ordinary tagged Ref2VA assets stay at their native reference representation. Spatial keyframe/guide latents resize for the low stage; the high stage receives the untouched target-resolution guides. Neither time nor audio length is scaled.
@@ -35,4 +35,4 @@ Pixel/latent upscale, de-rope and exports continue to use the normal final-resol
 ## Installation and scope
 The H3 model, text encoder and VAEs are the same as Ref2V Studio. Add the learned H3 latent-upscaler checkpoint separately; no automatic download is performed.
 The private runtime is adapted from facok/comfyui-SelfLift and Songssx/ComfyUI-MiniMaxH3-TimelineDirector. Neither pack needs to be installed, and neither ComfyUI core nor upstream custom nodes are modified. See selflift_runtime/NOTICE.md for source revision and licensing.
-The bundled VAE pixel-correction helper is not enabled by this workflow. No weight loading or inference runs when opening the project tab.
+Pixel/VAE correction is off by default; enable it explicitly with rho > 0 and w_max > 0. Tr1dae requires lowres_scale=0.5 and final dimensions divisible by 64. Old saved hunts resume with default controls; changed lift controls create a distinct hunt. No weight loading or inference runs when opening the project tab.

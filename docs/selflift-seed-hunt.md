@@ -39,11 +39,11 @@ Existing checkpoint selections and the disabled/default `none` are unchanged.
   existing video/audio masks and context anchors afterward.
 - **`bilinear`:** independent FP32 bilinear spatial interpolation for each video
   time token (`align_corners=False`). No weights, downloads, temporal mixing,
-  VAE round trip, or learned correction. The normal high-resolution sampling
+  VAE round trip (unless you explicitly enable `rho` below), or learned correction. The normal high-resolution sampling
   steps still run; this is an experimental comparison option, not a promise of
   equivalent final quality.
 
-Tr1dae is a fixed **2x** model. Use final Plan dimensions divisible by **64**,
+Tr1dae is a fixed **2x** model. Keep `lowres_scale=0.5` and use final Plan dimensions divisible by **64**,
 such as **1920×1088**. An incompatible grid is rejected before the low pass;
 there is no hidden second resize. Bilinear supports the existing target grids.
 
@@ -66,6 +66,30 @@ With **cleanup_between_stages** enabled, Tr1dae's small legacy patcher is
 specifically offloaded to CPU after the successful lift. Other loaded models
 are not targeted. Bilinear has no model to retire. This does not change the
 existing DynamicVRAM cleanup behavior for the diffusion models or LBH.
+
+## Lift controls
+
+**SelfLift Project** exposes the same controls to both samplers:
+
+| Control | Default | Meaning |
+| --- | --- | --- |
+| `lowres_scale` | `0.5` | First-stage width/height relative to final Plan size, rounded to the even latent grid; range `0.25..1`. Time/audio are not scaled. Tr1dae requires an exact 2x grid. |
+| `rho` | `0` | Fraction of the most inconsistent latent locations selected for pixel/VAE correction; range `0..1`. Zero disables correction. |
+| `w_min` | `0.5` | Minimum correction strength at selected locations. |
+| `w_max` | `1` | Maximum correction strength at the most inconsistent locations. Require `0 <= w_min <= w_max <= 1`. |
+
+Defaults preserve the existing direct lift. **`rho > 0` with `w_max > 0` adds a
+full video VAE decode → pixel resize → VAE encode at the transition.** This
+costs time and memory and can change color/detail; it is experimental, not a
+guaranteed fix for upscaler artifacts. The weights do nothing when `rho=0`.
+Both weights set to zero also skip the pixel/VAE pass.
+
+The new widgets are appended after the existing controls. Old workflows,
+native low carries and saved Seed Hunts remain compatible at default values.
+Changing a lift control creates a distinct Seed Hunt identity and falls back
+to saved HQ continuation context instead of using a carry from different lift
+settings. Requeue with unchanged controls to resume a matching hunt. This does
+not delete or automatically regenerate clips that were already saved.
 
 ## Run without the review gate
 

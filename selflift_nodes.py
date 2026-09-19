@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 
 from .selflift_upscalers import BILINEAR, TRIDAE, TRIDAE_CHECKPOINT, validate_upscaler_grid
+from .selflift_settings import canonical_settings, lift_settings
 
 _LOG = logging.getLogger(__name__)
 PLAN_TYPE = "H3_CHAIN_PLAN"
@@ -44,6 +45,14 @@ class MiniMaxH3SelfLiftProject:
         }, "optional": {
             "cleanup_between_stages": ("BOOLEAN", {"default": False,
                 "tooltip": "Release the retired checkpoint's DynamicVRAM buffers before lifting, and unload the learned upscaler after use. Tr1dae's small legacy upscaler is specifically offloaded to CPU; other classic/non-dynamic models are skipped. Preserves shared models and saved takes; can slow next-scene reloads."}),
+            "lowres_scale": ("FLOAT", {"default": 0.5, "min": 0.25, "max": 1.0, "step": 0.05,
+                "tooltip": "First-stage width/height relative to the final Plan size, rounded to H3's even latent grid. 0.5 keeps the existing half-resolution behavior. Tr1dae requires an exact 2x lift: use 0.5 and final dimensions divisible by 64."}),
+            "rho": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01,
+                "tooltip": "Fraction of the most inconsistent latent locations to correct toward a pixel/VAE anchor. 0 keeps the existing direct lift. Above 0 (with w_max > 0) adds a full video VAE decode, pixel resize and VAE encode; costs time/memory and can change detail/color. Experimental, not a guaranteed artifact fix."}),
+            "w_min": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
+                "tooltip": "Minimum pixel/VAE correction strength at selected locations. Inactive when rho=0. Must be <= w_max; 0 keeps the direct lift and 1 uses the pixel/VAE anchor."}),
+            "w_max": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                "tooltip": "Maximum pixel/VAE correction strength at the most inconsistent locations. Inactive when rho=0. Must be >= w_min; setting both weights to 0 skips the pixel/VAE pass."}),
         }}
 
     RETURN_TYPES = (PLAN_TYPE, "STRING")
@@ -51,19 +60,26 @@ class MiniMaxH3SelfLiftProject:
     FUNCTION = "configure"
     CATEGORY = "conditioning/minimax/context_loop"
     DESCRIPTION = ("Experimental SelfLift project switch for the dedicated Chain workflow. "
-                   "Plan width/height are the final size; the first stage uses half-size spatial latents. "
+                   "Plan width/height are the final size; lowres_scale defaults to half-size spatial latents. "
+                   "Optional pixel/VAE consistency correction is disabled by default (rho=0). "
                    "Does not patch ComfyUI or change any other workflow.")
 
     def configure(self, plan, enabled=False, upscaler_model="none", high_resolution_steps=2,
-                  cleanup_between_stages=False):
+                  cleanup_between_stages=False, lowres_scale=0.5, rho=0.0, w_min=0.5, w_max=1.0):
         result = dict(plan)
-        result[SETTINGS_KEY] = {"enabled": bool(enabled),
+        result[SETTINGS_KEY] = canonical_settings({"enabled": bool(enabled),
                                "upscaler_model": str(upscaler_model),
                                "high_resolution_steps": int(high_resolution_steps),
-                               "cleanup_between_stages": bool(cleanup_between_stages)}
-        status = ("SelfLift ON; half-resolution base; %d full-resolution steps; %s" %
-                  (int(high_resolution_steps), upscaler_model) if enabled else
+                               "cleanup_between_stages": bool(cleanup_between_stages),
+                               "lowres_scale": lowres_scale, "rho": rho, "w_min": w_min, "w_max": w_max})
+        controls = lift_settings(result[SETTINGS_KEY])
+        status = ("SelfLift ON; %.0f%% resolution base; %d full-resolution steps; %s" %
+                  (100 * controls["lowres_scale"], int(high_resolution_steps), upscaler_model) if enabled else
                   "SelfLift OFF; ordinary single-stage sampling")
+        if enabled:
+            status += ("; pixel/VAE correction rho=%g, weights=%g..%g" %
+                       (controls["rho"], controls["w_min"], controls["w_max"])
+                       if controls["rho"] > 0 and controls["w_max"] > 0 else "; pixel/VAE correction OFF")
         if enabled and cleanup_between_stages:
             status += "; targeted stage cleanup ON (DynamicVRAM)"
         return result, status
@@ -167,7 +183,8 @@ class MiniMaxH3ChainSelfLiftSampler:
         name = str(settings.get("upscaler_model", "none"))
         if name == "none" or name not in upscaler_models():
             raise ValueError("Select tridae, bilinear, or an installed H3 latent-upscaler model on SelfLift Project, or turn SelfLift off.")
-        validate_upscaler_grid(name, latent)
+        controls = lift_settings(settings)
+        validate_upscaler_grid(name, latent, controls["lowres_scale"])
         # Runtime imports, model registration and weight loading happen ONLY
         # when this explicitly enabled sampler executes, never on tab load.
         from .selflift_runtime.nodes import progressive_sample, _validate_hires_model
@@ -187,8 +204,9 @@ class MiniMaxH3ChainSelfLiftSampler:
             return learned_latent_lift(z, hw, name, temporal_split=temporal_split, **options)
         output = progressive_sample(
             staged_model, positive, negative, vae, prepared, sampler, sigmas,
-            int(seed), float(cfg), total_steps - high_steps, 0.5,
-            0.0, 0.5, 1.0, "nearest", latent_lifter=lifter, model_hires=staged_hires,
+            int(seed), float(cfg), total_steps - high_steps, controls["lowres_scale"],
+            controls["rho"], controls["w_min"], controls["w_max"], "nearest",
+            latent_lifter=lifter, model_hires=staged_hires,
             cleanup_between_stages=cleanup)
         output[SIGNATURE] = settings_signature(settings)
         status = "SelfLift: %d low-resolution + %d full-resolution steps; native AV masks" % (

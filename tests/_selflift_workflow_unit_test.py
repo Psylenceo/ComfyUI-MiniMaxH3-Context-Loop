@@ -24,7 +24,7 @@ project = "MiniMaxH3SelfLiftProject"
 sampler = "MiniMaxH3ChainSelfLiftSampler"
 context = "MiniMaxH3ChainContext"
 current = "MiniMaxH3ChainCurrent"
-assert nodes[project]["widgets_values"] == [False, "none", 5, False]
+assert nodes[project]["widgets_values"] == [False, "none", 5, False, 0.5, 0.0, 0.5, 1.0]
 assert nodes["KSamplerSelect"]["widgets_values"] == ["euler"]
 assert origin(project, "plan") == ("MiniMaxH3ChainPlanStudio", "plan")
 assert origin("MiniMaxH3ChainLoopStart", "plan") == (project, "plan")
@@ -51,7 +51,7 @@ nodes = {node["type"]: node for node in workflow["nodes"]}
 by_id = {node["id"]: node for node in workflow["nodes"]}
 links = {link[0]: link for link in workflow["links"]}
 hunt = "MiniMaxH3SelfLiftSeedHunt"
-assert nodes[project]["widgets_values"] == [False, "none", 5, False]
+assert nodes[project]["widgets_values"] == [False, "none", 5, False, 0.5, 0.0, 0.5, 1.0]
 assert sampler not in nodes
 assert origin(hunt, "state") == (current, "state")
 assert origin(hunt, "latent") == (context, "latent")
