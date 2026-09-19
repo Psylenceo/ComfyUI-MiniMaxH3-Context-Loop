@@ -161,8 +161,10 @@ function injectStyles() {
         outline:none; white-space:pre-wrap; overflow-wrap:anywhere; caret-color:var(--h3rp-text);
         font:var(--h3rp-font-size)/1.58 ui-monospace,SFMono-Regular,Consolas,monospace; }
       .h3rp-editor:empty::before { content:attr(data-placeholder); color:var(--h3rp-muted); pointer-events:none; }
-      .h3rp-basic-prompt-label { display:flex; flex-direction:column; gap:4px;
+      .h3rp-basic-prompt-label { flex:0 0 auto;
         color:var(--h3rp-muted); font-size:12px; }
+      .h3rp-basic-prompt-label > summary { cursor:pointer; user-select:none; }
+      .h3rp-basic-prompt-label > textarea { display:block; margin-top:4px; }
       .h3rp-basic-prompt {
         width:100%; min-height:64px; resize:vertical; padding:8px 10px;
         border:1px solid var(--h3rp-border); border-radius:8px;
@@ -2164,8 +2166,17 @@ function mount(node) {
             optimize, stop, applyPending, optimizerStatus,
         );
 
-        const basicPromptLabel = element("label", "h3rp-basic-prompt-label", "Basic prompt (plain language)");
+        const basicPromptLabel = element("details", "h3rp-basic-prompt-label");
+        basicPromptLabel.open = node.properties.h3_basic_prompt_open !== false;
+        basicPromptLabel.append(element("summary", "", "Basic prompt (plain language)"));
+        basicPromptLabel.addEventListener("toggle", () => {
+            if (!root.contains(basicPromptLabel)
+                    || basicPromptLabel.open === (node.properties.h3_basic_prompt_open !== false)) return;
+            node.properties.h3_basic_prompt_open = basicPromptLabel.open;
+            dirty();
+        });
         const basicPromptTextarea = element("textarea", "h3rp-basic-prompt");
+        basicPromptTextarea.setAttribute("aria-label", "Basic prompt (plain language)");
         basicPromptTextarea.value = String(shot.basic_prompt ?? "");
         basicPromptTextarea.placeholder = "Optional plain-language scene idea, kept separate from the H3-formatted prompt. Optimize turns this into the prompt below, combined with the selected Prompt Guide's style rules.";
         basicPromptTextarea.title = "A simple draft description, not H3-formatted. Optimize sends this as content alongside the Prompt Guide's style rules.";

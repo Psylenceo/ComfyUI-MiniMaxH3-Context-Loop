@@ -163,8 +163,10 @@ function injectStyles() {
         }
         .h3sp-textarea:focus { border-color:var(--h3sp-accent);
             box-shadow:0 0 0 1px color-mix(in srgb,var(--h3sp-accent) 45%,transparent); }
-        .h3sp-basic-prompt-label { display:flex; flex-direction:column; gap:4px;
+        .h3sp-basic-prompt-label { flex:0 0 auto;
             color:var(--h3sp-muted); font-size:12px; }
+        .h3sp-basic-prompt-label > summary { cursor:pointer; user-select:none; }
+        .h3sp-basic-prompt-label > textarea { display:block; margin-top:4px; }
         .h3sp-basic-prompt {
             width:100%; min-height:64px; resize:vertical; padding:8px 10px;
             border:1px solid var(--h3sp-border); border-radius:7px;
@@ -2625,8 +2627,17 @@ function mount(node) {
         font.append(smaller, fontValue, larger);
         nav.append(previous, sceneSelect, next, add, font);
 
-        const basicPromptLabel = element("label", "h3sp-basic-prompt-label", "Basic prompt (plain language)");
+        const basicPromptLabel = element("details", "h3sp-basic-prompt-label");
+        basicPromptLabel.open = node.properties.h3_basic_prompt_open !== false;
+        basicPromptLabel.append(element("summary", "", "Basic prompt (plain language)"));
+        basicPromptLabel.addEventListener("toggle", () => {
+            if (!root.contains(basicPromptLabel)
+                    || basicPromptLabel.open === (node.properties.h3_basic_prompt_open !== false)) return;
+            node.properties.h3_basic_prompt_open = basicPromptLabel.open;
+            dirty();
+        });
         const basicPromptTextarea = element("textarea", "h3sp-basic-prompt");
+        basicPromptTextarea.setAttribute("aria-label", "Basic prompt (plain language)");
         basicPromptTextarea.value = String(shot.basic_prompt ?? "");
         basicPromptTextarea.placeholder = "Optional plain-language scene idea, kept separate from the H3-formatted prompt below. Optimize it into the scene prompt from Rich Scene Prompt Editor.";
         basicPromptTextarea.title = "A simple draft description, not H3-formatted. It is never used for generation by itself.";
