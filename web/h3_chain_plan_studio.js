@@ -7016,6 +7016,32 @@ function mount(node) {
             element("div", "h3studio-message", "Repair the JSON tab or connect a valid H3 Chain Plan. Studio can operate in either mode."));
     }
 
+    function syncScenePromptsInPlace(livePlan, value) {
+        if (!state.plan || planHasNonPromptChanges(state.plan, livePlan)) return false;
+        const jsonArea = root.querySelector(".h3studio-json");
+        const previousJson = jsonArea ? planToJson(state.plan) : "";
+        // Keep shot identities: existing input handlers close over these objects.
+        for (let index = 0; index < livePlan.shots.length; index += 1) {
+            state.plan.shots[index].prompt = [...livePlan.shots[index].prompt];
+        }
+        const prompt = state.history.textarea;
+        const text = promptValueToText(state.plan.shots[state.active]?.prompt);
+        if (prompt && prompt.value !== text) {
+            const start = prompt.selectionStart, end = prompt.selectionEnd;
+            const direction = prompt.selectionDirection;
+            const scrollTop = prompt.scrollTop, scrollLeft = prompt.scrollLeft;
+            prompt.value = text;
+            prompt.setSelectionRange(Math.min(start, text.length), Math.min(end, text.length), direction);
+            prompt.scrollTop = scrollTop; prompt.scrollLeft = scrollLeft;
+            scheduleHistoryDraft(
+                String(state.plan.shots[state.active].id || `clip_${String(state.active + 1).padStart(4, "0")}`), text);
+        }
+        // Never replace an unapplied JSON draft, even after its field loses focus.
+        if (jsonArea && jsonArea.value === previousJson) jsonArea.value = planToJson(state.plan);
+        state.lastValue = value;
+        return true;
+    }
+
     function loadPlan(force = false, throwOnError = false) {
         if (branches?.busy && !force) return;
         const planNode = upstreamPlanNode(node);
@@ -7041,12 +7067,16 @@ function mount(node) {
             (editor) => upstreamPlanNode(editor) === planNode,
         ) : [];
         const currentPromptEditors = promptEditorsSignature(promptEditors);
-        if (!force && planOwner === state.planOwner && value === state.lastValue
+        const sameContext = planOwner === state.planOwner
+                && planWidget === state.planWidget
                 && currentRun === state.lastRunName
                 && state.lastBranchId === currentBranch()
                 && currentSettings === state.lastSettingsSignature
-                && currentPromptEditors === state.lastPromptEditorsSignature) return;
+                && currentPromptEditors === state.lastPromptEditorsSignature;
+        if (!force && !state.planLoadFailed && sameContext && value === state.lastValue) return;
         try {
+            const livePlan = parsePlanJson(value);
+            if (!force && !state.planLoadFailed && sameContext && syncScenePromptsInPlace(livePlan, value)) return;
             const runChanged = planOwner !== state.planOwner || currentRun !== state.lastRunName
                 || state.lastBranchId !== currentBranch();
             state.lastBranchId = currentBranch();
@@ -7060,7 +7090,7 @@ function mount(node) {
                     );
                 });
             }
-            state.plan = parsePlanJson(value); state.planNode = planNode;
+            state.plan = livePlan; state.planNode = planNode;
             state.planOwner = planOwner; state.planWidget = planWidget;
             state.lastValue = value; state.lastRunName = currentRun;
             state.lastSettingsSignature = currentSettings;
@@ -7110,6 +7140,7 @@ function mount(node) {
             if (!runChanged) refreshEditorialBinding();
             syncAlternateTakeWidget();
             renderShell(); void refreshCheckpoints();
+            state.planLoadFailed = false;
             if (runChanged && currentRun) {
                 void restoreSourcePresentation();
                 void loadSubtitleAssets();
@@ -7120,6 +7151,7 @@ function mount(node) {
         } catch (error) {
             if (throwOnError) throw error;
             showFailure(`${planNode ? "Connected Plan" : "Standalone Plan Studio"} JSON is invalid:\n${error.message}`);
+            state.planLoadFailed = true;
         }
     }
 
@@ -7253,33 +7285,9 @@ function mount(node) {
     };
     node._h3PromptCompanionSetScenePrompt = (planNode, index, text) => {
         if (planNode !== state.planNode || !state.plan?.shots?.[index]) return false;
-        const liveValue = String(state.planWidget?.value ?? "");
-        let livePlanParsed = false;
-        try {
-            const livePlan = parsePlanJson(liveValue);
-            livePlanParsed = true;
-            if (planHasNonPromptChanges(state.plan, livePlan)) {
-                loadPlan(true);
-                return true;
-            }
-        } catch (_error) {
-            // Leave lastValue untouched so normal polling reports invalid JSON.
-        }
-        state.plan.shots[index].prompt = promptTextToLines(text);
-        if (index === state.active && state.history.textarea
-                && state.history.textarea.value !== text) {
-            const textarea = state.history.textarea;
-            const focused = document.activeElement === textarea;
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            textarea.value = text;
-            if (focused) textarea.setSelectionRange(
-                Math.min(start, text.length), Math.min(end, text.length));
-            scheduleHistoryDraft(
-                String(state.plan.shots[index].id || `clip_${String(index + 1).padStart(4, "0")}`),
-                text);
-        }
-        if (livePlanParsed) state.lastValue = liveValue;
+        // Use the already-written live JSON, not a potentially delayed text
+        // notification. Polling and broadcasts share the same in-place path.
+        loadPlan(false);
         return true;
     };
     node._h3PlanStudioRefresh = () => refreshStudio();
