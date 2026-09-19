@@ -27,12 +27,12 @@ MINIMUM_CACHE_VERSION = {
     "h3_prompt_companion_sync.mjs": "0.6.2",
     "h3_project_asset_sync_core.mjs": "0.6.2",
     "h3_reference_preview_core.mjs": "0.6.2",
-    "h3_prompt_completion_core.mjs": "0.6.5",
-    "h3_prompt_schema_core.mjs": "0.6.5",
-    "h3_prompt_schema_ui.mjs": "0.6.5",
-    "h3_rich_prompt_editor_core.mjs": "0.6.5",
+    "h3_prompt_completion_core.mjs": "0.6.12",
+    "h3_prompt_schema_core.mjs": "0.6.12",
+    "h3_prompt_schema_ui.mjs": "0.6.12",
+    "h3_rich_prompt_editor_core.mjs": "0.6.12",
     "h3_prompt_editor_settings_core.mjs": "0.6.5",
-    "h3_prompt_marker_ui.mjs": "0.6.5",
+    "h3_prompt_marker_ui.mjs": "0.6.12",
 }
 
 

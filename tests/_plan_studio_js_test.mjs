@@ -40,6 +40,10 @@ import {
     applySceneTransitionPreset,
     sceneTransitionPreset,
 } from "../web/h3_policy_core.mjs";
+import {
+    nativeContextWindowStarts, nearestNativeContextWindowStart,
+    visualContextDefaultPartition, visualContextMaximumBlocks,
+} from "../web/h3_chain_plan_core.mjs";
 
 const studioBoundary = {};
 assert.equal(sceneTransitionPreset(studioBoundary), "inherit");
@@ -394,6 +398,43 @@ assert.match(source, /change the composed split to use that physical tail withou
 assert.match(source, /visual_context_start_frame/);
 assert.match(source, /visual_context_lead_start_frame/);
 assert.match(source, /field\("Picture context total", visualTotal\)/);
+// Execute the actual total-change handler and builder: the old resolved
+// selection must be read before changing the total invalidates its partition.
+const builder = source.match(/        const writeVisualBuilder = \([^]*?^        };/m)?.[0];
+const totalChange = source.match(/        visualTotal\.addEventListener\("change", [^]*?^        \}\);/m)?.[0];
+assert.ok(builder && totalChange);
+const resizeContext = new Function(
+    "nativeContextWindowStarts", "nearestNativeContextWindowStart",
+    "visualContextDefaultPartition", "visualContextMaximumBlocks", "start", "total",
+    `const shot = {context_length:5};
+     const state = {active:1};
+     const result = {shots:[{rawFrames:362, deliveredFrames:357}]};
+     const sourceId = () => "one";
+     const currentVisualBlocks = () => {
+         if (shot.context_length !== 5) throw new Error("read invalidated context");
+         return [{source:1, frames:5, startFrame:start}];
+     };
+     const clearLegacyVisualFields = () => {};
+     const sceneContextLength = shot => shot.context_length;
+     const settings = () => ({contextLength:5});
+     const writePlan = () => {}, renderShell = () => {};
+     const visualTotal = {value:String(total), addEventListener:(_, callback) => callback()};
+     ${builder}
+     ${totalChange}
+     return shot;`,
+).bind(null, nativeContextWindowStarts, nearestNativeContextWindowStart,
+    visualContextDefaultPartition, visualContextMaximumBlocks);
+assert.deepEqual(resizeContext(80, 22).visual_context_blocks,
+    [{source:"one", frames:22, start_frame:80}]);
+assert.equal(resizeContext(352, 22).visual_context_blocks[0].start_frame, 335,
+    "resize at the tail clamps to the closest legal position");
+assert.equal(resizeContext(null, 22).visual_context_blocks[0].start_frame, undefined,
+    "an unauthored default keeps following the native tail");
+assert.equal(resizeContext(80, 1).visual_context_blocks[0].start_frame, 356,
+    "one-frame context remains the final latent anchor");
+assert.equal(resizeContext(80, 0).visual_context_blocks, undefined);
+assert.match(source, /One-frame context uses the final latent anchor/);
+assert.match(source, /if \(event.button !== 0 \|\| fixedPosition\) return/);
 assert.match(source, /field\("Picture blocks", blockCount\)/);
 assert.match(source, /field\(`Division \$\{cutOffset \+ 1\}`, select\)/);
 assert.match(source, /Ordered repartition:/);

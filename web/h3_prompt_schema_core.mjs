@@ -344,7 +344,17 @@ export function analyzeH3Prompt(value, selectedMode = "auto", options = {}) {
     const alignment = h3AlignmentInstruction(mode, options);
     const firstLine = text.trimStart().split("\n", 1)[0];
     if (alignment) {
-        if (firstLine !== alignment) {
+        // Tagged pictures compile to native labels at execution. Validate that
+        // equivalent first line without rewriting the author's aliases/offsets.
+        const aliases = new Map();
+        for (const record of options.connectedReferences ?? []) {
+            if (record?.active && /^@[\w-]+$/.test(record.token ?? "")
+                    && /^<Picture \d+>$/.test(record.label ?? "")) {
+                aliases.set(record.token, record.label);
+            }
+        }
+        const resolvedLine = firstLine.replace(/@[\w-]+/g, token => aliases.get(token) ?? token);
+        if (resolvedLine !== alignment) {
             problems.push({severity:"error", code:"alignment", message:`${h3ModeLabel(mode)} requires its exact first-line picture alignment`});
         }
     } else if (ALIGNMENT_PREFIX.test(firstLine)) {

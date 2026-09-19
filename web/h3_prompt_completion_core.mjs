@@ -6,7 +6,7 @@ import {
     H3_VISUAL_RETENTION_MARKERS,
     H3_TASK_DIRECTIVES,
     h3SectionsForMode,
-} from "./h3_prompt_schema_core.mjs?v=0.6.11";
+} from "./h3_prompt_schema_core.mjs?v=0.6.12";
 
 const [
     DIALOGUE_START,

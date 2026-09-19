@@ -135,6 +135,18 @@ for (const relative of [
     const source = fs.readFileSync(new URL(relative, import.meta.url), "utf8");
     assert.match(source, /typeof promptCompanionSync\.activeSceneIndexAfterRefresh === "function"/,
         "prompt editors remain usable during a partial browser-cache update");
+    const handler = source.match(/node\._h3PromptCompanionSetActiveScene = (\(planNode, index\) => \{[^]*?^    });/m)[1];
+    for (const shots of [[{id:"one"}, {id:"new"}], [{id:"one"}, {id:"copy"}, {id:"two"}]]) {
+        const state = {planNode:plan, plan:{shots:[{id:"one"}]}};
+        let selected;
+        const apply = new Function("state", "loadPlan", "navigate", "optimizerBusy", `return ${handler}`)(
+            state, () => { state.plan = {shots}; },
+            (_offset, index) => { selected = state.plan.shots[Math.min(index, state.plan.shots.length - 1)].id; },
+            () => false);
+        assert.equal(apply(plan, 1), true);
+        assert.equal(selected, shots[1].id, "new/duplicated scene is selected before polling");
+        assert.equal(apply({}, 1), false, "unrelated Plans cannot change selection");
+    }
 }
 
 const reviewSource = fs.readFileSync(

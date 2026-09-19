@@ -1,4 +1,18 @@
-import {H3_ALL_SECTIONS} from "./h3_prompt_schema_core.mjs?v=0.6.11";
+import {H3_ALL_SECTIONS} from "./h3_prompt_schema_core.mjs?v=0.6.12";
+
+export function revealPromptCaret(editor) {
+    const selection = editor.ownerDocument.defaultView.getSelection();
+    if (!selection?.rangeCount || !editor.contains(selection.anchorNode)) return;
+    const range = selection.getRangeAt(0).cloneRange();
+    range.collapse(true);
+    const caret = range.getBoundingClientRect();
+    if (!caret.height) return;
+    const box = editor.getBoundingClientRect();
+    const top = box.top + editor.clientTop;
+    const bottom = top + editor.clientHeight;
+    if (caret.top < top) editor.scrollTop -= top - caret.top;
+    else if (caret.bottom > bottom) editor.scrollTop += caret.bottom - bottom;
+}
 
 export const RICH_PROMPT_GUIDES = Object.freeze([
     {id: "auto", label: "Auto · H3 mode"},

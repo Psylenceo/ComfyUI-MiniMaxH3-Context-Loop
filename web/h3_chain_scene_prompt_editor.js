@@ -37,13 +37,14 @@ import {
 import {
     PromptUndoHistory,
     promptUndoDirection,
+    revealPromptCaret,
     tokenizeRichPrompt,
-} from "./h3_rich_prompt_editor_core.mjs?v=0.6.11";
-import {createPromptCompletionController} from "./h3_prompt_completion_core.mjs?v=0.6.11";
-import {bindPromptMarkerInteractions} from "./h3_prompt_marker_ui.mjs?v=0.6.11";
+} from "./h3_rich_prompt_editor_core.mjs?v=0.6.12";
+import {createPromptCompletionController} from "./h3_prompt_completion_core.mjs?v=0.6.12";
+import {bindPromptMarkerInteractions} from "./h3_prompt_marker_ui.mjs?v=0.6.12";
 import {isWorkflowSaveShortcut, promptEditorRichText} from "./h3_prompt_editor_settings_core.mjs?v=0.6.11";
 import {promptEditorPreferences} from "./h3_prompt_editor_settings.js";
-import {createH3PromptSchemaController} from "./h3_prompt_schema_ui.mjs?v=0.6.11";
+import {createH3PromptSchemaController} from "./h3_prompt_schema_ui.mjs?v=0.6.12";
 import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.11";
 import {
     PROJECT_ASSET_CATALOG_CHANGED_EVENT,
@@ -2858,6 +2859,7 @@ function mount(node) {
                 if (state.decorated) {
                     renderRichEditorText(textarea.value, position);
                     richEditor.focus();
+                    revealPromptCaret(richEditor);
                 } else {
                     textarea.focus();
                     textarea.setSelectionRange(position, position);
@@ -3081,6 +3083,8 @@ function mount(node) {
     };
     node._h3PromptCompanionSetActiveScene = (planNode, index) => {
         if (planNode !== state.planNode || !state.plan?.shots?.length) return false;
+        // Add/Duplicate can arrive before the periodic Plan refresh.
+        loadPlan();
         navigate(0, index, {synchronize:false, focus:false});
         return true;
     };
