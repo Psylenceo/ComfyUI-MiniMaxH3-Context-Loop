@@ -58,6 +58,38 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(result["asset"]["folder_id"], folder["id"])
         self.assertEqual(len(result["catalog"]["assets"]), 1)
 
+    def test_capture_at_duration_returns_last_frame_not_empty_or_first(self):
+        subprocess.run([
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "color=c=red:s=64x48:r=24:d=1",
+            "-vf", "drawbox=c=blue:t=fill:enable='eq(n,23)'",
+            "-c:v", "ffv1", str(self.video),
+        ], check=True, timeout=20)
+        for time_seconds, channel in ((0.0, 0), (0.25, 0), (0.75, 0), (0.99, 2), (1.0, 2)):
+            result = self.capture(time_seconds=time_seconds)
+            path = self.store.asset("episode", result["asset"]["id"])[1]
+            with Image.open(path) as image:
+                self.assertGreater(image.convert("RGB").getpixel((30, 20))[channel], 240)
+
+        # The deployed outputs are MP4; exercise fractional frame timestamps
+        # as well as Matroska's millisecond time base.
+        mp4 = self.video.with_suffix(".mp4")
+        subprocess.run([
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(self.video), "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+            "-t", "1.05", "-c:v", "libx264", "-c:a", "aac", str(mp4),
+        ], check=True, timeout=20)
+        for offset in (1.0, 1.05):
+            result = self.capture(video_path=mp4.name, time_seconds=offset)
+            path = self.store.asset("episode", result["asset"]["id"])[1]
+            with Image.open(path) as image:
+                self.assertGreater(image.convert("RGB").getpixel((30, 20))[2], 240)
+
+    def test_time_beyond_duration_is_not_silently_captured_as_last_frame(self):
+        with self.assertRaisesRegex(RuntimeError, "empty captured frame"):
+            self.capture(time_seconds=2.0)
+        self.assertEqual(self.store.load("episode")["assets"], [])
+
     def test_invalid_folder_does_not_leave_an_asset(self):
         with self.assertRaises((ValueError, FileNotFoundError)):
             self.capture(folder_id="deleted-folder")

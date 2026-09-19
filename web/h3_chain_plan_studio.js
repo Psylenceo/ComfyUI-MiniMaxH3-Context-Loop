@@ -1,7 +1,7 @@
 import {app} from "/scripts/app.js";
 import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
-import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.6.10";
+import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.6.11";
 import {
     CONTINUATION_MODES,
     FPS,
@@ -55,18 +55,18 @@ import {
     visualContextDefaultPartition,
     visualContextMaximumBlocks,
     visualContextPartitionFromBoundaries,
-} from "./h3_chain_plan_core.mjs?v=0.6.10";
+} from "./h3_chain_plan_core.mjs?v=0.6.11";
 import {
     promptRevisionHelp,
     promptRevisionLabel,
     promptRevisionNavigation,
-} from "./h3_prompt_history_core.mjs?v=0.6.10";
+} from "./h3_prompt_history_core.mjs?v=0.6.11";
 import {
     availableReferenceRecords,
     convertTaggedPictureReference,
     taggedPictureReferenceMode,
     taggedPictureReferenceToken,
-} from "./h3_reference_preview_core.mjs?v=0.6.10";
+} from "./h3_reference_preview_core.mjs?v=0.6.11";
 import {
     applySceneAudioOverride,
     applySceneLipSync,
@@ -77,16 +77,16 @@ import {
     sceneAudioPolicy,
     sceneTransitionPreset,
     transitionPresetLabel,
-} from "./h3_policy_core.mjs?v=0.6.10";
+} from "./h3_policy_core.mjs?v=0.6.11";
 import {
     resolveAudioContextLength,
     resolveAudioPolicy,
     resolveTransitionPolicy,
-} from "./h3_socket_presentation_core.mjs?v=0.6.10";
+} from "./h3_socket_presentation_core.mjs?v=0.6.11";
 import {
     availableLoRARoutes,
     loraRouteLabel,
-} from "./h3_lora_scheduler_core.mjs?v=0.6.10";
+} from "./h3_lora_scheduler_core.mjs?v=0.6.11";
 import {
     h3StudioGridMarkers,
     locateStudioTimelineSegment,
@@ -117,8 +117,8 @@ import {
     studioRulerTicks,
     studioWaveformIntervalSamples,
     timedLyricAtSecond,
-} from "./h3_chain_plan_studio_core.mjs?v=0.6.10";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.10";
+} from "./h3_chain_plan_studio_core.mjs?v=0.6.11";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.11";
 
 const {
     connectedPromptEditors,
@@ -442,6 +442,8 @@ function injectStyles() {
             display:grid; place-items:center; overflow:hidden; color:#fff; font-size:10px;
             font-variant-numeric:tabular-nums; cursor:grab; user-select:none; }
         .h3studio-context-movie-track.h3studio-dragging .h3studio-context-window { cursor:grabbing; }
+        .h3studio-context-movie-track[aria-disabled="true"],
+        .h3studio-context-movie-track[aria-disabled="true"] .h3studio-context-window { cursor:default; }
         .h3studio-context-window::before,.h3studio-context-window::after { content:"";
             position:absolute; top:6px; bottom:6px; width:2px; background:rgba(255,255,255,.78); }
         .h3studio-context-window::before { left:4px; }
@@ -4390,17 +4392,24 @@ function mount(node) {
             }
         };
         const writeVisualBuilder = (
-            partition, {preserveStarts = false} = {},
+            partition, {preserveStarts = false, previous = currentVisualBlocks()} = {},
         ) => {
-            const previous = currentVisualBlocks();
+            let prefixFrames = 0;
             shot.visual_context_blocks = partition.map((frames, offset) => {
                 const prior = previous[offset] ?? previous.at(-1);
                 const source = Number(prior?.source) || state.active;
                 const block = {source:sourceId(source), frames:Number(frames)};
-                if (preserveStarts && Number(prior?.frames) === Number(frames)
-                        && Number.isInteger(prior?.startFrame)) {
-                    block.start_frame = Number(prior.startFrame);
+                if (preserveStarts && Number.isInteger(prior?.startFrame)) {
+                    const sourceRow = result.shots[source - 1];
+                    const starts = sourceRow ? nativeContextWindowStarts(
+                        sourceRow.rawFrames, sourceRow.deliveredFrames,
+                        Number(frames), prefixFrames,
+                    ) : [];
+                    if (starts.length) block.start_frame = nearestNativeContextWindowStart(
+                        starts, prior.startFrame,
+                    );
                 }
+                prefixFrames += Number(frames);
                 return block;
             });
             clearLegacyVisualFields();
@@ -4422,6 +4431,7 @@ function mount(node) {
             ? String(shot.context_length) : "";
         visualTotal.title = "Total picture prefix entering this scene. The builder divides this exact H3-safe total into ordered source blocks.";
         visualTotal.addEventListener("change", () => {
+            const previous = currentVisualBlocks();
             if (visualTotal.value === "") delete shot.context_length;
             else shot.context_length = Number(visualTotal.value);
             const total = sceneContextLength(shot, settings().contextLength);
@@ -4430,11 +4440,12 @@ function mount(node) {
                 clearLegacyVisualFields();
             } else {
                 const count = Math.min(
-                    Math.max(1, currentVisualBlocks().length || 1),
+                    Math.max(1, previous.length || 1),
                     visualContextMaximumBlocks(total),
                 );
                 writeVisualBuilder(
                     visualContextDefaultPartition(total, count),
+                    {preserveStarts:true, previous},
                 );
             }
             writePlan();
@@ -4703,12 +4714,18 @@ function mount(node) {
             }
             const rangeWrap = element("div", "h3studio-context-range");
             const movieTrack = element("div", "h3studio-context-movie-track");
+            const fixedPosition = validStarts.length === 1;
             movieTrack.tabIndex = 0;
             movieTrack.setAttribute("role", "slider");
+            movieTrack.setAttribute("aria-disabled", String(fixedPosition));
             movieTrack.setAttribute("aria-label", `${block.label} position in source movie`);
             movieTrack.setAttribute("aria-valuemin", "0");
             movieTrack.setAttribute("aria-valuemax", String(latest));
-            movieTrack.title = `Drag the fixed ${block.span}-frame context zone across ${validStarts.length} native latent-aligned positions`;
+            movieTrack.title = fixedPosition
+                ? block.span === 1 && block.prefixFrames === 0
+                    ? "One-frame context uses the final latent anchor; its position cannot be moved. Choose 5 or more picture frames for a movable window."
+                    : "Only one native latent-aligned position fits this source and context window."
+                : `Drag the fixed ${block.span}-frame context zone across ${validStarts.length} native latent-aligned positions`;
             const selectedZone = element(
                 "div", "h3studio-context-window", `${block.span}f`,
             );
@@ -4726,6 +4743,7 @@ function mount(node) {
             const playhead = element("div", "h3studio-context-playhead");
             movieTrack.append(phaseTail, selectedZone, playhead);
             const rangeLabel = element("span", "h3studio-context-range-label");
+            if (fixedPosition) card.append(element("div", "h3studio-context-help", movieTrack.title));
             const movieLength = element(
                 "span", "h3studio-context-movie-length",
                 `source movie · ${sourceRow.deliveredFrames}f · ${(sourceRow.deliveredFrames / FPS).toFixed(3)}s`,
@@ -4776,7 +4794,7 @@ function mount(node) {
             };
             let drag = null;
             movieTrack.addEventListener("pointerdown", (event) => {
-                if (event.button !== 0) return;
+                if (event.button !== 0 || fixedPosition) return;
                 event.preventDefault();
                 const bounds = movieTrack.getBoundingClientRect();
                 if (event.target !== selectedZone) {
@@ -4813,6 +4831,7 @@ function mount(node) {
             movieTrack.addEventListener("pointerup", finishDrag);
             movieTrack.addEventListener("pointercancel", finishDrag);
             movieTrack.addEventListener("keydown", (event) => {
+                if (fixedPosition) return;
                 let next = null;
                 const currentSlot = Math.max(0, validStarts.indexOf(selectedStart));
                 const step = event.shiftKey ? 5 : 1;
@@ -6135,6 +6154,45 @@ function mount(node) {
             element("div", "h3studio-message", "Repair the JSON tab or connect a valid H3 Chain Plan. Studio can operate in either mode."));
     }
 
+    function syncScenePromptsInPlace(livePlan, value) {
+        if (!state.plan || planHasNonPromptChanges(state.plan, livePlan)) return false;
+        const jsonArea = root.querySelector(".h3studio-json");
+        const previousJson = jsonArea ? planToJson(state.plan) : "";
+        // Keep shot identities: existing input handlers close over these objects.
+        for (let index = 0; index < livePlan.shots.length; index += 1) {
+            const shot = state.plan.shots[index], liveShot = livePlan.shots[index];
+            shot.prompt = [...liveShot.prompt];
+            if (Object.hasOwn(liveShot, "basic_prompt")) shot.basic_prompt = liveShot.basic_prompt;
+            else delete shot.basic_prompt;
+        }
+        const prompt = state.history.textarea;
+        const text = promptValueToText(state.plan.shots[state.active]?.prompt);
+        if (prompt && prompt.value !== text) {
+            const start = prompt.selectionStart, end = prompt.selectionEnd;
+            const direction = prompt.selectionDirection;
+            const scrollTop = prompt.scrollTop, scrollLeft = prompt.scrollLeft;
+            prompt.value = text;
+            prompt.setSelectionRange(Math.min(start, text.length), Math.min(end, text.length), direction);
+            prompt.scrollTop = scrollTop; prompt.scrollLeft = scrollLeft;
+            scheduleHistoryDraft(
+                String(state.plan.shots[state.active].id || `clip_${String(state.active + 1).padStart(4, "0")}`), text);
+        }
+        const basicPrompt = root.querySelector(".h3studio-basic-prompt");
+        const basicText = String(state.plan.shots[state.active]?.basic_prompt ?? "");
+        if (basicPrompt && basicPrompt.value !== basicText) {
+            const start = basicPrompt.selectionStart, end = basicPrompt.selectionEnd;
+            const direction = basicPrompt.selectionDirection;
+            const scrollTop = basicPrompt.scrollTop, scrollLeft = basicPrompt.scrollLeft;
+            basicPrompt.value = basicText;
+            basicPrompt.setSelectionRange(Math.min(start, basicText.length), Math.min(end, basicText.length), direction);
+            basicPrompt.scrollTop = scrollTop; basicPrompt.scrollLeft = scrollLeft;
+        }
+        // Never replace an unapplied JSON draft, even after its field loses focus.
+        if (jsonArea && jsonArea.value === previousJson) jsonArea.value = planToJson(state.plan);
+        state.lastValue = value;
+        return true;
+    }
+
     function loadPlan(force = false) {
         const planNode = upstreamPlanNode(node);
         if (planNode) mirrorConnectedPlan(planNode);
@@ -6155,11 +6213,15 @@ function mount(node) {
             (editor) => upstreamPlanNode(editor) === planNode,
         ) : [];
         const currentPromptEditors = promptEditorsSignature(promptEditors);
-        if (!force && planOwner === state.planOwner && value === state.lastValue
+        const sameContext = planOwner === state.planOwner
+                && planWidget === state.planWidget
                 && currentRun === state.lastRunName
                 && currentSettings === state.lastSettingsSignature
-                && currentPromptEditors === state.lastPromptEditorsSignature) return;
+                && currentPromptEditors === state.lastPromptEditorsSignature;
+        if (!force && !state.planLoadFailed && sameContext && value === state.lastValue) return;
         try {
+            const livePlan = parsePlanJson(value);
+            if (!force && !state.planLoadFailed && sameContext && syncScenePromptsInPlace(livePlan, value)) return;
             const runChanged = planOwner !== state.planOwner || currentRun !== state.lastRunName;
             const previousRun = state.lastRunName;
             if (runChanged && previousRun) {
@@ -6170,7 +6232,7 @@ function mount(node) {
                     );
                 });
             }
-            state.plan = parsePlanJson(value); state.planNode = planNode;
+            state.plan = livePlan; state.planNode = planNode;
             state.planOwner = planOwner; state.planWidget = planWidget;
             state.lastValue = value; state.lastRunName = currentRun;
             state.lastSettingsSignature = currentSettings;
@@ -6218,12 +6280,14 @@ function mount(node) {
             // Editorial data is useful even when the Plan has no chapters.
             syncAlternateTakeWidget();
             renderShell(); void refreshCheckpoints();
+            state.planLoadFailed = false;
             if (runChanged && currentRun) {
                 void restoreSourcePresentation();
                 void loadSubtitleAssets();
             }
         } catch (error) {
             showFailure(`${planNode ? "Connected Plan" : "Standalone Plan Studio"} JSON is invalid:\n${error.message}`);
+            state.planLoadFailed = true;
         }
     }
 
@@ -6336,44 +6400,15 @@ function mount(node) {
     };
     node._h3PromptCompanionSetScenePrompt = (planNode, index, text) => {
         if (planNode !== state.planNode || !state.plan?.shots?.[index]) return false;
-        const liveValue = String(state.planWidget?.value ?? "");
-        let livePlanParsed = false;
-        try {
-            const livePlan = parsePlanJson(liveValue);
-            livePlanParsed = true;
-            if (planHasNonPromptChanges(state.plan, livePlan)) {
-                loadPlan(true);
-                return true;
-            }
-        } catch (_error) {
-            // Leave lastValue untouched so normal polling reports invalid JSON.
-        }
-        state.plan.shots[index].prompt = promptTextToLines(text);
-        if (index === state.active && state.history.textarea
-                && state.history.textarea.value !== text) {
-            const textarea = state.history.textarea;
-            const focused = document.activeElement === textarea;
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            textarea.value = text;
-            if (focused) textarea.setSelectionRange(
-                Math.min(start, text.length), Math.min(end, text.length));
-            scheduleHistoryDraft(
-                String(state.plan.shots[index].id || `clip_${String(index + 1).padStart(4, "0")}`),
-                text);
-        }
-        if (livePlanParsed) state.lastValue = liveValue;
+        // Use the already-written live JSON, not a potentially delayed text
+        // notification. Polling and broadcasts share the same in-place path.
+        loadPlan(false);
         return true;
     };
     node._h3PromptCompanionSetBasicPrompt = (planNode, index, text) => {
         if (planNode !== state.planNode || !state.plan?.shots?.[index]) return false;
-        state.plan.shots[index].basic_prompt = text;
-        if (index === state.active) {
-            const basicPromptTextarea = root.querySelector(".h3studio-basic-prompt");
-            if (basicPromptTextarea && basicPromptTextarea.value !== text) {
-                basicPromptTextarea.value = text;
-            }
-        }
+        // As with H3 prompts, the live Plan is authoritative over delayed pushes.
+        loadPlan(false);
         return true;
     };
     node._h3PlanStudioRefresh = () => refreshStudio();

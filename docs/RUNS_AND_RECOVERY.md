@@ -144,10 +144,28 @@ for a completely independent scene.
 Loop Start's `verify_resume_history` switch is enabled by default. Disable it
 only when you intentionally want scene N to consume the existing saved scene
 N−1 despite a changed Plan. The override skips Plan/history matching; it does
-not skip missing-file checks, SHA-256 artifact validation, checkpoint tensor
+not skip missing-file checks, SHA-256 context-checkpoint validation, checkpoint tensor
 validation, or metadata's own recorded-history consistency. Consequently, any
 new settings that describe the saved predecessor are not retroactively present
 in its pixels or AV latent.
+
+Loop Start and preflight check metadata, recorded identities and file presence
+for all earlier scenes, but hash only the checkpoint payloads needed to restore
+the selected scene's context. This includes explicitly selected older visual
+blocks and audio sources, plus N−1 when needed to initialize the paired AV
+container. Independent cuts with no generated-audio continuation read no prior
+checkpoint payloads. Earlier videos, blend clips, audio and prompt sidecars are
+not re-read during resume; full content verification remains in Manifest Load
+and assembly/export. Corruption in unused media is therefore detected there,
+not while resuming an unrelated scene.
+
+Each required checkpoint is hashed once per resume. Preflight and state restore
+share that result only while filesystem identity, size and timestamps remain
+unchanged. The cache is local to the call; new queues recheck required payloads.
+Changed context files are rehashed, and missing files, mismatched context hashes
+or inconsistent metadata still block resume. Logs identify checked context
+sources and phase timings. Stop/Cancel is checked between scenes and each 1 MiB
+hash block; a filesystem read already blocked in the OS must return first.
 
 Plan-wide continuation mode and context length are the exceptions: they choose
 how the next scene consumes its saved predecessor. Changing either does not

@@ -162,6 +162,15 @@ assert.match(source, /selectionWidget\.callback\?\.\(value\)/);
 assert.match(source, /node\.graph\?\.setDirtyCanvas\?\.\(true, true\)/);
 assert.match(source, /Select this whole branch/);
 assert.match(source, /checkpoint-revisions\/delete-preview/);
+const obsoleteAction = source.match(/    async function obsoletePathAction\(preview = null\) \{[^]*?^    }/m)?.[0];
+assert.ok(obsoleteAction);
+assert.ok(obsoleteAction.indexOf('button("Confirm obsolete path deletion"')
+    < obsoleteAction.indexOf('const files = element("ul"'),
+    "obsolete confirmation must precede a potentially huge file inventory");
+assert.match(obsoleteAction, /element\("details", "h3cm-delete-details"\)/);
+assert.match(obsoleteAction, /Obsolete path cleanup failed/);
+assert.doesNotMatch(source, /\.h3cm-delete-button\s*\{[^}]*margin-left:auto/);
+assert.match(source, /\.h3cm-delete-body\s*\{[^}]*max-height:135px; overflow:auto/);
 assert.match(source, /checkpoint-revisions\/delete/);
 assert.match(source, /run-folder\/delete-preview/);
 assert.match(source, /run-folder\/delete/);

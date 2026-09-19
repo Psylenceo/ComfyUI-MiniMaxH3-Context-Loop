@@ -75,7 +75,9 @@ async function browserChecks() {
     window.api = {fetchApi() { requests++; throw Error("Unexpected API request"); }};
     try {
         await import("/web/h3_chain_plan_editor.js");
+        const {MODERN_PLAN_WIDGET_NAMES} = await import("/web/h3_plan_upgrade_core.mjs");
         for (const type of ["MiniMaxH3ChainPlan", "MiniMaxH3ChainPlanModern"]) {
+            const modern = type === "MiniMaxH3ChainPlanModern";
             class Node {
                 constructor(saved) {
                     this.id = graph._nodes.length + 1; this.type = this.comfyClass = type;
@@ -87,23 +89,56 @@ async function browserChecks() {
                             {id:"one", prompt:["First scene.", "Keep this text."], length:22, seed:"18446744073709551615"},
                             {id:"two", prompt:["Second scene."], length:22, seed:"42"},
                             {id:"three", prompt:["Third scene."], length:22, seed:"43"},
-                        ]}), run_name:"collapse_fixture", width:640, height:384,
+                        ]}), run_name:"collapse_fixture", generation_fingerprint:"", width:640, height:384,
                         context_length:5, default_duration_seconds:5, default_steps:8, base_seed:1,
-                        encode_mode:"video", anchor_mode:"head", continuation_mode:"guide",
-                    }).map(([name, value]) => ({name, value}));
+                        encode_mode:"video", crop:"disabled", segment_crf:18, video_blend_frames:0,
+                        anchor_mode:"head", continuation_mode:"guide",
+                    }).filter(([name]) => !modern || MODERN_PLAN_WIDGET_NAMES.includes(name))
+                        .map(([name, value]) => ({name, value, type:typeof value === "number" ? "number" : "text", options:{}}));
+                    // Match current ComfyUI: ordinary widgets already own an
+                    // unlinked socket, before any user conversion/connection.
+                    this.inputs = this.widgets.map(widget => ({name:widget.name, widget:{name:widget.name}, link:null}));
+                    const json = this.widgets.find(widget => widget.name === "plan_json");
+                    json.type = "customtext";
+                    json.computeLayoutSize = () => ({minHeight:200});
                     graph._nodes.push(this);
                 }
                 setSize(value) { this.size = value; }
                 addDOMWidget(name, type, root) {
                     this.root = root; this.host = document.createElement("div");
                     this.host.className = "host"; this.host.append(root); document.body.append(this.host);
-                    return {element:root};
+                    const widget = {name, type, element:root, options:{}};
+                    this.widgets.push(widget);
+                    return widget;
                 }
             }
             await window.extension.beforeRegisterNodeDef(Node, {name:type});
             let node = new Node(); node.onNodeCreated();
             await waitFor(() => node.root?.querySelectorAll(".h3c-card").length === 3);
             await wait(200);
+            const checkBackingWidgets = () => {
+                const visible = node.widgets.filter(widget => !widget.hidden);
+                check(!visible.some(widget => widget.name === "plan_json"), type + ": no blank JSON textarea allocation");
+                if (modern) {
+                    check(visible.length === 1 && visible[0].name === "h3_chain_scene_editor",
+                        "Modern Plan allocates canvas height only to the rich editor, not duplicate settings");
+                    check(node.widgets.filter(widget => !widget.options?.hidden).length === 1,
+                        "Modern Plan also excludes native rows from Vue layout");
+                } else {
+                    check(visible.some(widget => widget.name === "width"), "Legacy Plan keeps native settings");
+                }
+            };
+            checkBackingWidgets();
+            if (modern) {
+                const width = node.widgets.find(widget => widget.name === "width");
+                const socket = node.inputs.find(input => input.name === "width");
+                socket.link = 42; node.onConnectionsChange();
+                await waitFor(() => !width.hidden);
+                check(width.value === 640 && socket.link === 42, "Connected backing socket and its value survive refresh");
+                socket.link = null; node.onConnectionsChange();
+                await waitFor(() => width.hidden);
+                checkBackingWidgets();
+            }
             const cards = () => [...node.root.querySelectorAll(".h3c-card")];
             const click = (text, root = node.root) => [...root.querySelectorAll("button")].find(b => b.textContent === text).click();
             const plan = () => node.widgets.find(w => w.name === "plan_json").value;
@@ -159,6 +194,7 @@ async function browserChecks() {
             node.onRemoved(); node.host.remove();
             node = new Node(saved); node.onNodeCreated(); node.onConfigure();
             await waitFor(() => node.root?.querySelectorAll(".h3c-card").length === 3);
+            checkBackingWidgets();
             check(collapsed().length === 1 && collapsed()[0].querySelector(".h3c-id").value === "one", "Collapsed state survives workflow reload");
             check(prefixBody().hidden && prefixToggle().getAttribute("aria-expanded") === "false",
                 "Global prompt collapse survives workflow reload");
@@ -185,6 +221,7 @@ async function browserChecks() {
             node.properties = {...node.properties, h3_chain_plan_layout:{...layout(), collapsedScenes:{}, sharedPromptCollapsed:false}};
             node.onConfigure();
             await waitFor(() => collapsed().length === 0);
+            checkBackingWidgets();
             check(collapsed().length === 0, "Configure restores expanded state without stale UI");
             check(!prefixBody().hidden && prefixToggle().getAttribute("aria-expanded") === "true",
                 "Configure restores global prompt state without stale UI");

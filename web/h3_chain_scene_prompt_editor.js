@@ -9,7 +9,7 @@ import {
     promptTextToLines,
     promptValueToText,
     sharedPrompt,
-} from "./h3_chain_plan_core.mjs?v=0.6.10";
+} from "./h3_chain_plan_core.mjs?v=0.6.11";
 import {
     PROMPT_ASSIST_DEFAULT_INSTRUCTIONS,
     PROMPT_ASSIST_MODES,
@@ -18,14 +18,14 @@ import {
     makePromptAssistRequest,
     promptSceneKey,
     promptSourceRevision,
-} from "./h3_prompt_assistant_core.mjs?v=0.6.10";
-import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.6.10";
+} from "./h3_prompt_assistant_core.mjs?v=0.6.11";
+import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.6.11";
 import {
     promptRevisionHelp,
     promptRevisionLabel,
     promptRevisionNavigation,
     promptRevisionTree,
-} from "./h3_prompt_history_core.mjs?v=0.6.10";
+} from "./h3_prompt_history_core.mjs?v=0.6.11";
 import {
     availableReferenceRecords,
     convertTaggedPictureReference,
@@ -33,21 +33,22 @@ import {
     replacePromptReferenceOccurrence,
     taggedPictureReferenceMode,
     taggedPictureReferenceToken,
-} from "./h3_reference_preview_core.mjs?v=0.6.10";
+} from "./h3_reference_preview_core.mjs?v=0.6.11";
 import {
     PromptUndoHistory,
     promptUndoDirection,
+    revealPromptCaret,
     tokenizeRichPrompt,
-} from "./h3_rich_prompt_editor_core.mjs?v=0.6.10";
-import {createPromptCompletionController} from "./h3_prompt_completion_core.mjs?v=0.6.10";
-import {bindPromptMarkerInteractions} from "./h3_prompt_marker_ui.mjs?v=0.6.10";
-import {isWorkflowSaveShortcut, promptEditorRichText} from "./h3_prompt_editor_settings_core.mjs?v=0.6.10";
+} from "./h3_rich_prompt_editor_core.mjs?v=0.6.12";
+import {createPromptCompletionController} from "./h3_prompt_completion_core.mjs?v=0.6.12";
+import {bindPromptMarkerInteractions} from "./h3_prompt_marker_ui.mjs?v=0.6.12";
+import {isWorkflowSaveShortcut, promptEditorRichText} from "./h3_prompt_editor_settings_core.mjs?v=0.6.11";
 import {promptEditorPreferences} from "./h3_prompt_editor_settings.js";
-import {createH3PromptSchemaController} from "./h3_prompt_schema_ui.mjs?v=0.6.10";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.10";
+import {createH3PromptSchemaController} from "./h3_prompt_schema_ui.mjs?v=0.6.12";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.11";
 import {
     PROJECT_ASSET_CATALOG_CHANGED_EVENT,
-} from "./h3_project_asset_sync_core.mjs?v=0.6.10";
+} from "./h3_project_asset_sync_core.mjs?v=0.6.11";
 
 const {
     publishCompanionScene,
@@ -2888,6 +2889,7 @@ function mount(node) {
                 if (state.decorated) {
                     renderRichEditorText(textarea.value, position);
                     richEditor.focus();
+                    revealPromptCaret(richEditor);
                 } else {
                     textarea.focus();
                     textarea.setSelectionRange(position, position);
@@ -3112,6 +3114,8 @@ function mount(node) {
     };
     node._h3PromptCompanionSetActiveScene = (planNode, index) => {
         if (planNode !== state.planNode || !state.plan?.shots?.length) return false;
+        // Add/Duplicate can arrive before the periodic Plan refresh.
+        loadPlan();
         navigate(0, index, {synchronize:false, focus:false});
         return true;
     };

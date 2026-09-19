@@ -21,6 +21,8 @@ const fixtures = [];
 for (const rich of [false, true]) {
     const source = read(rich ? "h3_chain_rich_scene_prompt_editor.js" : "h3_chain_scene_prompt_editor.js");
     const render = rich ? "renderEditorText" : "renderRichEditorText";
+    assert.match(source, /focusAt:\(caret\) => \{[^]*?revealPromptCaret\(/,
+        "section navigation must reveal its restored caret");
     const functions = [
         ...["editorPlainText", "editorPointTextOffset", "selectionTextOffset", "restoreCaret", "restoreTextSelection", "insertPlainText"]
             .map(name => functionSource(source, name)),
@@ -146,6 +148,27 @@ function browserChecks(fixtures) {
                 };
             `;
             const f = Function(setup)();
+            const longPrompt = Array.from({length:80}, (_, i) => `Line ${i}: keep @Hero in view`).join("\n");
+            f.editor.style.cssText = "height:120px;overflow:auto";
+            const caretVisible = () => {
+                const rect = getSelection().getRangeAt(0).getBoundingClientRect();
+                const box = f.editor.getBoundingClientRect();
+                return rect.top >= box.top + f.editor.clientTop - 1
+                    && rect.bottom <= box.top + f.editor.clientTop + f.editor.clientHeight + 1;
+            };
+            f.render(longPrompt, longPrompt.indexOf("Line 70:"));
+            f.editor.scrollTop = 0;
+            test(!caretVisible(), "lower section initially outside editor viewport");
+            revealPromptCaret(f.editor);
+            test(caretVisible(), "Go To reveals lower section without arrow key");
+            f.render(longPrompt, longPrompt.indexOf("Line 2:"));
+            f.editor.scrollTop = f.editor.scrollHeight;
+            test(!caretVisible(), "upper section initially outside editor viewport");
+            revealPromptCaret(f.editor);
+            test(caretVisible(), "Go To reveals upper section without arrow key");
+            test(f.text() === longPrompt && f.saved.length === 0,
+                "revealing the caret does not edit or save the prompt");
+            f.editor.style.cssText = "";
             const choose = label => {
                 const items = [...document.querySelectorAll(".h3pc-menu:not([hidden]) .h3pc-option")];
                 const item = items.find(item => item.querySelector(".h3pc-label").textContent === label);

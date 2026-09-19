@@ -1,7 +1,7 @@
 import {app} from "/scripts/app.js";
 import {bindNodeWheel} from "./h3_dom_wheel.mjs";
 import {api} from "/scripts/api.js";
-import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.6.10";
+import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.6.11";
 import {
     H3_CONTEXT_LENGTHS,
     MAX_SHOTS,
@@ -36,8 +36,8 @@ import {
     shotLengthMode,
     sharedPrompt,
     visualContextCompositions,
-} from "./h3_chain_plan_core.mjs?v=0.6.10";
-import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.6.10";
+} from "./h3_chain_plan_core.mjs?v=0.6.11";
+import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.6.11";
 import {
     applySceneAudioOverride,
     applySceneLipSync,
@@ -48,21 +48,21 @@ import {
     sceneAudioPolicy,
     sceneTransitionPreset,
     transitionPresetLabel,
-} from "./h3_policy_core.mjs?v=0.6.10";
+} from "./h3_policy_core.mjs?v=0.6.11";
 import {
     resolveAudioContextLength,
     resolveAudioPolicy,
     resolveTransitionPolicy,
-} from "./h3_socket_presentation_core.mjs?v=0.6.10";
+} from "./h3_socket_presentation_core.mjs?v=0.6.11";
 import {
     availableLoRARoutes,
     loraRouteLabel,
-} from "./h3_lora_scheduler_core.mjs?v=0.6.10";
+} from "./h3_lora_scheduler_core.mjs?v=0.6.11";
 import {
     MODERN_PLAN_NODE as MODERN_NODE_NAME,
     MODERN_PLAN_WIDGET_NAMES as MODERN_BACKING_WIDGETS,
     upgradeLegacyPlanNode,
-} from "./h3_plan_upgrade_core.mjs?v=0.6.10";
+} from "./h3_plan_upgrade_core.mjs?v=0.6.11";
 
 // This scene editor is an original implementation. Its quick @ reference and
 // # dialogue interactions are inspired by nkxx188/ComfyUI-MiniMaxH3-Easy,
@@ -349,10 +349,20 @@ function setWidgetValue(node, name, value) {
 }
 
 function collapseWidget(widget) {
-    widget._h3OriginalType ??= widget.type;
-    widget._h3OriginalComputeSize ??= widget.computeSize;
-    widget._h3OriginalDraw ??= widget.draw;
+    // Snapshot once, including undefined methods: repeated refreshes must not
+    // mistake our collapsed geometry for the original converted-input layout.
+    widget._h3PlanWidgetOriginal ??= {
+        type: widget.type,
+        computeSize: widget.computeSize,
+        draw: widget.draw,
+        optionsHidden: widget.options?.hidden,
+    };
     widget.hidden = true;
+    // The Vue/Nodes 2.0 renderer reads options.hidden, not widget.hidden.
+    // Keep both renderers in sync, otherwise invisible backing controls still
+    // occupy a textarea-sized block and empty rows above the rich editor.
+    widget.options ??= {};
+    widget.options.hidden = true;
     widget.type = "hidden";
     widget.computeSize = () => [0, -4];
     // Modern and legacy canvas paths do not agree on whether a hidden widget
@@ -386,14 +396,25 @@ function collapseModernBackingWidgets(node) {
     if ((node.comfyClass ?? node.type) !== MODERN_NODE_NAME) return;
     for (const name of MODERN_BACKING_WIDGETS) {
         const widget = node.widgets?.find((item) => item.name === name);
-        if (widget && node.inputs?.some((input) => input.widget?.name === name)) {
-            // A converted widget owns a real socket. Hiding it also hides or
-            // mispositions that socket in the frontend (notably fingerprints).
+        const input = node.inputs?.find((item) => item.widget?.name === name);
+        const original = widget?._h3PlanWidgetOriginal;
+        // Newer ComfyUI creates an automatic socket for every native widget.
+        // Only a real link or an older explicit conversion needs its native
+        // layout kept alive; socket presence alone would restore every row
+        // AND the invisible plan_json textarea's large blank allocation.
+        const converted = [widget?.type, original?.type].some(
+            (type) => typeof type === "string" && type.startsWith("converted-widget"));
+        if (widget && input && (input.link != null || converted)) {
+            // Hiding an active/converted widget hides or mispositions its
+            // socket in the frontend (notably connected fingerprints).
             if (widget.type === "hidden") {
-                widget.type = widget._h3OriginalType ?? "converted-widget";
-                widget.computeSize = widget._h3OriginalComputeSize;
-                widget.draw = widget._h3OriginalDraw;
+                widget.type = original?.type ?? "converted-widget";
+                widget.computeSize = original?.computeSize;
+                widget.draw = original?.draw;
             }
+            // Core may already have changed type during conversion; still
+            // release the Vue visibility flag that our editor owns.
+            if (original && widget.options) widget.options.hidden = original.optionsHidden;
             widget.hidden = false;
             continue;
         }
@@ -405,6 +426,7 @@ function setProjectAssetManagedWidget(widget, managed) {
     if (!widget) return;
     widget._h3ProjectAssetOriginal ??= {
         hidden: widget.hidden,
+        optionsHidden: widget.options?.hidden,
         type: widget.type,
         computeSize: widget.computeSize,
         draw: widget.draw,
@@ -415,12 +437,15 @@ function setProjectAssetManagedWidget(widget, managed) {
     const original = widget._h3ProjectAssetOriginal;
     if (managed) {
         widget.hidden = true;
+        widget.options ??= {};
+        widget.options.hidden = true;
         widget.type = "hidden";
         widget.computeSize = () => [0, -4];
         widget.draw = () => {};
         widget.disabled = true;
     } else {
         widget.hidden = original.hidden;
+        if (widget.options) widget.options.hidden = original.optionsHidden;
         widget.type = original.type;
         widget.computeSize = original.computeSize;
         widget.draw = original.draw;

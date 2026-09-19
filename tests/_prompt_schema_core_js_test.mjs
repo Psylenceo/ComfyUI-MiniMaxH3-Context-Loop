@@ -19,6 +19,16 @@ assert.equal(detectH3Mode(h3AlignmentInstruction("l2va", {duration:6, finalShot:
 
 assert.equal(h3AlignmentInstruction("i2va"),
     "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.");
+const taggedAlignment = h3AlignmentInstruction("i2va").replace("<Picture 1>", "@test");
+const hasAlignmentError = (references, text = taggedAlignment) => analyzeH3Prompt(text, "i2va", {
+    connectedReferences:references,
+}).problems.some(problem => problem.code === "alignment");
+assert.equal(hasAlignmentError([{token:"@test", label:"<Picture 1>", active:true}]), false);
+assert.equal(hasAlignmentError([{token:"@test", label:"<Picture 1>", active:false}]), true);
+assert.equal(hasAlignmentError([{token:"@test", label:"<Picture 2>", active:true}]), true);
+assert.equal(hasAlignmentError([{token:"@test", label:"<Picture 1>", active:true}],
+    taggedAlignment.replace("0.00", "1.00")), true);
+assert.equal(hasAlignmentError([]), true);
 assert.match(h3AlignmentInstruction("fl2va", {duration:8, finalShot:3}), /Picture 2 \(from Shot 3\).*8\.00-second/);
 assert.match(h3AlignmentInstruction("l2va", {duration:6.5, finalShot:2}), /\[Shot 2\].*6\.50-second/);
 assert.ok(analyzeH3Prompt(`${h3AlignmentInstruction("i2va")}\n\ntext`, "t2va")

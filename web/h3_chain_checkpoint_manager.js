@@ -22,18 +22,18 @@ import {
     checkpointOutputSummary,
     formatCheckpointBytes,
     selectedCheckpointRevision,
-} from "./h3_checkpoint_manager_core.mjs?v=0.6.10";
+} from "./h3_checkpoint_manager_core.mjs?v=0.6.11";
 import {
     parsePlanJson,
     planToJson,
     promptValueToText,
-} from "./h3_chain_plan_core.mjs?v=0.6.10";
-import {applyCheckpointRevisionSet} from "./h3_chain_review_core.mjs?v=0.6.10";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.10";
+} from "./h3_chain_plan_core.mjs?v=0.6.11";
+import {applyCheckpointRevisionSet} from "./h3_chain_review_core.mjs?v=0.6.11";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.6.11";
 import {
     refreshRestoredPlanEditors,
     restoreConnectedPolicyInputs,
-} from "./h3_plan_restore_core.mjs?v=0.6.10";
+} from "./h3_plan_restore_core.mjs?v=0.6.11";
 
 const NODE_NAME = "MiniMaxH3ChainCheckpointManager";
 const PLAN_NAME = "MiniMaxH3ChainPlan";
@@ -285,15 +285,19 @@ function injectStyles() {
       .h3cm-attribution-candidates { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:7px; }
       .h3cm-attribution-candidate-selected { border-color:var(--h3cm-accent) !important;
         color:var(--h3cm-accent) !important; }
-      .h3cm-delete { flex:0 0 auto; max-height:210px; overflow:auto; padding:8px;
+      .h3cm-delete { flex:0 0 auto; padding:8px;
         border:1px solid var(--h3cm-border); border-radius:7px; }
+      .h3cm-delete-body { max-height:135px; overflow:auto; }
+      .h3cm-delete-details > summary { cursor:pointer; color:var(--h3cm-muted); margin-top:5px; }
       .h3cm-delete-blocked { border-color:var(--h3cm-danger); }
       .h3cm-delete-title { font-weight:700; }
       .h3cm-files,.h3cm-dependents { margin:5px 0 0; padding-left:18px; }
       .h3cm-dependent { color:var(--h3cm-danger); cursor:pointer; }
-      .h3cm-delete-actions { margin-top:7px; }
+      .h3cm-delete-actions { margin-top:7px; flex-wrap:wrap; }
       .h3cm-delete-actions .h3cm-status { flex:1 1 180px; min-width:120px; }
-      .h3cm-delete-button { margin-left:auto; color:var(--h3cm-danger) !important; }
+      .h3cm-delete-button { color:var(--h3cm-danger) !important; }
+      .h3cm-obsolete-preview { margin-top:8px; overflow-wrap:anywhere; }
+      .h3cm-obsolete-preview[hidden] { display:none; }
       .h3cm-error { color:var(--h3cm-danger); }
       @media (max-width:760px) { .h3cm-main { grid-template-columns:1fr; }
         .h3cm-root { overflow:auto; } }
@@ -405,7 +409,7 @@ function mount(node) {
     main.append(branchesPanel, detail);
     const deletion = element("section", "h3cm-delete");
     const deletionTitle = element("div", "h3cm-delete-title", "Select a checkpoint revision.");
-    const deletionBody = element("div");
+    const deletionBody = element("div", "h3cm-delete-body");
     const deletionActions = element("div", "h3cm-delete-actions");
     let retireButtons = [];
     const status = element("div", "h3cm-status");
@@ -421,7 +425,7 @@ function mount(node) {
     remove.disabled = true;
     deletionActions.append(load, activate, status, remove);
     deletionActions.append(removeObsolete);
-    deletion.append(deletionTitle, deletionBody, deletionActions, obsoletePanel);
+    deletion.append(deletionActions, obsoletePanel, deletionTitle, deletionBody);
     root.append(head, runRow, outputRow, stageTabs, stageNote, chapterTabs, scenes, main, deletion);
 
     function setPreviewHeight(value, persist = false) {
@@ -1953,6 +1957,12 @@ function mount(node) {
             "Reattached scenes and shared media are kept. This cannot be undone."))) return;
         const token = state.requestToken;
         setBusy(true, preview ? "Deleting obsolete path…" : "Checking obsolete path and shared files…");
+        obsoleteConfirm = null;
+        obsoletePanel.hidden = false;
+        obsoletePanel.replaceChildren(
+            element("strong", "", "Obsolete path deletion preview"),
+            element("div", "h3cm-status", preview ? "Deleting confirmed files…" : "Checking dependencies and shared files…"),
+        );
         try {
             const path = "/minimax_h3_context_loop/checkpoint-revisions/obsolete-" + (preview ? "delete" : "preview");
             const options = {method:"POST", headers:{"Content-Type":"application/json"},
@@ -1971,23 +1981,37 @@ function mount(node) {
             obsoleteConfirm = null;
             obsoletePanel.replaceChildren(); obsoletePanel.hidden = false;
             obsoletePanel.append(element("strong", "", "Obsolete path deletion preview"));
-            for (const item of payload.revisions ?? []) obsoletePanel.append(element("div", "",
+            obsoletePanel.append(element("div", "", `${payload.revisions?.length ?? 0} revisions · ${payload.owned_file_count} files · ${formatCheckpointBytes(payload.reclaimed_bytes)}`));
+            if (payload.allowed) {
+                obsoleteConfirm = button("Confirm obsolete path deletion", "Delete only the previewed files", () => void obsoletePathAction(payload), "h3cm-delete-button");
+                const actions = element("div", "h3cm-delete-actions");
+                actions.append(obsoleteConfirm);
+                obsoletePanel.append(actions);
+            }
+            const blockers = element("div", "h3cm-delete-body");
+            for (const reason of payload.blockers ?? []) blockers.append(element("div", "h3cm-error", reason));
+            obsoletePanel.append(blockers);
+            const details = element("details", "h3cm-delete-details");
+            const inventory = element("div", "h3cm-delete-body");
+            details.append(element("summary", "", "Revisions, files and retained data"), inventory);
+            for (const item of payload.revisions ?? []) inventory.append(element("div", "",
                 `Remove link: S${item.scene} · ${item.revision.slice(0, 8)}`));
-            for (const item of payload.retained_revisions ?? []) obsoletePanel.append(element("div", "h3cm-muted",
+            for (const item of payload.retained_revisions ?? []) inventory.append(element("div", "h3cm-muted",
                 `Keep reattached: S${item.scene} · ${item.revision.slice(0, 8)}`));
-            for (const reason of payload.blockers ?? []) obsoletePanel.append(element("div", "h3cm-error", reason));
             const files = element("ul", "h3cm-files");
             for (const file of payload.files ?? []) if (file.exists) files.append(element("li", "",
                 `${file.owned ? "Delete" : file.shared ? "Keep shared" : "Keep"}: ${file.path} · ${formatCheckpointBytes(file.size_bytes)}`));
-            obsoletePanel.append(files);
-            if (payload.allowed) {
-                obsoleteConfirm = button("Confirm obsolete path deletion", "Delete only the previewed files", () => void obsoletePathAction(payload), "h3cm-delete-button");
-                obsoletePanel.append(obsoleteConfirm);
-            }
+            inventory.append(files);
+            obsoletePanel.append(details);
             status.textContent = payload.allowed ? "Review the obsolete path preview before confirming." : "Obsolete path cleanup is blocked; see the preview.";
         } catch (error) {
             if (identity !== obsoletePathIdentity()) return;
-            obsoletePanel.replaceChildren(); obsoletePanel.hidden = true; obsoleteConfirm = null;
+            obsoleteConfirm = null;
+            obsoletePanel.hidden = false;
+            obsoletePanel.replaceChildren(
+                element("strong", "", "Obsolete path cleanup failed"),
+                element("div", "h3cm-error", error.message),
+            );
             status.className = "h3cm-status h3cm-error";
             status.textContent = error.message;
         } finally {

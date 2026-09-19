@@ -3,6 +3,31 @@
 Newest first. The [README](README.md#changelog) keeps a short highlight reel;
 this file records the detailed changes.
 
+## Unreleased — Context-scoped resume verification
+
+- Resume checks metadata and file presence for all prior scenes, but hashes
+  only the checkpoint payloads used by the selected visual/audio context.
+  Include explicit older sources and the paired AV bootstrap checkpoint;
+  independent cuts read no predecessor payloads. Manifest Load and assembly
+  retain full integrity checks for unused media.
+- Honor Stop/Cancel between resume scenes and each hash read block, preserving
+  ComfyUI's native cancellation exception and leaving saved files untouched.
+
+## v0.6.11 — Faster resume and Plan layout fixes
+
+- Avoid hashing unchanged saved artifacts twice during Loop Start resume.
+  Share verification results only within the current call, checking file
+  identity, size and timestamps before reuse. Changed or missing files,
+  mismatched hashes, invalid history and invalid context still block resume.
+  New queues verify afresh; add per-scene progress and phase timing logs.
+- Fix Modern/Production Plan blank space and duplicate backing controls with
+  the Vue node renderer and automatic widget sockets. Preserve linked inputs
+  and saved workflow values.
+- Add persistent global prompt collapse controls to Plan editors and restore
+  canvas wheel navigation over inactive H3 panels.
+- Restore the Loop Start selection after successful top-level completion (#75).
+- Refresh browser helper cache tokens for the patch release.
+
 ## v0.6.10 — Checkpoint recovery and Plan editing fixes
 
 - Fix #72's expanded visual-context recovery on resume. Preserve the exact
