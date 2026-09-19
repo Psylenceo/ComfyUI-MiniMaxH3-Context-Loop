@@ -30,7 +30,7 @@ await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 let chrome;
 try {
     chrome = spawn(process.env.H3_TEST_BROWSER || "/opt/google/chrome/chrome", [
-        "--headless", "--window-size=1600,1000", "--disable-gpu", "--no-first-run", "--disable-extensions",
+        "--headless", "--window-size=" + (process.env.H3_TEST_WINDOW_SIZE || "1600,1000"), "--disable-gpu", "--no-first-run", "--disable-extensions",
         "--disable-background-networking", "--disable-component-update", "--disable-sync",
         "--user-data-dir=" + path.join(temporary, "profile"), "--virtual-time-budget=18000",
         "--dump-dom", `http://127.0.0.1:${server.address().port}/`,
@@ -99,7 +99,16 @@ async function browserChecks() {
             check(Boolean(node.root.querySelector(".h3pa-source-col")) === tree, "Tree column is opt-in");
             check(Boolean(node.root.querySelector(".h3pa-lineage-display")) === tree, "Related assets strip is opt-in");
             check((typeof node.dom.computeLayoutSize === "function") === tree, "New resize floor does not alter the legacy node");
+            const toolbar = node.root.querySelector(":scope > .h3pa-toolbar");
+            const status = node.root.querySelector(":scope > .h3pa-status");
+            check(status.getBoundingClientRect().top >= toolbar.getBoundingClientRect().bottom,
+                type + " project status must stay below the Run-name toolbar");
             if (tree) {
+                check(getComputedStyle(toolbar).gridArea === "top", "Tree toolbar has its own grid area");
+                const extraRow = document.createElement("div"); extraRow.className = "h3pa-row";
+                node.root.append(extraRow);
+                check(getComputedStyle(extraRow).gridArea !== "top", "Other rows cannot occupy the toolbar area");
+                extraRow.remove();
                 check(node.dom.computeLayoutSize().minWidth > 700, "Tree node advertises its width floor");
                 const toggle = node.root.querySelector(".h3pa-tree-toggle"); check(Boolean(toggle), "Source exposes its edits");
                 toggle.click();
