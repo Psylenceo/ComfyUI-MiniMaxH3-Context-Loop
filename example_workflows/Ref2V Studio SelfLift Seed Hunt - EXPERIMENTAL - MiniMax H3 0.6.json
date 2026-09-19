@@ -881,7 +881,8 @@
         "hunt_1",
         "taeh3.safetensors",
         false,
-        true
+        true,
+        "resume"
       ]
     },
     {

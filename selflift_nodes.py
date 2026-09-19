@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 
+from .selflift_upscalers import BILINEAR, TRIDAE, TRIDAE_CHECKPOINT, validate_upscaler_grid
+
 _LOG = logging.getLogger(__name__)
 PLAN_TYPE = "H3_CHAIN_PLAN"
 STATE_TYPE = "H3_CHAIN_STATE"
@@ -22,7 +24,10 @@ def upscaler_models():
         names = list(folder_paths.get_filename_list("latent_upscale_models"))
     except (AttributeError, KeyError):
         names = []
-    return ["none"] + sorted(name for name in names if name != "none")
+    # Keep none first: old workflows/defaults do not opt in to a different lift.
+    builtins = ["none", BILINEAR, TRIDAE]
+    return builtins + sorted(name for name in names
+                             if name not in (*builtins, TRIDAE_CHECKPOINT))
 
 
 class MiniMaxH3SelfLiftProject:
@@ -33,12 +38,12 @@ class MiniMaxH3SelfLiftProject:
             "enabled": ("BOOLEAN", {"default": False,
                 "tooltip": "Project-wide switch in the dedicated SelfLift workflow. Off uses ordinary single-stage sampling; saved clips are not regenerated automatically."}),
             "upscaler_model": (upscaler_models(), {
-                "tooltip": "H3 3D-convolution learned latent-upscaler checkpoint under models/latent_upscale_models. Required only when enabled; not compatible with H3 2D or generic image/LTX upscalers."}),
+                "tooltip": "Select an installed LBH H3 3D checkpoint, tridae (FP32 clean-latent 2x; downloads verified weights on first use), or bilinear (spatial-only, no weights). Tr1dae requires final dimensions divisible by 64. Required only when enabled; generic image/LTX upscalers are not compatible."}),
             "high_resolution_steps": ("INT", {"default": 2, "min": 1, "max": 10000,
                 "tooltip": "Final steps at the Plan's full resolution. Must be lower than each generated scene's total steps (e.g. 6 low + 2 high out of 8)."}),
         }, "optional": {
             "cleanup_between_stages": ("BOOLEAN", {"default": False,
-                "tooltip": "Release the retired checkpoint's DynamicVRAM buffers before lifting, and unload the learned upscaler after use. Logs RAM before/after. Preserves shared models and saved takes; can slow next-scene reloads. Classic/non-dynamic models are skipped."}),
+                "tooltip": "Release the retired checkpoint's DynamicVRAM buffers before lifting, and unload the learned upscaler after use. Tr1dae's small legacy upscaler is specifically offloaded to CPU; other classic/non-dynamic models are skipped. Preserves shared models and saved takes; can slow next-scene reloads."}),
         }}
 
     RETURN_TYPES = (PLAN_TYPE, "STRING")
@@ -124,7 +129,7 @@ class MiniMaxH3ChainSelfLiftSampler:
     DESCRIPTION = ("Dedicated experimental Chain sampler, controlled by SelfLift Project. "
                    "Supports native AV masks, source-audio locks, tagged references and guides. "
                    "SelfLift ON supports Euler or experimental RES4LYF Radau IA 2s (eta=0), "
-                   "with a learned H3 latent upscaler; no TST or spatial tiling.")
+                   "with an H3 learned or bilinear latent upscaler; no TST or spatial tiling.")
 
     def sample(self, state, model, positive, vae, latent, sampler, sigmas, seed, cfg=1.0, negative=None,
                model_hires=None):
@@ -161,7 +166,8 @@ class MiniMaxH3ChainSelfLiftSampler:
                              (total_steps - 1, total_steps))
         name = str(settings.get("upscaler_model", "none"))
         if name == "none" or name not in upscaler_models():
-            raise ValueError("Select an installed H3 latent-upscaler model on SelfLift Project, or turn SelfLift off.")
+            raise ValueError("Select tridae, bilinear, or an installed H3 latent-upscaler model on SelfLift Project, or turn SelfLift off.")
+        validate_upscaler_grid(name, latent)
         # Runtime imports, model registration and weight loading happen ONLY
         # when this explicitly enabled sampler executes, never on tab load.
         from .selflift_runtime.nodes import progressive_sample, _validate_hires_model

@@ -4,7 +4,7 @@ Use **MiniMax H3 SelfLift Seed Hunt** in place of the Chain SelfLift Sampler,
 or open the dedicated **Ref2V Studio SelfLift Seed Hunt** example. Existing
 workflows and the ordinary Review Gate are unchanged.
 
-1. Enable SelfLift Project and select its learned H3 upscaler. Use Euler
+1. Enable SelfLift Project and select its H3 upscaler (see choices below). Use Euler
    (the default) or the experimental Radau setup below, with the same
    total/high-step split used by ordinary SelfLift.
 2. For review previews, install current KJNodes and select `taeh3.safetensors` from `models/vae_approx`.
@@ -16,7 +16,7 @@ workflows and the ordinary Review Gate are unchanged.
 4. Browse the low-pass videos with the Review Gate-style arrows or dots, then
    click **Use take — finish upscale**. The single player fills the node; drag
    its lower handle to resize it, or double-click the handle to restore auto-fit.
-   Only that candidate gets the learned lift and remaining high-resolution steps.
+   Only that candidate gets the selected lift and remaining high-resolution steps.
    These are silent, approximate motion/composition previews, not final-detail
    or audio-quality previews. Flat 2D TAE frames repeat at H3's token timing;
    playback duration is correct, but motion has fewer distinct frames.
@@ -24,6 +24,48 @@ workflows and the ordinary Review Gate are unchanged.
    and Loop End. This records the chosen seed and carries it to later scenes.
    The example already does this. Keep the final Review Gate's candidate count
    at **1**; it reviews the finished result, not another set of expensive hunts.
+
+## Latent upscaler choices
+
+Use the existing **SelfLift Project → upscaler_model** dropdown; no rewiring is
+needed. This applies to both Chain SelfLift Sampler and SelfLift Seed Hunt.
+Existing checkpoint selections and the disabled/default `none` are unchanged.
+
+- **An installed LBH checkpoint:** the existing 3D-convolution lift, unchanged.
+- **`tridae`:** Tr1dae's `h3_clean_latent_upscaler_film_epoch200.safetensors`,
+  run in FP32 using the clean H3 VAE-space latent. No LBH normalization,
+  temporal chunks, or artificial prefix split is applied. The complete native
+  temporal context goes through the model; the sampler still restores its
+  existing video/audio masks and context anchors afterward.
+- **`bilinear`:** independent FP32 bilinear spatial interpolation for each video
+  time token (`align_corners=False`). No weights, downloads, temporal mixing,
+  VAE round trip, or learned correction. The normal high-resolution sampling
+  steps still run; this is an experimental comparison option, not a promise of
+  equivalent final quality.
+
+Tr1dae is a fixed **2x** model. Use final Plan dimensions divisible by **64**,
+such as **1920×1088**. An incompatible grid is rejected before the low pass;
+there is no hidden second resize. Bilinear supports the existing target grids.
+
+On first **execution** of the Tr1dae lift, the pinned ~59 MB checkpoint is
+downloaded into `models/latent_upscale_models` and SHA-256 verified. Schema/UI
+loading never downloads or loads weights. Existing copies in registered
+`latent_upscale_models` or `h3_latent_upscalers` directories are reused when
+their checksum matches; a mismatching user file is never overwritten. No
+additional custom-node pack is needed. Weights are separate from this repo:
+[Tridae/H3LatentUpscaler](https://huggingface.co/Tridae/H3LatentUpscaler).
+
+Keep the seed, conditioning, sampler and finishing steps fixed for comparisons.
+Changing the upscaler creates a distinct Seed Hunt identity, so a finished take
+from the old upscaler is not returned as a new test. Previous saved clips are
+not regenerated automatically: explicitly regenerate the scene you want to
+compare. Changing the lifter also makes continuation fall back to saved HQ
+context rather than reusing an incompatible native low-resolution carry.
+
+With **cleanup_between_stages** enabled, Tr1dae's small legacy patcher is
+specifically offloaded to CPU after the successful lift. Other loaded models
+are not targeted. Bilinear has no model to retire. This does not change the
+existing DynamicVRAM cleanup behavior for the diffusion models or LBH.
 
 ## Run without the review gate
 
@@ -87,7 +129,7 @@ conditioning, with matching flow/audio scaling and sampling settings. Incompatib
 families, latent formats and conditioning dimensions are rejected before sampling.
 The sampler (Euler or supported Radau), CFG, sigma schedule and step split remain
 shared. This is not a generic cross-model-family refiner or a second latent-upscaler
-checkpoint; the learned 3D upscaler is still selected on SelfLift Project.
+checkpoint; the latent upscaler is still selected on SelfLift Project.
 
 The high model keeps its own LoRAs and engine patches. Connect any desired LoRA
 setup to that loader separately; base-model LoRAs are not copied automatically.

@@ -20,3 +20,19 @@ the user's connected RES4LYF sampler without patching it. It captures the
 completed low-resolution state, evaluates a fresh boundary prediction, and
 uses a separately versioned durable handoff; Euler retains its original path.
 Neither ComfyUI core nor installed upstream node packs are modified.
+
+## Tr1dae clean-latent upscaler
+
+`h3_clean_upscaler.py` is the unmodified architecture/metadata implementation
+from mamad8c/ComfyUI-H3-Latent-Upscaler-Mamad8, commit
+`e98237773011523528353a8beb4863e65b099a38` (apart from its attribution header).
+Copyright (c) 2026 Mamad8, MIT license; the full notice is included in
+`H3_CLEAN_UPSCALER_LICENSE.txt`.
+https://github.com/mamad8c/ComfyUI-H3-Latent-Upscaler-Mamad8
+
+The `tridae` option uses Tr1dae's separately distributed epoch200 weights:
+https://huggingface.co/Tridae/H3LatentUpscaler
+The checkpoint revision and SHA-256 are pinned in `selflift_upscalers.py`.
+Weights are not bundled. The new private adapter uses FP32, legacy full-load
+ModelPatcher, and full temporal context, as in the validated diagnostic.
+https://github.com/Tr1dae/ComfyUI-MiniMaxH3_LatentUpscaler

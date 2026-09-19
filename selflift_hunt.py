@@ -211,6 +211,7 @@ class MiniMaxH3SelfLiftSeedHunt:
         import comfy.nested_tensor
         from comfy.model_management import throw_exception_if_processing_interrupted
         from .selflift_nodes import MiniMaxH3ChainSelfLiftSampler, _stage_model, upscaler_models
+        from .selflift_upscalers import validate_upscaler_grid
         from .selflift_state import prepare_previous_context, settings_signature, SIGNATURE
         from .selflift_hunt_store import HuntStore, digest, save_bundle, load_bundle, atomic_json
         from .selflift_preview import check_preview, save_preview
@@ -232,7 +233,8 @@ class MiniMaxH3SelfLiftSeedHunt:
             raise ValueError("SelfLift Seed Hunt needs at least one low and one high step.")
         name = str(settings.get("upscaler_model", "none"))
         if name == "none" or name not in upscaler_models():
-            raise ValueError("Select an installed H3 latent upscaler on SelfLift Project.")
+            raise ValueError("Select tridae, bilinear, or an installed H3 latent upscaler on SelfLift Project.")
+        validate_upscaler_grid(name, latent)
         if not 1 <= int(candidate_count) <= 100:
             raise ValueError("SelfLift candidate count must be 1..100.")
         from .selflift_runtime.nodes import progressive_sample, _validate_sampling, _validate_hires_model

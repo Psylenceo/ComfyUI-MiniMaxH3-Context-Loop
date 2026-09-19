@@ -362,6 +362,11 @@ def _inference_memory_required(model, z0_low, out_hw):
 
 
 def learned_latent_lift(z0_low, out_hw, model_name, device=None, temporal_split=None, *, cleanup_after=False):
+    from ..selflift_upscalers import BILINEAR, TRIDAE
+    if model_name in (BILINEAR, TRIDAE):
+        from .alternative_lifts import latent_lift
+        return latent_lift(z0_low, out_hw, model_name, device=device,
+                           temporal_split=temporal_split, cleanup_after=cleanup_after)
     device = comfy.model_management.get_torch_device() if device is None else device
     out = _learned_latent_lift(z0_low, out_hw, model_name, device, temporal_split)
     if cleanup_after:
