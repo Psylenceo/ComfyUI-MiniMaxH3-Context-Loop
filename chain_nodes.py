@@ -12055,287 +12055,6 @@ class MiniMaxH3ReferenceVideoPrepare:
         return selected, copied_audio, length, status
 
 
-class MiniMaxH3ScheduledPictureReference:
-    DEPRECATED = True
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "image": ("IMAGE", {
-                    "tooltip": "One reference picture. Ref2VA uses only the "
-                               "first image when a batch is connected."}),
-                "tag": ("STRING", {
-                    "default": "hero_face",
-                    "tooltip": "Stable alias used as @tag in prompts, for "
-                               "example tag hero_face becomes @hero_face. "
-                               "The tag is NOT a native Picture number. "
-                               "Active pictures are renumbered from "
-                               "<Picture 1> in every scene: if an earlier "
-                               "picture is removed or inactive, @picture_2 "
-                               "can correctly compile to <Picture 1>."}),
-                "scenes": ("STRING", {
-                    "default": "",
-                    "tooltip": "Scenes where this picture is active. Leave "
-                               "blank for all scenes; use 1, 1:4, or "
-                               "1,3,5:8 for selected scenes. Only active "
-                               "pictures consume <Picture N> numbers, so the "
-                               "same @tag may receive a different native "
-                               "number in different scenes."}),
-            },
-            "optional": {
-                "previous": (REFERENCE_SCHEDULE_TYPE, {
-                    "tooltip": "Optional schedule from another Picture, "
-                               "Video, or Audio Schedule node. Chain nodes in "
-                               "the stable priority order you want. Native "
-                               "numbers are assigned only after inactive "
-                               "entries are removed for the current scene."}),
-            },
-            "hidden": {
-                "dynprompt": "DYNPROMPT",
-                "unique_id": "UNIQUE_ID",
-            },
-        }
-
-    RETURN_TYPES = (REFERENCE_SCHEDULE_TYPE, "STRING", "STRING")
-    RETURN_NAMES = ("schedule", "schedule_fingerprint", "status")
-    OUTPUT_TOOLTIPS = (
-        "Reference schedule to chain into another entry or Scheduled Ref2VA.",
-        "SHA-256 of every scheduled source, tag, and selector. Connect it to "
-        "the Plan generation_fingerprint to protect checkpoint resume.",
-        "Normalized tag, scene selector, entry count, and fingerprint.",
-    )
-    FUNCTION = "add"
-    CATEGORY = "conditioning/minimax/context_loop/references/legacy_schedule"
-    DESCRIPTION = ("Add one scene-scheduled picture using a stable @tag. "
-                   "Tags identify assets; they do not reserve native H3 "
-                   "numbers. The final wrapper keeps only pictures active "
-                   "in the current scene and numbers them compactly from "
-                   "<Picture 1>. For example, if @picture_1 is removed or "
-                   "inactive, @picture_2 automatically becomes <Picture 1>. "
-                   "Write @picture_2 in the Plan prompt; the scheduler only "
-                   "resolves aliases and never inserts prompt text.")
-
-    def add(self, image, tag, scenes, previous=None,
-            dynprompt=None, unique_id=None):
-        mode = _downstream_reference_compliance(dynprompt, unique_id)
-        try:
-            if (torch is None or not torch.is_tensor(image) or image.ndim != 4 or
-                    int(image.shape[0]) < 1 or int(image.shape[-1]) < 3):
-                raise ValueError(
-                    "Scheduled H3 picture must be an IMAGE tensor with shape "
-                    "[batch,height,width,channels].")
-            picture = image[:1]
-            schedule = _append_scheduled_reference(
-                previous, kind="picture", tag=tag, scenes=scenes,
-                value=picture, content_hash=_tensor_fingerprint(picture),
-                compliance_mode=mode)
-        except (TypeError, ValueError) as exc:
-            if mode == "disabled":
-                return _skipped_reference_result(previous, "Picture reference", exc)
-            raise
-        entry = schedule["entries"][-1]
-        status = "@%s picture on %s; %d sources; %s" % (
-            entry["tag"], entry["scenes"], len(schedule["entries"]),
-            schedule["fingerprint"][:12])
-        return schedule, _reference_fingerprint_output(schedule), status
-
-
-class MiniMaxH3ScheduledVideoReference:
-    DEPRECATED = True
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "video": ("IMAGE", {
-                    "tooltip": "Reference video frames at 24 fps. Use "
-                               "Reference Video Prep when the loader source "
-                               "has another frame rate."}),
-                "tag": ("STRING", {
-                    "default": "performance",
-                    "tooltip": "Stable alias such as @performance. It is "
-                               "NOT a native Video number. Active videos are "
-                               "renumbered from <Video 1> per scene, so this "
-                               "@tag remains valid if an earlier entry is "
-                               "removed or inactive."}),
-                "scenes": ("STRING", {
-                    "default": "",
-                    "tooltip": "Scenes where this video and its optional "
-                               "paired soundtrack are active. Blank means all; "
-                               "1, 1:4, and 1,3,5:8 are supported. Only "
-                               "active videos consume <Video N> numbers."}),
-                "audio_tag": ("STRING", {
-                    "default": "",
-                    "tooltip": "Alias for the paired soundtrack when audio "
-                               "is connected. Blank derives @<video_tag>_audio. "
-                               "This is also a stable alias, not a reserved "
-                               "<Audio N> number."}),
-                "timeline_mode": (list(REFERENCE_VIDEO_TIMELINE_MODES), {
-                    "default": "restart_each_scene",
-                    "tooltip": "restart_each_scene preserves the original "
-                               "behavior: every active scene receives the "
-                               "reference from frame 0. sequential advances "
-                               "the 24 fps source along the Plan timeline, "
-                               "repeating the same overlap as Motion Context. "
-                               "Sequential mode requires Current Shot state "
-                               "connected to Scheduled Ref2VA."}),
-            },
-            "optional": {
-                "audio": ("AUDIO", {
-                    "tooltip": "Optional soundtrack of this same reference "
-                               "video. It stays index-paired with the video in "
-                               "stock Ref2VA and receives its own audio tag."}),
-                "previous": (REFERENCE_SCHEDULE_TYPE, {
-                    "tooltip": "Optional preceding scheduled reference chain. "
-                               "It sets stable priority order, not permanent "
-                               "native label numbers."}),
-            },
-            "hidden": {
-                "dynprompt": "DYNPROMPT",
-                "unique_id": "UNIQUE_ID",
-            },
-        }
-
-    RETURN_TYPES = (REFERENCE_SCHEDULE_TYPE, "STRING", "STRING")
-    RETURN_NAMES = ("schedule", "schedule_fingerprint", "status")
-    OUTPUT_TOOLTIPS = (
-        "Reference schedule to chain into another entry or Scheduled Ref2VA.",
-        "SHA-256 of all sources, tags, and selectors for checkpoint safety.",
-        "Normalized video/audio tags, selector, entry count, and fingerprint.",
-    )
-    FUNCTION = "add"
-    CATEGORY = "conditioning/minimax/context_loop/references/legacy_schedule"
-    DESCRIPTION = ("Add one scene-scheduled 24 fps video and an optional "
-                   "index-paired soundtrack using stable @tags. Tags identify "
-                   "assets while the wrapper assigns compact <Video N> and "
-                   "<Audio N> labels from the entries active in each scene. "
-                   "You may use @tags in Plan prompts when automatic renumbering "
-                   "is useful; they are optional authoring aliases and this node "
-                   "never inserts prompt text. Do not treat a tag suffix as a "
-                   "fixed native number.")
-
-    def add(self, video, tag, scenes, audio_tag,
-            timeline_mode="restart_each_scene", audio=None, previous=None,
-            dynprompt=None, unique_id=None):
-        mode = _downstream_reference_compliance(dynprompt, unique_id)
-        try:
-            if (torch is None or not torch.is_tensor(video) or video.ndim != 4 or
-                    int(video.shape[0]) < 5 or int(video.shape[-1]) < 3):
-                raise ValueError(
-                    "Scheduled H3 video must be an IMAGE batch containing at "
-                    "least 5 frames.")
-            paired_hash = ""
-            if audio is not None:
-                _validate_audio(audio, "Scheduled H3 reference-video audio")
-                paired_hash = _audio_fingerprint(audio)
-            schedule = _append_scheduled_reference(
-                previous, kind="video", tag=tag, scenes=scenes,
-                value=video, content_hash=_tensor_fingerprint(video), audio=audio,
-                audio_tag=audio_tag, audio_hash=paired_hash,
-                compliance_mode=mode, timeline_mode=timeline_mode)
-        except (TypeError, ValueError) as exc:
-            if mode == "disabled":
-                return _skipped_reference_result(previous, "Video reference", exc)
-            raise
-        entry = schedule["entries"][-1]
-        paired = (" + @%s" % entry["audio_tag"]
-                  if entry.get("audio_tag") else "")
-        status = "@%s%s video on %s; %s; %d sources; %s" % (
-            entry["tag"], paired, entry["scenes"], entry["timeline_mode"],
-            len(schedule["entries"]), schedule["fingerprint"][:12])
-        return schedule, _reference_fingerprint_output(schedule), status
-
-
-class MiniMaxH3ScheduledAudioReference:
-    DEPRECATED = True
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "audio": ("AUDIO", {
-                    "tooltip": "Standalone reference audio. For a video's "
-                               "synchronized soundtrack, use the paired audio "
-                               "socket on Video Schedule instead."}),
-                "tag": ("STRING", {
-                    "default": "voice",
-                    "tooltip": "Stable alias such as @voice. It is NOT a "
-                               "native Audio number. Active audio references "
-                               "are renumbered from <Audio 1> per scene, so "
-                               "the @tag survives earlier entries being "
-                               "removed or inactive."}),
-                "scenes": ("STRING", {
-                    "default": "",
-                    "tooltip": "Scenes where this audio reference is active. "
-                               "Blank means all; use 1, 1:4, or 1,3,5:8. "
-                               "Only active audio references consume "
-                               "<Audio N> numbers."}),
-            },
-            "optional": {
-                "previous": (REFERENCE_SCHEDULE_TYPE, {
-                    "tooltip": "Optional preceding scheduled reference chain. "
-                               "It sets stable priority order, not permanent "
-                               "native label numbers."}),
-            },
-            "hidden": {
-                "dynprompt": "DYNPROMPT",
-                "unique_id": "UNIQUE_ID",
-            },
-        }
-
-    RETURN_TYPES = (REFERENCE_SCHEDULE_TYPE, "STRING", "STRING")
-    RETURN_NAMES = ("schedule", "schedule_fingerprint", "status")
-    OUTPUT_TOOLTIPS = (
-        "Reference schedule to chain into another entry or Scheduled Ref2VA.",
-        "SHA-256 of all sources, tags, and selectors for checkpoint safety.",
-        "Normalized tag, scene selector, entry count, and fingerprint.",
-    )
-    FUNCTION = "add"
-    CATEGORY = "conditioning/minimax/context_loop/references/legacy_schedule"
-    DESCRIPTION = ("Add one scene-scheduled standalone audio reference using "
-                   "a stable @tag. The wrapper compactly renumbers active "
-                   "audio as <Audio N> in each scene. Write the @tag and its "
-                   "definition in the Plan prompt if you use the optional alias; "
-                   "this node inserts no text.")
-
-    def add(self, audio, tag, scenes, previous=None,
-            dynprompt=None, unique_id=None):
-        mode = _downstream_reference_compliance(dynprompt, unique_id)
-        try:
-            if audio is None:
-                raise ValueError(
-                    "Scheduled H3 standalone audio received no audio (None). "
-                    "Most likely, this input is connected to Current Shot's "
-                    "source_audio_slice while Source reference is off; that "
-                    "output is intentionally empty. For a "
-                    "short voice/timbre reference, connect Load Audio directly to "
-                    "Scheduled Audio Ref. For frame-exact source slices, set "
-                    "Source reference=on in H3 Audio Policy. Generated continuity "
-                    "and the final soundtrack remain independent. In legacy "
-                    "terms, generated_audio leaves this slice empty while "
-                    "source_plus_timeline enables both source reference and "
-                    "generated carry. Otherwise check "
-                    "that the upstream audio node is not "
-                    "muted or bypassed, reconnect the AUDIO link, and queue again. "
-                    "A playable browser preview does not guarantee that the socket "
-                    "emitted AUDIO during this execution.")
-            _validate_audio(audio, "Scheduled H3 standalone audio")
-            schedule = _append_scheduled_reference(
-                previous, kind="audio", tag=tag, scenes=scenes,
-                value=audio, content_hash=_audio_fingerprint(audio),
-                compliance_mode=mode)
-        except (TypeError, ValueError) as exc:
-            if mode == "disabled":
-                return _skipped_reference_result(previous, "Audio reference", exc)
-            raise
-        entry = schedule["entries"][-1]
-        status = "@%s audio on %s; %d sources; %s" % (
-            entry["tag"], entry["scenes"], len(schedule["entries"]),
-            schedule["fingerprint"][:12])
-        return schedule, _reference_fingerprint_output(schedule), status
-
-
 class MiniMaxH3SemanticPictureAnchor:
     @classmethod
     def INPUT_TYPES(cls):
@@ -12949,80 +12668,6 @@ class MiniMaxH3SourceTimeline:
         return timeline, status
 
 
-class MiniMaxH3LazyMotionAVLoader:
-    """Expose one disk-backed native VIDEO and its complete timeline audio."""
-
-    DEPRECATED = True
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "video_path": ("STRING", {
-                    "default": "",
-                    "tooltip": "Absolute path to the motion-reference video. "
-                               "VIDEO remains file-backed; only its embedded "
-                               "audio track is decoded."}),
-                "skip_first_frames": ("INT", {
-                    "default": 0, "min": 0, "max": 100000000, "step": 1,
-                    "tooltip": "Start the Plan timeline after this many "
-                               "native source frames. The VIDEO wrapper stays "
-                               "untrimmed; connect this INT to the tagged "
-                               "motion node's matching input."}),
-            },
-        }
-
-    RETURN_TYPES = ("VIDEO", "AUDIO", "INT", "STRING")
-    RETURN_NAMES = (
-        "source_video", "source_audio", "skip_first_frames", "status")
-    OUTPUT_TOOLTIPS = (
-        "Native file-backed VIDEO wrapper; the full picture stream remains "
-        "on disk.",
-        "Complete post-skip embedded soundtrack for legacy AUDIO wiring.",
-        "Validated native-frame origin to connect to Tagged Motion Ref Path.",
-        "Resolved path, skipped origin, audio duration, and lazy-load summary.",
-    )
-    FUNCTION = "load"
-    CATEGORY = "conditioning/minimax/context_loop/media"
-    DESCRIPTION = (
-        "Legacy 0.4 adapter: load one motion-reference container without "
-        "decoding its video frames. source_video is ComfyUI's native "
-        "file-backed VIDEO; "
-        "source_audio is the complete post-skip track aligned to the same "
-        "24 fps timeline for legacy downstream AUDIO fan-out. New workflows "
-        "should register the container with Source Timeline instead."
-    )
-
-    @classmethod
-    def IS_CHANGED(cls, video_path="", skip_first_frames=0, **kwargs):
-        try:
-            path = _resolved_media_path(
-                video_path, "Lazy motion AV loader video path")
-            stat = os.stat(path)
-            return "%s:%d:%d:%d" % (
-                path, int(stat.st_size), int(stat.st_mtime_ns),
-                int(skip_first_frames))
-        except (OSError, ValueError):
-            return float("NaN")
-
-    def load(self, video_path, skip_first_frames=0):
-        path = _resolved_media_path(
-            video_path, "Lazy motion AV loader video path")
-        descriptor = _lazy_motion_descriptor_with_skip(
-            _probe_lazy_motion_path(path, True), skip_first_frames)
-        source_audio = _decode_lazy_motion_source_audio(descriptor)
-        source_video = _native_video_from_path(path)
-        waveform, sample_rate = _validate_audio(
-            source_audio, "Lazy motion AV loader source audio")
-        duration = int(waveform.shape[-1]) / float(sample_rate)
-        status = (
-            "Lazy native VIDEO + %.3fs full post-skip AUDIO; "
-            "%d source frames skipped; video frames remain disk-backed" %
-            (duration, int(descriptor["skip_first_frames"])))
-        return (source_video, source_audio,
-                int(descriptor["skip_first_frames"]), status)
-
-
 class MiniMaxH3TaggedMotionReferenceTimeline:
     """Register motion directly from the typed 0.5 Source Timeline."""
 
@@ -13585,213 +13230,6 @@ class MiniMaxH3TaggedAudioReference:
         return references, _reference_fingerprint_output(references), status
 
 
-class MiniMaxH3ScheduledReferenceToVideo:
-    DEPRECATED = True
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "clip": ("CLIP", {
-                    "tooltip": "MiniMax H3 text encoder used by stock Ref2VA."}),
-                "vae": ("VAE", {
-                    "tooltip": "MiniMax H3 video VAE used to encode active "
-                               "pictures and videos."}),
-                "audio_vae": ("VAE", {
-                    "tooltip": "MiniMax H3 audio VAE used to encode active "
-                               "standalone or video-paired audio references."}),
-                "reference_schedule": (REFERENCE_SCHEDULE_TYPE, {
-                    "tooltip": "Final chain from the scheduled Picture, "
-                               "Video, and Audio reference nodes. For each "
-                               "scene it removes inactive entries, compactly "
-                               "assigns native labels by type, then resolves "
-                               "stable @tags used in the Plan prompt."}),
-                "clip_index": ("INT", {
-                    "default": 1, "min": 1, "max": MAX_SHOTS,
-                    "tooltip": "Current one-based scene. Connect Current "
-                               "Shot clip_index so the active refs change on "
-                               "each recursive iteration."}),
-                "clip_count": ("INT", {
-                    "default": 1, "min": 1, "max": MAX_SHOTS,
-                    "tooltip": "Total scenes. Connect Current Shot clip_count "
-                               "to validate schedule bounds."}),
-                "prompt": ("STRING", {
-                    "default": "", "multiline": True,
-                    "dynamicPrompts": True,
-                    "tooltip": "Scene prompt may use optional stable aliases such as "
-                               "@hero_face and @performance. The wrapper "
-                               "replaces them with native H3 labels for the "
-                               "current scene. Example: @picture_2 becomes "
-                               "<Picture 1> if it is the only active picture. "
-                               "Aliases are a scheduler convenience, not required "
-                               "H3 syntax. Native labels remain user-managed. All "
-                               "reference definitions remain visible and "
-                               "editable in the Plan or Prompt Editor."}),
-                "width": ("INT", {
-                    "default": 960, "min": 32, "max": 4096, "step": 32,
-                    "tooltip": "Generation width forwarded unchanged to "
-                               "stock MiniMax H3 Reference to Video."}),
-                "height": ("INT", {
-                    "default": 544, "min": 32, "max": 4096, "step": 32,
-                    "tooltip": "Generation height forwarded unchanged to "
-                               "stock MiniMax H3 Reference to Video."}),
-                "length": ("INT", {
-                    "default": 124, "min": 5, "max": 3600, "step": 17,
-                    "tooltip": "H3-valid raw frame count from Current Shot."}),
-                "ref_image_size": (["match", "max"], {
-                    "default": "match",
-                    "tooltip": "Stock Ref2VA picture sizing: match limits "
-                               "each picture to generation pixel area; max "
-                               "uses its high-fidelity 2048px-short-edge path."}),
-            },
-            "optional": {
-                "state": (STATE_TYPE, {
-                    "tooltip": "Current Shot state. Required only when an "
-                               "active Scheduled Video Ref uses sequential "
-                               "timeline mode; it supplies exact scene starts "
-                               "and Motion Context overlap timing."}),
-                "prompt_compliance": (list(REFERENCE_COMPLIANCE_MODES), {
-                    "default": "strict",
-                    "tooltip": "strict: compile active @tags and block unknown "
-                               "or inactive tags. soft: compile active tags but "
-                               "warn and preserve unresolved tags. disabled: "
-                               "make every scheduler-authored check non-blocking, "
-                               "pass the prompt unchanged, omit missing/invalid "
-                               "scheduled media (including an empty generated-"
-                               "audio source slice), and keep only stock H3's "
-                               "supported reference capacity. Failures in CLIP, "
-                               "VAE, sampling, or checkpoint execution remain "
-                               "real execution errors."}),
-                "cache_for_upscale": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Automatically save the active scene's native "
-                               "H3 reference latents, compact Qwen preview "
-                               "frames, and original picture masters needed "
-                               "for target-resolution pass-2 conditioning. "
-                               "Deferred upscale discovers them from the "
-                               "checkpoint fingerprint without reconnecting "
-                               "the original reference media."}),
-            },
-        }
-
-    @classmethod
-    def VALIDATE_INPUTS(cls, prompt_compliance="strict"):
-        try:
-            _reference_compliance_mode(prompt_compliance)
-        except ValueError as exc:
-            return str(exc)
-        return True
-
-    RETURN_TYPES = ("CONDITIONING", "LATENT", "STRING", "STRING", "STRING")
-    RETURN_NAMES = (
-        "positive", "latent", "compiled_prompt", "active_references",
-        "schedule_fingerprint")
-    OUTPUT_TOOLTIPS = (
-        "Positive conditioning produced by stock MiniMax H3 Ref2VA.",
-        "Empty MiniMax H3 AV latent produced by stock Ref2VA.",
-        "Exact prompt sent to H3 after stable aliases compile to native labels.",
-        "Human-readable mapping for this scene, for example "
-        "@picture_2 -> <Picture 1>. Use it to verify renumbering.",
-        "Full schedule fingerprint. Connect the schedule node's matching "
-        "fingerprint to Plan generation_fingerprint when all scheduled "
-        "sources are static.",
-    )
-    FUNCTION = "apply"
-    CATEGORY = "conditioning/minimax/context_loop/references/legacy_schedule"
-    DESCRIPTION = ("Select scheduled references for the current scene, "
-                   "remove inactive entries, and compactly number each media "
-                   "type from 1. Stable @tags in the Plan prompt are compiled "
-                   "to those scene-local native labels before core MiniMax H3 "
-                   "Ref2VA runs; the scheduler inserts no prompt text. A tag "
-                   "named @picture_2 may therefore map to <Picture 1>; inspect "
-                   "the active_references output for the exact mapping.")
-
-    def apply(self, clip, vae, audio_vae, reference_schedule, clip_index,
-              clip_count, prompt, width, height, length,
-              ref_image_size="match", state=None,
-              prompt_compliance="strict", cache_for_upscale=True):
-        if GraphBuilder is None:
-            raise RuntimeError(
-                "Scheduled H3 Ref2VA requires ComfyUI GraphBuilder.")
-        compiled, summary, bindings = _compile_scheduled_reference_prompt(
-            reference_schedule, clip_index, clip_count, prompt,
-            prompt_compliance)
-        graph = GraphBuilder()
-        ref2va = graph.node("MiniMaxH3ReferenceToVideo", "ScheduledRef2VA")
-        for key, value in (
-                ("clip", clip), ("vae", vae), ("audio_vae", audio_vae),
-                ("prompt", compiled), ("width", int(width)),
-                ("height", int(height)), ("length", int(length)),
-                ("ref_image_size", ref_image_size)):
-            ref2va.set_input(key, value)
-        for index, entry in enumerate(bindings["pictures"]):
-            ref2va.set_input(
-                "ref_images.ref_image_%d" % index, entry["value"])
-        slice_details = []
-        resolved_videos = []
-        for index, entry in enumerate(bindings["videos"]):
-            video, paired_audio, detail = _scheduled_video_reference_slice(
-                entry, state, clip_index, clip_count, length)
-            resolved_videos.append({"video": video, "audio": paired_audio})
-            ref2va.set_input(
-                "ref_videos.ref_video_%d" % index, video)
-            if paired_audio is not None:
-                ref2va.set_input(
-                    "ref_video_audios.ref_video_audio_%d" % index,
-                    paired_audio)
-            if detail:
-                slice_details.append(detail)
-        resolved_audios = []
-        for index, entry in enumerate(bindings["audios"]):
-            resolved_audios.append(entry["value"])
-            ref2va.set_input(
-                "ref_audios.ref_audio_%d" % index, entry["value"])
-        if isinstance(reference_schedule, dict) and reference_schedule.get(
-                "fingerprint"):
-            fingerprint = str(reference_schedule["fingerprint"])
-            fingerprint_output = _reference_fingerprint_output(
-                reference_schedule)
-        elif _reference_compliance_mode(prompt_compliance) == "disabled":
-            fingerprint = _fingerprint({
-                "reference_schedule": "ignored",
-                "prompt_compliance": "disabled",
-            })
-            fingerprint_output = fingerprint
-        else:
-            raise ValueError(
-                "Scheduled references have no valid schedule fingerprint.")
-        cache_runtime_ready = (
-            callable(getattr(vae, "encode", None))
-            and not isinstance(vae, (str, bytes))
-            and (not resolved_audios and not any(
-                item.get("audio") is not None for item in resolved_videos)
-                 or (callable(getattr(audio_vae, "encode", None))
-                     and not isinstance(audio_vae, (str, bytes)))))
-        if bool(cache_for_upscale) and cache_runtime_ready and (
-                bindings["pictures"] or resolved_videos or resolved_audios):
-            try:
-                cache_status = _cache_reference_scene(
-                    fingerprint=fingerprint, scene=clip_index,
-                    scene_count=clip_count, prompt=prompt,
-                    compiled_prompt=compiled, width=width, height=height,
-                    length=length, ref_image_size=ref_image_size, vae=vae,
-                    audio_vae=audio_vae,
-                    pictures=[entry["value"] for entry in bindings["pictures"]],
-                    videos=resolved_videos, audios=resolved_audios)
-                summary += "; " + cache_status
-            except Exception as exc:
-                _LOG.warning(
-                    "H3 scheduled reference cache was not saved: %s", exc)
-        if slice_details:
-            summary += "; " + "; ".join(slice_details)
-        return {
-            "result": (
-                ref2va.out(0), ref2va.out(1), compiled, summary,
-                fingerprint_output),
-            "expand": graph.finalize(),
-        }
-
-
 class MiniMaxH3SemanticAnchorConditioning:
     """Internal presentation replacement used by Tagged Ref2VA expansion."""
 
@@ -13837,12 +13275,49 @@ class MiniMaxH3SemanticAnchorConditioning:
             positive, clip, prompt, presentation)
 
 
+def _ref2va_required_inputs():
+    """Shared native Ref2VA inputs, independent of retired schedule nodes."""
+    return {
+        "clip": ("CLIP", {
+            "tooltip": "MiniMax H3 text encoder used by stock Ref2VA."}),
+        "vae": ("VAE", {
+            "tooltip": "MiniMax H3 video VAE used to encode active "
+                       "pictures and videos."}),
+        "audio_vae": ("VAE", {
+            "tooltip": "MiniMax H3 audio VAE used to encode active "
+                       "standalone or video-paired audio references."}),
+        "clip_index": ("INT", {
+            "default": 1, "min": 1, "max": MAX_SHOTS,
+            "tooltip": "Current one-based scene. Connect Current "
+                       "Shot clip_index so the active refs change on "
+                       "each recursive iteration."}),
+        "clip_count": ("INT", {
+            "default": 1, "min": 1, "max": MAX_SHOTS,
+            "tooltip": "Total scenes. Connect Current Shot clip_count "
+                       "to validate scene bounds."}),
+        "width": ("INT", {
+            "default": 960, "min": 32, "max": 4096, "step": 32,
+            "tooltip": "Generation width forwarded unchanged to "
+                       "stock MiniMax H3 Reference to Video."}),
+        "height": ("INT", {
+            "default": 544, "min": 32, "max": 4096, "step": 32,
+            "tooltip": "Generation height forwarded unchanged to "
+                       "stock MiniMax H3 Reference to Video."}),
+        "length": ("INT", {
+            "default": 124, "min": 5, "max": 3600, "step": 17,
+            "tooltip": "H3-valid raw frame count from Current Shot."}),
+        "ref_image_size": (["match", "max"], {
+            "default": "match",
+            "tooltip": "Stock Ref2VA picture sizing: match limits "
+                       "each picture to generation pixel area; max "
+                       "uses its high-fidelity 2048px-short-edge path."}),
+    }
+
+
 class MiniMaxH3TaggedReferenceToVideo:
     @classmethod
     def INPUT_TYPES(cls):
-        scheduled = MiniMaxH3ScheduledReferenceToVideo.INPUT_TYPES()
-        required = dict(scheduled["required"])
-        required.pop("reference_schedule")
+        required = _ref2va_required_inputs()
         required["prompt"] = ("STRING", {
             "default": "", "multiline": True, "dynamicPrompts": True,
             "tooltip": "Resolved current-scene prompt. Mention a registered "
@@ -15106,100 +14581,6 @@ class MiniMaxH3GenerationProfile:
             int(policy["audio_context_length"]), option_status)
 
 
-class MiniMaxH3ChainPolicy:
-    """Compact normal-user policy for transition and soundtrack intent."""
-
-    DEPRECATED = True
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "incoming_transition": (list(PRIMARY_TRANSITION_PRESETS), {
-                    "default": "guide",
-                    "tooltip": "Default boundary entering a scene: Visual "
-                               "Cut = no carried picture; Guide = 22-frame "
-                               "RGB continuation; Hard AV = protected "
-                               "39-frame picture/audio prefix; Soft AV = the "
-                               "same hard picture prefix with a short audio "
-                               "release. A scene can inherit or override this "
-                               "default in Plan Studio."}),
-                "final_audio": (list(FINAL_AUDIO_POLICIES), {
-                    "default": "generated",
-                    "tooltip": "Soundtrack muxed into the final MP4: H3's "
-                               "saved generated sound, the exact source "
-                               "track, or no soundtrack."}),
-                "source_reference": (list(SOURCE_REFERENCE_POLICIES), {
-                    "default": "off",
-                    "tooltip": "Use the matching Source Timeline audio as "
-                               "guidance while H3 generates this scene's "
-                               "sound. This does not copy the source waveform "
-                               "into the result or choose the final MP4 "
-                               "soundtrack. To force the exact source waveform "
-                               "during generation, enable Lock source audio; "
-                               "to put it in the final MP4, set Final audio to "
-                               "source. Lock automatically turns this "
-                               "reference off."}),
-                "generated_continuity": (
-                    list(GENERATED_CONTINUITY_POLICIES), {
-                        "default": "on",
-                        "tooltip": "On carries the previous sampled audio "
-                                   "latent across scene boundaries. Guide uses "
-                                   "the tested automatic 22-frame sound "
-                                   "context; AV follows its exact shared video "
-                                   "boundary. Off leaves target audio fully "
-                                   "denoisable. This does not select the final "
-                                   "soundtrack. Lock source audio overrides "
-                                   "this off."}),
-                # Keep this last so older serialized widget arrays retain the
-                # exact positions of all existing 0.5 choices.
-                "lock_source_audio": ("BOOLEAN", {
-                    "default": False,
-                    "tooltip": "Encode each scene's exact Source Timeline "
-                               "window directly into the target H3 audio "
-                               "latent and protect the complete audio mask "
-                               "from denoising. This automatically replaces "
-                               "Source reference and Generated continuity for "
-                               "generation. Choose Final audio=source when the "
-                               "final MP4 must retain the original waveform."}),
-            },
-        }
-
-    RETURN_TYPES = (CHAIN_POLICY_TYPE, "STRING")
-    RETURN_NAMES = ("chain_policy", "status")
-    OUTPUT_TOOLTIPS = (
-        "Combined 0.5 policy to connect to Chain Plan's chain_policy input.",
-        "Resolved transition, soundtrack, source-reference, generated-"
-        "continuity, and exact-target lock summary.",
-    )
-    FUNCTION = "build"
-    CATEGORY = "conditioning/minimax/context_loop/policies"
-    DESCRIPTION = (
-        "Set the normal 0.5 transition and audio intent in one place. Plan "
-        "stores canonical audio and transition records so checkpoint "
-        "compatibility is based on behavior, not graph topology."
-    )
-
-    def build(self, incoming_transition="guide", final_audio="generated",
-              source_reference="off", generated_continuity="on",
-              lock_source_audio=False):
-        policy = _contract_chain_policy(
-            incoming_transition, final_audio, source_reference,
-            generated_continuity, lock_source_audio)
-        transition_status = _transition_policy_display({
-            "transition_policy": policy["transition_policy"]})
-        audio_status = _audio_policy_summary({
-            "audio_policy": policy["audio_policy"]})
-        source_need = (
-            "source timeline required"
-            if _audio_policy_requires_source({
-                "audio_policy": policy["audio_policy"]})
-            else "no source timeline required")
-        return policy, "%s; %s; %s; audio context automatic (%df)" % (
-            transition_status, audio_status, source_need,
-            int(policy["audio_context_length"]))
-
-
 class MiniMaxH3AdvancedPolicy:
     """Apply a named advanced transition without replacing audio intent."""
 
@@ -15265,118 +14646,6 @@ class MiniMaxH3AdvancedPolicy:
                 transition_status, audio_status,
                 int(combined["audio_context_length"])),
         )
-
-
-class MiniMaxH3Legacy04PolicyAdapter:
-    """Expose the retired 0.4 Plan policy widgets without cluttering Plan."""
-
-    DEPRECATED = True
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "audio_mode": (list(AUDIO_MODES), {
-                    "default": "generated_audio",
-                    "tooltip": "Legacy 0.4 combined audio mode. The adapter "
-                               "translates it exactly into the independent "
-                               "0.5 Audio Policy axes only when chain_policy "
-                               "is disconnected. A connected modern policy "
-                               "owns audio intent instead."}),
-                "continuation_mode": (list(CONTINUATION_MODES), {
-                    "default": "guide",
-                    "tooltip": "Legacy 0.4 low-level continuation "
-                               "implementation. Prefer Chain Policy plus "
-                               "Advanced Policy for new workflows."}),
-                "context_length": (list(H3_CONTEXT_LENGTHS), {
-                    "default": 22,
-                    "tooltip": "Legacy 0.4 global visual overlap. This is "
-                               "paired with continuation_mode and translated "
-                               "into the one-wire 0.5 policy. Basic AV modes "
-                               "may use 5+ frames for a video-only diagnostic "
-                               "when generated audio continuity is off; AV "
-                               "audio carry and Drift-Control remain 39+ "
-                               "aligned recipes."}),
-                "audio_context_length": ("INT", {
-                    "default": 22, "min": 0, "max": 240,
-                    "tooltip": "Legacy 0.4 generated-audio overlap in "
-                               "24-fps video-frame units. Guide can use this "
-                               "independently of visual context. AV treats "
-                               "zero as disabled and any positive value as "
-                               "enabled. Off-grid basic AV is accepted only "
-                               "when generated audio continuity is off (or "
-                               "this value is zero)."}),
-            },
-            "optional": {
-                "chain_policy": (CHAIN_POLICY_TYPE, {
-                    "tooltip": "Optional policy layer to preserve. When "
-                               "connected, its complete 0.5 audio intent is "
-                               "kept and the legacy audio_mode widget is "
-                               "ignored; only the raw 0.4 transition and "
-                               "audio-context fields override it. Leave this "
-                               "disconnected only when migrating a standalone "
-                               "0.4 policy."}),
-            },
-        }
-
-    RETURN_TYPES = (CHAIN_POLICY_TYPE, "STRING")
-    RETURN_NAMES = ("chain_policy", "status")
-    OUTPUT_TOOLTIPS = (
-        "One-wire combined policy carrying all translated legacy settings.",
-        "Human-readable summary of the translated legacy settings.",
-    )
-    FUNCTION = "build"
-    CATEGORY = "conditioning/minimax/context_loop/policies/legacy"
-    DESCRIPTION = (
-        "Migration-only adapter for the combined audio mode, raw incoming-"
-        "transition implementation, visual context, and audio context "
-        "formerly shown on the 0.4 Plan node. Connect a modern Chain Policy "
-        "to preserve its audio intent while applying only the legacy raw "
-        "boundary fields. New workflows should use Chain Policy and, when "
-        "needed, Advanced Policy."
-    )
-
-    def build(self, audio_mode="generated_audio",
-              continuation_mode="guide", context_length=22,
-              audio_context_length=22, chain_policy=None):
-        incoming = (
-            _validate_chain_policy(chain_policy)
-            if chain_policy is not None else None)
-        audio = (
-            incoming["audio_policy"]
-            if incoming is not None else migrate_legacy_audio_mode(audio_mode))
-        mode = str(continuation_mode)
-        context = int(context_length)
-        matched_preset = None
-        for candidate in (
-                "cut", "guide", "tone_guide", "latent_guide",
-                "detail_guide", "detail_av", "drift_av", "color_drift_av",
-                "hard_av", "soft_av",
-                "audio_feather_av"):
-            resolved = _contract_transition_policy(candidate)
-            if (resolved["continuation_mode"] == mode and
-                    int(resolved["context_length"]) == context):
-                matched_preset = candidate
-                break
-        transition = _contract_transition_policy(
-            matched_preset or "guide",
-            expert_override=matched_preset is None,
-            continuation_mode=mode,
-            context_length=context)
-        combined = _contract_compose_chain_policy(
-            audio, transition, audio_context_length=audio_context_length)
-        if incoming is not None:
-            status = (
-                "legacy 0.4 boundary override: incoming audio preserved "
-                "(%s); transition=%s/%df; audio context=%df" % (
-                    _audio_policy_summary({"audio_policy": audio}), mode,
-                    context, int(audio_context_length)))
-        else:
-            status = (
-                "legacy 0.4 migration: audio=%s; transition=%s/%df; "
-                "audio context=%df" % (
-                    audio_mode, mode, context, int(audio_context_length)))
-        return combined, status
 
 
 class MiniMaxH3ChainPlan:
@@ -16701,7 +15970,6 @@ def _preflight_chain(
         plan: Any, *, source_timeline: Any = None, source_audio: Any = None,
         start_clip: int = 1, scene_range: Any = "",
         verify_resume_history: bool = True, tagged_references: Any = None,
-        reference_schedule: Any = None,
         artifact_verification: _ResumeArtifactVerification | None = None
         ) -> tuple[dict[str, Any], dict[str, Any]]:
     report: dict[str, Any] = {
@@ -16785,27 +16053,8 @@ def _preflight_chain(
             source_coverage.get("first_affected_scene") or {}).get("scene")
 
         stage = "references"
-        if tagged_references is not None and reference_schedule is not None:
-            _preflight_issue(
-                report, "errors", "multiple_reference_routes",
-                "Connect tagged_references or reference_schedule, not both.",
-                "Keep the reference input used by the active Ref2VA node and "
-                "disconnect the other route.",
-                solutions=(
-                    "Use tagged_references for prompt-activated @tags and "
-                    "#semantic anchors.",
-                    "Use reference_schedule only for the legacy scheduled "
-                    "reference workflow."),
-                triggers=(
-                    {"scope": "Preflight", "setting": "tagged_references",
-                     "value": "connected", "origin": "input socket"},
-                    {"scope": "Preflight", "setting": "reference_schedule",
-                     "value": "connected", "origin": "input socket"},
-                ))
-        references = (tagged_references if tagged_references is not None
-                      else reference_schedule)
-        route = ("tagged" if tagged_references is not None else
-                 "scheduled" if reference_schedule is not None else "none")
+        references = tagged_references
+        route = "tagged" if references is not None else "none"
         semantic_bundle = (
             _reference_semantic_anchor_bundle(tagged_references)
             if tagged_references is not None else None)
@@ -16820,9 +16069,7 @@ def _preflight_chain(
         if references is not None or semantic_bundle is not None:
             entries = (
                 _tagged_reference_entries(references)
-                if route == "tagged" else
-                _reference_schedule_entries(references)
-                if route == "scheduled" else [])
+                if references is not None else [])
             registered = sorted({tag for entry in entries
                                  for tag in _reference_entry_tags(entry)})
             reference_fingerprint = str(
@@ -16855,49 +16102,6 @@ def _preflight_chain(
                         native_bindings["pictures"] +
                         native_bindings["videos"] +
                         native_bindings["audios"])
-                elif route == "scheduled":
-                    native_bindings = _active_reference_bindings(
-                        references, int(shot["index"]), len(prepared["shots"]))
-                    active = (
-                        native_bindings["pictures"] +
-                        native_bindings["videos"] +
-                        native_bindings["audios"])
-                    for anchor in semantic_anchors:
-                        timestamp = anchor["timestamp_seconds"]
-                        syntax = (
-                            "#%s[%.3fs]" % (anchor["tag"], float(timestamp))
-                            if timestamp is not None
-                            else "#%s" % anchor["tag"])
-                        _preflight_issue(
-                            report, "errors", "semantic_anchor_requires_tagged",
-                            "Scene %d uses %s, but semantic anchors "
-                            "require the Tagged reference route." % (
-                                int(shot["index"]), syntax),
-                            "Use Tagged Picture Ref + Tagged Ref2VA, or remove "
-                            "the #anchor from this scheduled workflow.",
-                            solutions=(
-                                "Replace the #anchor with an @tag only if a "
-                                "native visual reference was intended.",),
-                            triggers=(_preflight_scene_trigger(
-                                shot, "prompt", syntax, "scene prompt",
-                                tag=anchor["tag"]),),
-                            scene=int(shot["index"]),
-                            scene_id=str(shot["id"]), tag=anchor["tag"])
-                    unresolved = sorted(prompt_tags - set(registered))
-                    for tag in unresolved:
-                        _preflight_issue(
-                            report, "errors", "unresolved_reference_tag",
-                            "Scene %d uses unresolved scheduled reference @%s."
-                            % (int(shot["index"]), tag),
-                            "Register that tag or remove it from the scene prompt.",
-                            solutions=(
-                                "Rename the prompt @tag to one of the "
-                                "registered scheduled reference tags.",),
-                            triggers=(_preflight_scene_trigger(
-                                shot, "prompt_reference", "@%s" % tag,
-                                "scene prompt", tag=tag),),
-                            scene=int(shot["index"]),
-                            scene_id=str(shot["id"]), tag=tag)
                 else:
                     active = []
                     for tag in sorted(prompt_tags):
@@ -17063,7 +16267,7 @@ def _preflight_chain(
                 report, "warnings", "reference_registry_not_connected",
                 "Scene prompts contain @tags or #semantic anchors, but no "
                 "reference registry is connected to preflight.",
-                "Connect the active Tagged or Scheduled reference output to "
+                "Connect the active Tagged reference output to "
                 "preflight for scene-window validation.",
                 solutions=(
                     "Remove prompt tags that are not intended to resolve to "
@@ -17418,12 +16622,9 @@ def _plan_studio_source_audio_media(
 def _register_plan_studio_source_previews(
         plan: dict[str, Any], report: dict[str, Any],
         tagged_references: Any = None,
-        reference_schedule: Any = None,
         source_timeline: Any = None) -> dict[str, Any]:
-    references = (tagged_references if tagged_references is not None
-                  else reference_schedule)
-    route = ("tagged" if tagged_references is not None else
-             "scheduled" if reference_schedule is not None else "none")
+    references = tagged_references
+    route = "tagged" if references is not None else "none"
     payload: dict[str, Any] = {
         "version": 2,
         "run_name": str(plan.get("run_name") or ""),
@@ -17450,10 +16651,7 @@ def _register_plan_studio_source_previews(
         runtime_source_timeline = None
     entries = (
         _tagged_reference_entries(references)
-        if references is not None and route == "tagged"
-        else _reference_schedule_entries(references)
-        if references is not None and route == "scheduled"
-        else ())
+        if references is not None else ())
     motion_entries: dict[str, dict[str, Any]] = {}
     for entry in entries:
         if (str(entry.get("kind") or "") != "video" or
@@ -17610,8 +16808,6 @@ def _plan_studio_preflight_input_types():
                        "In standalone Plan Studio it also supplies the "
                        "automatic incremental generation fingerprint, "
                        "including bundled semantic anchors."}),
-        "reference_schedule": (REFERENCE_SCHEDULE_TYPE, {
-            "tooltip": "Optional legacy scheduled reference registry."}),
     }
 
 
@@ -17712,7 +16908,7 @@ class MiniMaxH3ChainPlanStudio:
 
     def passthrough(self, plan=None, source_timeline=None, source_audio=None,
                     start_clip=1, scene_range="", verify_resume_history=True,
-                    tagged_references=None, reference_schedule=None,
+                    tagged_references=None,
                     plan_json='{"shots":[{"id":"intro","prompt":"Describe the opening shot."}]}',
                     run_name="h3_chain", generation_fingerprint="",
                     width=960, height=544, context_length=22,
@@ -17764,11 +16960,10 @@ class MiniMaxH3ChainPlanStudio:
             plan, source_timeline=source_timeline, source_audio=source_audio,
             start_clip=start_clip, scene_range=scene_range,
             verify_resume_history=verify_resume_history,
-            tagged_references=tagged_references,
-            reference_schedule=reference_schedule)
+            tagged_references=tagged_references)
         try:
             source_previews = _register_plan_studio_source_previews(
-                prepared, report, tagged_references, reference_schedule,
+                prepared, report, tagged_references,
                 source_timeline)
         except Exception as exc:
             _LOG.warning("Plan Studio source-preview registration failed: %s", exc)
@@ -18136,10 +17331,9 @@ class MiniMaxH3ProjectAssetManager:
             semantic_anchor_size="512",
             semantic_anchor_mode="timestamped_video",
             tagged_references=None, operation_json="",
-            upscale_model=_LAZY_INPUT_MISSING, tagged_scene_options=None):
+            upscale_model=_LAZY_INPUT_MISSING):
         del catalog_json, semantic_anchor_size
         del semantic_anchor_mode, tagged_references
-        del tagged_scene_options
         operation = _project_asset_pending_operation(operation_json)
         if operation is not None:
             try:
@@ -18158,8 +17352,7 @@ class MiniMaxH3ProjectAssetManager:
             semantic_anchor_size="512",
             semantic_anchor_mode="timestamped_video",
             tagged_references=None, operation_json="",
-            upscale_model=_LAZY_INPUT_MISSING, tagged_scene_options=None):
-        del tagged_scene_options  # Tolerate prompts saved during 0.6 preview.
+            upscale_model=_LAZY_INPUT_MISSING):
         del catalog_json  # Disk catalog is authoritative; widget is UI state.
         store = ProjectAssetStore(_input_root(), _output_root())
         operation = _project_asset_pending_operation(operation_json)
@@ -18704,11 +17897,6 @@ class MiniMaxH3ChainLoopStart:
                                "registry. Connect the same Tagged registry used "
                                "by Ref2VA so Loop Start can validate prompt "
                                "@tags before generation."}),
-                "reference_schedule": (REFERENCE_SCHEDULE_TYPE, {
-                    "tooltip": "Optional legacy scheduled reference registry. "
-                               "Connect the same schedule used by Scheduled "
-                               "Ref2VA; do not connect it together with "
-                               "tagged_references."}),
             },
             "hidden": {
                 "initial_state": (STATE_TYPE,),
@@ -18737,7 +17925,7 @@ class MiniMaxH3ChainLoopStart:
     def start(self, plan, start_clip, source_audio=None, scene_range="",
               verify_resume_history=True, external_context=None,
               source_timeline=None, tagged_references=None,
-              reference_schedule=None, initial_state=None):
+              initial_state=None):
         if initial_state is None:
             alternate = _alternate_take_descriptor(plan)
             if alternate is not None:
@@ -18762,7 +17950,6 @@ class MiniMaxH3ChainLoopStart:
                 scene_range=scene_range,
                 verify_resume_history=verify_resume_history,
                 tagged_references=tagged_references,
-                reference_schedule=reference_schedule,
                 artifact_verification=verification)
             _LOG.info(
                 "H3 Loop Start preflight finished in %.2fs; "
@@ -30238,9 +29425,7 @@ if (PromptServer is not None and web is not None and
 CHAIN_NODE_CLASS_MAPPINGS = {
     "MiniMaxH3LipSyncOptions": MiniMaxH3LipSyncOptions,
     "MiniMaxH3GenerationProfile": MiniMaxH3GenerationProfile,
-    "MiniMaxH3ChainPolicy": MiniMaxH3ChainPolicy,
     "MiniMaxH3AdvancedPolicy": MiniMaxH3AdvancedPolicy,
-    "MiniMaxH3Legacy04PolicyAdapter": MiniMaxH3Legacy04PolicyAdapter,
     "MiniMaxH3ChainPlan": MiniMaxH3ChainPlan,
     "MiniMaxH3ChainPlanModern": MiniMaxH3ChainPlanModern,
     "MiniMaxH3ChainScenePromptEditor": MiniMaxH3ChainScenePromptEditor,
@@ -30254,10 +29439,6 @@ CHAIN_NODE_CLASS_MAPPINGS = {
     "MiniMaxH3ChainFirstSceneImage": MiniMaxH3ChainFirstSceneImage,
     "MiniMaxH3ChainFrameIndexSwitch": MiniMaxH3ChainFrameIndexSwitch,
     "MiniMaxH3ReferenceVideoPrepare": MiniMaxH3ReferenceVideoPrepare,
-    "MiniMaxH3ScheduledPictureReference": MiniMaxH3ScheduledPictureReference,
-    "MiniMaxH3ScheduledVideoReference": MiniMaxH3ScheduledVideoReference,
-    "MiniMaxH3ScheduledAudioReference": MiniMaxH3ScheduledAudioReference,
-    "MiniMaxH3ScheduledReferenceToVideo": MiniMaxH3ScheduledReferenceToVideo,
     "MiniMaxH3SemanticPictureAnchor": MiniMaxH3SemanticPictureAnchor,
     "MiniMaxH3SemanticAnchorBundle": MiniMaxH3SemanticAnchorBundle,
     "MiniMaxH3TaggedPictureReference": MiniMaxH3TaggedPictureReference,
@@ -30267,7 +29448,6 @@ CHAIN_NODE_CLASS_MAPPINGS = {
     "MiniMaxH3SourceTimeline": MiniMaxH3SourceTimeline,
     "MiniMaxH3TaggedMotionReferenceTimeline": (
         MiniMaxH3TaggedMotionReferenceTimeline),
-    "MiniMaxH3LazyMotionAVLoader": MiniMaxH3LazyMotionAVLoader,
     "MiniMaxH3TaggedMotionReferencePath": MiniMaxH3TaggedMotionReferencePath,
     "MiniMaxH3LazyMotionScenePreview": MiniMaxH3LazyMotionScenePreview,
     "MiniMaxH3SourceTimelineScenePreview": (
@@ -30302,10 +29482,7 @@ CHAIN_NODE_CLASS_MAPPINGS = {
 CHAIN_NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3LipSyncOptions": "MiniMax H3 Lip-Sync Options",
     "MiniMaxH3GenerationProfile": "MiniMax H3 Generation Profile",
-    "MiniMaxH3ChainPolicy": "MiniMax H3 Manual Chain Policy (Legacy)",
     "MiniMaxH3AdvancedPolicy": "MiniMax H3 Advanced Policy Override",
-    "MiniMaxH3Legacy04PolicyAdapter": (
-        "MiniMax H3 Legacy 0.4 Policy Adapter"),
     "MiniMaxH3ChainPlan": "MiniMax H3 Context Loop Plan",
     "MiniMaxH3ChainPlanModern": "MiniMax H3 Plan (Modern)",
     "MiniMaxH3ChainScenePromptEditor": "MiniMax H3 Scene Prompt Editor",
@@ -30320,10 +29497,6 @@ CHAIN_NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3ChainFirstSceneImage": "MiniMax H3 Frame Gate",
     "MiniMaxH3ChainFrameIndexSwitch": "MiniMax H3 Frame Index Switch",
     "MiniMaxH3ReferenceVideoPrepare": "MiniMax H3 Reference Video Prep",
-    "MiniMaxH3ScheduledPictureReference": "MiniMax H3 Scheduled Picture Ref",
-    "MiniMaxH3ScheduledVideoReference": "MiniMax H3 Scheduled Video Ref",
-    "MiniMaxH3ScheduledAudioReference": "MiniMax H3 Scheduled Audio Ref",
-    "MiniMaxH3ScheduledReferenceToVideo": "MiniMax H3 Scheduled Ref2VA",
     "MiniMaxH3SemanticPictureAnchor": "MiniMax H3 Semantic Picture Anchor",
     "MiniMaxH3SemanticAnchorBundle": "MiniMax H3 Semantic Anchor Bundle",
     "MiniMaxH3TaggedPictureReference": "MiniMax H3 Tagged Picture Ref",
@@ -30333,7 +29506,6 @@ CHAIN_NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3SourceTimeline": "MiniMax H3 Source Timeline",
     "MiniMaxH3TaggedMotionReferenceTimeline": (
         "MiniMax H3 Tagged Motion Ref (Source Timeline)"),
-    "MiniMaxH3LazyMotionAVLoader": "MiniMax H3 Lazy Motion AV Loader",
     "MiniMaxH3TaggedMotionReferencePath": (
         "MiniMax H3 Tagged Motion Ref (Lazy VIDEO/Path)"),
     "MiniMaxH3LazyMotionScenePreview": (

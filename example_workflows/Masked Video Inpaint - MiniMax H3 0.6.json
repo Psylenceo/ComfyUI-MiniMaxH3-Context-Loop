@@ -181,7 +181,7 @@
       ],
       "size": [
         360,
-        216
+        236
       ],
       "flags": {},
       "order": 5,
@@ -205,6 +205,11 @@
         {
           "name": "source_timeline",
           "type": "H3_SOURCE_TIMELINE",
+          "link": null
+        },
+        {
+          "name": "tagged_references",
+          "type": "H3_TAGGED_REFERENCES",
           "link": null
         }
       ],
@@ -244,7 +249,7 @@
       "type": "MiniMaxH3ChainCurrent",
       "pos": [
         3820,
-        2608
+        2628
       ],
       "size": [
         460,
@@ -375,7 +380,7 @@
       "type": "MiniMaxH3ChainAssemble",
       "pos": [
         4390,
-        3660
+        3680
       ],
       "size": [
         440,
@@ -1012,8 +1017,7 @@
       "widgets_values": [
         0,
         24,
-        true,
-        5
+        true
       ]
     },
     {
@@ -1146,7 +1150,7 @@
       "type": "ModelAttentionBackend",
       "pos": [
         3820,
-        3108
+        3128
       ],
       "size": [
         360,
@@ -1333,11 +1337,6 @@
           "link": 45
         },
         {
-          "name": "reference_schedule",
-          "type": "H3_REFERENCE_SCHEDULE",
-          "link": null
-        },
-        {
           "name": "chain_policy",
           "type": "H3_CHAIN_POLICY",
           "link": null
@@ -1438,7 +1437,7 @@
       "type": "MiniMaxH3ChainManifestLoad",
       "pos": [
         3820,
-        3660
+        3680
       ],
       "size": [
         440,
@@ -1564,7 +1563,8 @@
         "Node name for S&R": "MiniMaxH3ChainLoopEnd"
       },
       "widgets_values": [
-        "off"
+        "off",
+        "recursive_legacy"
       ]
     },
     {
@@ -1637,7 +1637,7 @@
       "type": "LoadVideo",
       "pos": [
         3820,
-        1608
+        1628
       ],
       "size": [
         400,
@@ -1669,7 +1669,7 @@
       "type": "GetVideoComponents",
       "pos": [
         3820,
-        3316
+        3336
       ],
       "size": [
         360,
@@ -1875,7 +1875,7 @@
       "type": "LoadImageMask",
       "pos": [
         3820,
-        2088
+        2108
       ],
       "size": [
         400,
@@ -2626,7 +2626,7 @@
       38,
       0,
       24,
-      6,
+      5,
       "H3_PROJECT_ASSETS"
     ],
     [
@@ -2857,7 +2857,7 @@
         3780,
         90,
         540,
-        3430
+        3450
       ],
       "color": "#393f58",
       "font_size": 24,
@@ -2939,7 +2939,7 @@
       "title": "RECOVERY • DISABLED / NO SAMPLING",
       "bounding": [
         3780,
-        3570,
+        3590,
         1090,
         490
       ],

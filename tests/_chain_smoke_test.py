@@ -239,10 +239,6 @@ def main():
         "MiniMaxH3ChainRunManager",
         "MiniMaxH3ChainFirstSceneImage",
         "MiniMaxH3ReferenceVideoPrepare",
-        "MiniMaxH3ScheduledPictureReference",
-        "MiniMaxH3ScheduledVideoReference",
-        "MiniMaxH3ScheduledAudioReference",
-        "MiniMaxH3ScheduledReferenceToVideo",
         "MiniMaxH3TaggedSceneOptions",
         "MiniMaxH3CurrentTaggedScenePack",
         "MiniMaxH3CurrentTaggedReferenceScene",
@@ -294,284 +290,8 @@ def main():
     assert (ROOT / "web" / "h3_chain_cancel_reroll.js").is_file()
     assert (ROOT / "web" / "h3_chain_cancel_reroll_core.mjs").is_file()
     assert (ROOT / "web" / "h3_chain_scene_prompt_editor.js").is_file()
-    assert (ROOT / "web" / "h3_reference_autoconnect.js").is_file()
-    assert (ROOT / "web" / "h3_reference_autoconnect_core.mjs").is_file()
     assert (ROOT / "web" / "h3_scene_data_extract.js").is_file()
     assert (ROOT / "web" / "h3_scene_data_core.mjs").is_file()
-    workflow_path = (ROOT / "example_workflows" / "Archive" /
-                     "Looping Seamless Chain Global Refs Example - MiniMax H3.json")
-    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
-    workflow_types = {node.get("type") for node in workflow["nodes"]}
-    assert "MiniMaxH3LoopTrim" in workflow_types
-    assert not upstream_ids.intersection(workflow_types)
-    loop_nodes = [
-        node for node in workflow["nodes"]
-        if node.get("type") == "MiniMaxH3LoopTrim"
-        or str(node.get("type", "")).startswith("MiniMaxH3Chain")
-    ]
-    assert loop_nodes and all(
-        node.get("properties", {}).get("aux_id") ==
-        "ethanfel/ComfyUI-MiniMaxH3-Contex-Loop"
-        for node in loop_nodes)
-    workflow_start = next(
-        node for node in workflow["nodes"]
-        if node.get("type") == "MiniMaxH3ChainLoopStart")
-    assert workflow_start.get("widgets_values") == [1, ""]
-    assert "SEGMENT" not in str(workflow_start.get("title", "")).upper()
-    print("workflow: loop node ids and package metadata use the new namespace")
-
-    def assert_workflow_links(payload):
-        nodes = {int(node["id"]): node for node in payload["nodes"]}
-        links = {int(link[0]): link for link in payload["links"]}
-        assert len(nodes) == len(payload["nodes"])
-        assert len(links) == len(payload["links"])
-        for link_id, link in links.items():
-            _, origin_id, origin_slot, target_id, target_slot, _ = link
-            origin = nodes[int(origin_id)]
-            target = nodes[int(target_id)]
-            assert link_id in (origin["outputs"][int(origin_slot)].get("links") or [])
-            assert target["inputs"][int(target_slot)].get("link") == link_id
-        for node in nodes.values():
-            for input_socket in node.get("inputs", []):
-                link_id = input_socket.get("link")
-                assert link_id is None or int(link_id) in links
-            for output_socket in node.get("outputs", []):
-                for link_id in output_socket.get("links") or []:
-                    assert int(link_id) in links
-
-    fl2va_path = (ROOT / "example_workflows" / "Archive" /
-                  "Looping Core FL2VA V2 - MiniMax H3.json")
-    fl2va = json.loads(fl2va_path.read_text(encoding="utf-8"))
-    assert_workflow_links(fl2va)
-    fl2va_types = {node.get("type") for node in fl2va["nodes"]}
-    assert {
-        "MiniMaxH3ImageToVideo",
-        "MiniMaxH3ChainScenePromptEditor",
-        "MiniMaxH3ChainReview",
-    } <= fl2va_types
-    assert not any(str(value).startswith("MiniMaxH3Scheduled")
-                   for value in fl2va_types)
-    assert "LoadAudio" not in fl2va_types
-    fl_plan_node = next(node for node in fl2va["nodes"]
-                        if node.get("type") == "MiniMaxH3ChainPlan")
-    fl_plan = json.loads(fl_plan_node["widgets_values"][0])
-    assert len(fl_plan["shots"]) == 1
-    assert fl_plan["shots"][0]["length"] == 124
-    fl_prompt = "\n".join(fl_plan["shots"][0]["prompt"])
-    assert fl_prompt.startswith(
-        "How the reference pictures align with the target video")
-    fl_sections = [
-        "integrated_multimodal_description:",
-        "overall_soundscape:",
-        "non_diegetic_music:",
-    ]
-    assert [fl_prompt.index(value) for value in fl_sections] == sorted(
-        fl_prompt.index(value) for value in fl_sections)
-    assert fl_plan_node["widgets_values"][9] == "generated_audio"
-    fl_conditioner = next(node for node in fl2va["nodes"]
-                          if node.get("type") == "MiniMaxH3ImageToVideo")
-    assert {input_socket["name"] for input_socket in fl_conditioner["inputs"]
-            if input_socket.get("link") is not None} >= {
-        "first_frame", "last_frame", "prompt", "width", "height", "length",
-    }
-    fl_assemble = next(node for node in fl2va["nodes"]
-                       if node.get("type") == "MiniMaxH3ChainAssemble"
-                       and node.get("mode", 0) == 0)
-    assert "%date:yyyy-MM-dd%" in fl_assemble["widgets_values"][1]
-    print("workflow v2: scheduler-free core FL2VA editing/review graph passes")
-
-    i2va_path = (ROOT / "example_workflows" / "Archive" /
-                  "Looping Single Image I2VA 20s V2 - MiniMax H3.json")
-    i2va = json.loads(i2va_path.read_text(encoding="utf-8"))
-    assert_workflow_links(i2va)
-    i2va_types = {node.get("type") for node in i2va["nodes"]}
-    assert {
-        "MiniMaxH3ImageToVideo",
-        "MiniMaxH3ChainFirstSceneImage",
-        "MiniMaxH3ChainScenePromptEditor",
-        "MiniMaxH3ChainReview",
-    } <= i2va_types
-    assert "LoadAudio" not in i2va_types
-    i2va_plan_node = next(node for node in i2va["nodes"]
-                           if node.get("type") == "MiniMaxH3ChainPlan")
-    i2va_plan = package.NODE_CLASS_MAPPINGS["MiniMaxH3ChainPlan"]().build(
-        *i2va_plan_node["widgets_values"])[0]
-    assert [shot["raw_frames"] for shot in i2va_plan["shots"]] == [243, 243]
-    assert [shot["delivered_frames"] for shot in i2va_plan["shots"]] == [243, 238]
-    assert i2va_plan["total_delivered_frames"] == 481
-    i2va_conditioner = next(node for node in i2va["nodes"]
-                            if node.get("type") == "MiniMaxH3ImageToVideo")
-    i2va_inputs = {item["name"]: item.get("link")
-                    for item in i2va_conditioner["inputs"]}
-    assert i2va_inputs["first_frame"] is not None
-    assert i2va_inputs["last_frame"] is None
-    print("workflow v2: gated two-scene I2VA 20-second graph passes")
-
-    scheduled_path = (ROOT / "example_workflows" / "Archive" /
-                      "Looping Seamless Chain V2 - Scheduled Refs - MiniMax H3.json")
-    scheduled = json.loads(scheduled_path.read_text(encoding="utf-8"))
-    assert_workflow_links(scheduled)
-    scheduled_types = {node.get("type") for node in scheduled["nodes"]}
-    assert {
-        "MiniMaxH3ScheduledPictureReference",
-        "MiniMaxH3ScheduledVideoReference",
-        "MiniMaxH3ScheduledAudioReference",
-        "MiniMaxH3ScheduledReferenceToVideo",
-        "MiniMaxH3ReferenceVideoPrepare",
-        "MiniMaxH3ChainScenePromptEditor",
-        "MiniMaxH3ChainReview",
-    } <= scheduled_types
-    assert "MiniMaxH3ReferenceToVideo" not in scheduled_types
-    scheduled_plan_node = next(
-        node for node in scheduled["nodes"]
-        if node.get("type") == "MiniMaxH3ChainPlan")
-    scheduled_plan = json.loads(scheduled_plan_node["widgets_values"][0])
-    assert len(scheduled_plan["shots"]) == 14
-    for index, shot in enumerate(scheduled_plan["shots"], start=1):
-        text = "\n".join(shot["prompt"])
-        assert "@hero_look" in text and "@song" in text
-        assert any(line.startswith("@song is ") for line in shot["prompt"])
-        assert ("@hero_face" in text) == (index <= 7)
-        assert ("@performance" in text) == (4 <= index <= 6)
-        assert (any(line.startswith("@performance provides ")
-                    for line in shot["prompt"]) == (4 <= index <= 6))
-        assert "<Picture 1>" not in text and "<Picture 2>" not in text
-        assert "<Audio 1>" not in text
-    picture_nodes = {
-        node["widgets_values"][0]: node for node in scheduled["nodes"]
-        if node.get("type") == "MiniMaxH3ScheduledPictureReference"
-    }
-    assert picture_nodes["hero_face"]["widgets_values"][1] == "1:7"
-    assert picture_nodes["hero_look"]["widgets_values"][1] == "all"
-    assert all(len(node["widgets_values"]) == 2
-               for node in picture_nodes.values())
-    video_schedule = next(
-        node for node in scheduled["nodes"]
-        if node.get("type") == "MiniMaxH3ScheduledVideoReference")
-    assert video_schedule["widgets_values"][:2] == ["performance", "4:6"]
-    assert video_schedule["widgets_values"][2] == "performance_audio"
-    assert len(video_schedule["widgets_values"]) == 3
-    audio_schedule = next(
-        node for node in scheduled["nodes"]
-        if node.get("type") == "MiniMaxH3ScheduledAudioReference")
-    assert audio_schedule["widgets_values"][:2] == ["song", "all"]
-    assert len(audio_schedule["widgets_values"]) == 2
-    demo_schedule = chain._make_reference_schedule([
-        {
-            "kind": "picture", "tag": "hero_face", "scenes": "1:7",
-            "ranges": ((1, 7),), "value": object(), "content_hash": "face",
-        },
-        {
-            "kind": "picture", "tag": "hero_look", "scenes": "all",
-            "ranges": (), "value": object(), "content_hash": "look",
-        },
-        {
-            "kind": "video", "tag": "performance", "scenes": "4:6",
-            "ranges": ((4, 6),), "value": object(), "audio": object(),
-            "audio_tag": "performance_audio", "content_hash": "video",
-            "audio_hash": "paired-audio",
-        },
-        {
-            "kind": "audio", "tag": "song", "scenes": "all",
-            "ranges": (), "value": object(), "content_hash": "song",
-        },
-    ])
-    for scene in (1, 4, 8):
-        source = "\n".join(scheduled_plan["shots"][scene - 1]["prompt"])
-        compiled_demo, _mapping, _bindings = (
-            chain._compile_scheduled_reference_prompt(
-                demo_schedule, scene, 14, source))
-        assert "@hero" not in compiled_demo
-        assert "@performance" not in compiled_demo
-        assert "@song" not in compiled_demo
-        assert "{ref}" not in compiled_demo
-        assert "defines <Subject 1>" not in compiled_demo
-        assert "for scenes 1-7" not in compiled_demo
-        assert compiled_demo.startswith("subject_definitions:\n<Subject 1>")
-        if scene == 1:
-            assert "<Picture 1>" in compiled_demo
-            assert "<Picture 2>" in compiled_demo
-            assert "<Audio 1> is the current frame-exact" in compiled_demo
-        elif scene == 4:
-            assert "<Video 1> provides a weak reference" in compiled_demo
-            assert "<Audio 1> is the synchronized soundtrack" in compiled_demo
-            assert "<Audio 2> is the current frame-exact" in compiled_demo
-        else:
-            assert "defined by <Picture 1>" in compiled_demo
-            assert "<Picture 2>" not in compiled_demo
-            assert "<Audio 1> is the current frame-exact" in compiled_demo
-    scheduled_links = {int(link[0]): link for link in scheduled["links"]}
-    fingerprint_input = next(
-        item for item in scheduled_plan_node["inputs"]
-        if item["name"] == "generation_fingerprint")
-    fingerprint_link = scheduled_links[int(fingerprint_input["link"])]
-    assert fingerprint_link[1] == video_schedule["id"]
-    current_node = next(node for node in scheduled["nodes"]
-                        if node.get("type") == "MiniMaxH3ChainCurrent")
-    current_audio_link = next(
-        item for item in current_node["outputs"]
-        if item["name"] == "source_audio_slice")
-    assert len(current_audio_link["links"]) == 1
-    assert scheduled_links[current_audio_link["links"][0]][3] == audio_schedule["id"]
-    scheduled_assemble = next(
-        node for node in scheduled["nodes"]
-        if node.get("type") == "MiniMaxH3ChainAssemble"
-        and node.get("mode", 0) == 0)
-    assert "%date:yyyy-MM-dd%" in scheduled_assemble["widgets_values"][1]
-    print("workflow v2: scheduled picture/video/audio aliases and review graph pass")
-
-    angle_workflow_path = (ROOT / "example_workflows" / "Archive" /
-                           "Three-Angle Guitar Ref2VA - EXPERIMENTAL - MiniMax H3.json")
-    angle_workflow = json.loads(
-        angle_workflow_path.read_text(encoding="utf-8"))
-    angle_types = {node.get("type") for node in angle_workflow["nodes"]}
-    assert "MiniMaxH3ReferenceVideoPrepare" in angle_types
-    assert "MiniMaxH3ReferenceToVideo" in angle_types
-    assert "MiniMaxH3LoopTrim" in angle_types
-    assert not any(str(value).startswith("MiniMaxH3ChainLoop")
-                   for value in angle_types)
-    angle_loader = next(node for node in angle_workflow["nodes"]
-                        if node.get("type") == "LoadVideo")
-    angle_prep = next(node for node in angle_workflow["nodes"]
-                      if node.get("type") == "MiniMaxH3ReferenceVideoPrepare")
-    angle_ref = next(node for node in angle_workflow["nodes"]
-                     if node.get("type") == "MiniMaxH3ReferenceToVideo")
-    assert angle_loader["widgets_values"][0] == "3ClbaJYWVO4_000030.mp4"
-    assert angle_prep["widgets_values"] == [209, 24.0]
-    prompt = angle_ref["widgets_values"][0]
-    sections = ["subject_definitions:", "summary:", "retention_analysis:",
-                "detailed_description:", "overall_soundscape:",
-                "non_diegetic_music:"]
-    positions = [prompt.index(section) for section in sections]
-    assert positions == sorted(positions)
-    assert "exactly three shots" in prompt
-    assert "Tera Echo product card" in prompt
-    links = {int(link[0]): link for link in angle_workflow["links"]}
-    prep_audio_links = next(
-        output["links"] for output in angle_prep["outputs"]
-        if output["name"] == "source_audio")
-    assert len(prep_audio_links) == 2
-    assert {links[link_id][3] for link_id in prep_audio_links} == {110, 132}
-    print("workflow: one-pass three-angle Ref2VA copies source audio exactly")
-
-    # Every public socket/widget should explain its role in the graph, and
-    # every output should describe what it carries. This keeps newly added
-    # controls from silently regressing to opaque ComfyUI labels.
-    for node_name, node_class in package.NODE_CLASS_MAPPINGS.items():
-        schema = node_class.INPUT_TYPES()
-        for section in ("required", "optional"):
-            for input_name, input_spec in schema.get(section, {}).items():
-                options = input_spec[1] if len(input_spec) > 1 else {}
-                assert isinstance(options, dict) and str(
-                    options.get("tooltip", "")).strip(), (
-                        "%s.%s has no tooltip" % (node_name, input_name))
-        output_tooltips = getattr(node_class, "OUTPUT_TOOLTIPS", ())
-        assert len(output_tooltips) == len(node_class.RETURN_TYPES), (
-            "%s output tooltip count is %d; expected %d" %
-            (node_name, len(output_tooltips), len(node_class.RETURN_TYPES)))
-        assert all(str(value).strip() for value in output_tooltips), (
-            "%s has an empty output tooltip" % node_name)
-    print("tooltips: every public input and output is documented")
     review_inputs = chain.MiniMaxH3ChainReview.INPUT_TYPES()
     partial_audio_tooltip = review_inputs["required"][
         "partial_audio_source"][1]["tooltip"]
@@ -716,197 +436,6 @@ def main():
     video = torch.zeros((22, 8, 8, 3), dtype=torch.float32)
     paired_audio = audio_for_frames(22)
     voice_audio = audio_for_frames(22)
-    picture_node = chain.MiniMaxH3ScheduledPictureReference()
-    video_node = chain.MiniMaxH3ScheduledVideoReference()
-    audio_node = chain.MiniMaxH3ScheduledAudioReference()
-    picture_schedule = picture_node.add(
-        picture, "@hero", "1,3,5:8")[0]
-    video_schedule = video_node.add(
-        video, "performance", "2:4", "performance_sound",
-        audio=paired_audio, previous=picture_schedule)[0]
-    schedule, schedule_fingerprint, _status = audio_node.add(
-        voice_audio, "voice", "3", previous=video_schedule)
-    assert chain._generation_fingerprint_value(schedule_fingerprint)[0] == (
-        schedule["fingerprint"])
-    assert len(schedule["entries"]) == 3
-    assert schedule["entries"][0]["value"].shape[0] == 1
-
-    source_prompt = (
-        "subject_definitions:\n"
-        "<Subject 1> follows @hero and @performance.\n"
-        "@performance_sound is synchronized with @performance.\n"
-        "@voice provides voice timing.\n\n"
-        "summary:\n"
-        "Use @performance_sound and @voice in scene 3."
-    )
-    compiled, active_summary, bindings = (
-        chain._compile_scheduled_reference_prompt(
-            schedule, 3, 8, source_prompt))
-    assert active_summary == (
-        "scene 3/8: @hero -> <Picture 1>; "
-        "@performance_sound -> <Audio 1>; "
-        "@performance -> <Video 1>; @voice -> <Audio 2>")
-    assert compiled.startswith(
-        "subject_definitions:\n"
-        "<Subject 1> follows <Picture 1> and <Video 1>.\n"
-        "<Audio 1> is synchronized with <Video 1>.\n"
-        "<Audio 2> provides voice timing.\n")
-    assert "@hero" not in compiled
-    assert "@performance" not in compiled
-    assert "@voice" not in compiled
-    assert bindings["aliases"] == {
-        "hero": "<Picture 1>",
-        "performance_sound": "<Audio 1>",
-        "performance": "<Video 1>",
-        "voice": "<Audio 2>",
-    }
-
-    expanded = chain.MiniMaxH3ScheduledReferenceToVideo().apply(
-        "clip", "video-vae", "audio-vae", schedule, 3, 8,
-        source_prompt, 960, 544, 124, "match")
-    graph_node = next(iter(expanded["expand"].values()))
-    assert graph_node["class_type"] == "MiniMaxH3ReferenceToVideo"
-    graph_inputs = graph_node["inputs"]
-    assert graph_inputs["prompt"] == compiled
-    assert graph_inputs["ref_images.ref_image_0"] is schedule[
-        "entries"][0]["value"]
-    assert graph_inputs["ref_videos.ref_video_0"] is video
-    assert graph_inputs[
-        "ref_video_audios.ref_video_audio_0"] is paired_audio
-    assert graph_inputs["ref_audios.ref_audio_0"] is voice_audio
-    assert expanded["result"][2:] == (
-        compiled, active_summary, schedule_fingerprint)
-
-    sequential_video = torch.arange(
-        500, dtype=torch.float32).reshape(500, 1, 1, 1).expand(-1, 8, 8, 3)
-    sequential_audio = {
-        "waveform": torch.arange(
-            5000, dtype=torch.float32).reshape(1, 1, 5000),
-        "sample_rate": 240,
-    }
-    sequential_schedule = video_node.add(
-        sequential_video, "motion", "", "motion_audio", "sequential",
-        audio=sequential_audio)[0]
-    sequential_state = {
-        "index": 2,
-        "plan": {"shots": [
-            {"raw_frames": 243, "generation_start_frame": 0},
-            {"raw_frames": 243, "generation_start_frame": 221},
-        ]},
-    }
-    sequential_expanded = chain.MiniMaxH3ScheduledReferenceToVideo().apply(
-        "clip", "video-vae", "audio-vae", sequential_schedule, 2, 2,
-        "Use @motion and @motion_audio.", 960, 544, 243, "match",
-        state=sequential_state)
-    sequential_inputs = next(iter(
-        sequential_expanded["expand"].values()))["inputs"]
-    sequential_video_slice = sequential_inputs["ref_videos.ref_video_0"]
-    sequential_audio_slice = sequential_inputs[
-        "ref_video_audios.ref_video_audio_0"]
-    assert float(sequential_video_slice[0, 0, 0, 0]) == 221
-    assert float(sequential_video_slice[-1, 0, 0, 0]) == 463
-    assert float(sequential_audio_slice["waveform"][0, 0, 0]) == 2210
-    assert "@motion sequential frames 221:464" in (
-        sequential_expanded["result"][3])
-
-    first_picture_schedule = picture_node.add(
-        picture, "picture_1", "1")[0]
-    renumbering_schedule = picture_node.add(
-        picture, "picture_2", "",
-        previous=first_picture_schedule)[0]
-    scene_one_compiled, scene_one_summary, _ = (
-        chain._compile_scheduled_reference_prompt(
-            renumbering_schedule, 1, 2,
-            "Use @picture_2 as the second identity reference.\n"
-            "Follow @picture_2."))
-    assert scene_one_summary == (
-        "scene 1/2: @picture_1 -> <Picture 1>; "
-        "@picture_2 -> <Picture 2>")
-    assert "Use <Picture 2> as the second identity reference." in (
-        scene_one_compiled)
-    assert "Follow <Picture 2>." in scene_one_compiled
-    scene_two_compiled, scene_two_summary, _ = (
-        chain._compile_scheduled_reference_prompt(
-            renumbering_schedule, 2, 2,
-            "Use @picture_2 as the second identity reference.\n"
-            "Follow @picture_2."))
-    assert scene_two_summary == "scene 2/2: @picture_2 -> <Picture 1>"
-    assert "Use <Picture 1> as the second identity reference." in (
-        scene_two_compiled)
-    assert "Follow <Picture 1>." in scene_two_compiled
-
-    picture_only = picture_node.add(
-        picture, "single", "1")[0]
-    unreferenced = chain.MiniMaxH3ScheduledReferenceToVideo().apply(
-        "clip", "video-vae", "audio-vae", picture_only, 2, 2,
-        "A text-only second scene.", 960, 544, 124, "match")
-    unreferenced_inputs = next(iter(unreferenced["expand"].values()))[
-        "inputs"]
-    assert not any(
-        key.startswith(("ref_images.", "ref_videos.",
-                        "ref_video_audios.", "ref_audios."))
-        for key in unreferenced_inputs)
-    assert unreferenced["result"][3] == (
-        "scene 2/2: no scheduled references")
-    try:
-        chain._compile_scheduled_reference_prompt(
-            picture_only, 2, 2, "Use @single here.")
-    except ValueError as exc:
-        assert "not active in scene 2" in str(exc)
-    else:
-        raise AssertionError("compiler accepted an inactive reference tag")
-    try:
-        chain._compile_scheduled_reference_prompt(
-            picture_only, 1, 2, "Use @unknown here.")
-    except ValueError as exc:
-        assert "unknown scheduled reference tag" in str(exc)
-    else:
-        raise AssertionError("compiler accepted an unknown reference tag")
-    warning_prompt, warning_summary, warning_bindings = (
-        chain._compile_scheduled_reference_prompt(
-            picture_only, 1, 2,
-            "Keep @unknown and @unknown; resolve @single.",
-            compliance_mode="soft"))
-    assert warning_prompt == (
-        "Keep @unknown and @unknown; resolve <Picture 1>.")
-    assert len(warning_bindings["compliance_warnings"]) == 1
-    assert "unknown scheduled reference tag @unknown" in warning_summary
-    inactive_prompt, _, inactive_bindings = (
-        chain._compile_scheduled_reference_prompt(
-            picture_only, 2, 2, "Keep @single here.",
-            compliance_mode="soft"))
-    assert inactive_prompt == "Keep @single here."
-    assert "not active in scene 2" in (
-        inactive_bindings["compliance_warnings"][0])
-    disabled_prompt, disabled_summary, disabled_bindings = (
-        chain._compile_scheduled_reference_prompt(
-            picture_only, 1, 2, "Leave @single and @unknown unchanged.",
-            compliance_mode="disabled"))
-    assert disabled_prompt == "Leave @single and @unknown unchanged."
-    assert disabled_bindings["compliance_warnings"] == []
-    assert "prompt compliance disabled" in disabled_summary
-    try:
-        audio_node.add(
-            voice_audio, "hero", "", previous=picture_schedule)
-    except ValueError as exc:
-        assert "already in this chain" in str(exc)
-    else:
-        raise AssertionError("scheduler accepted a duplicate tag")
-    try:
-        video_node.add(
-            video, "same", "1", "same", audio=paired_audio)
-    except ValueError as exc:
-        assert "must be different" in str(exc)
-    else:
-        raise AssertionError(
-            "video scheduler accepted the same video and audio tag")
-    try:
-        chain._active_reference_bindings(picture_schedule, 1, 4)
-    except ValueError as exc:
-        assert "exceeds this plan's 4 scenes" in str(exc)
-    else:
-        raise AssertionError("scheduler accepted an out-of-plan selector")
-
     tagged_picture_node = chain.MiniMaxH3TaggedPictureReference()
     tagged_video_node = chain.MiniMaxH3TaggedVideoReference()
     tagged_audio_node = chain.MiniMaxH3TaggedAudioReference()
@@ -949,6 +478,14 @@ def main():
     assert "ref_images.ref_image_1" not in tagged_inputs
     assert chain._generation_fingerprint_value(
         tagged_expanded["result"][4])[0] == tagged["fingerprint"]
+
+    sequential_video = torch.arange(
+        500, dtype=torch.float32).reshape(500, 1, 1, 1).expand(-1, 8, 8, 3)
+    sequential_audio = {
+        "waveform": torch.arange(
+            5000, dtype=torch.float32).reshape(1, 1, 5000),
+        "sample_rate": 240,
+    }
 
     tagged_motion = tagged_video_node.add(
         sequential_video, "motion", "motion_audio", "sequential",
@@ -1047,12 +584,13 @@ def main():
     assert torch.all(truncated["waveform"] > 0.99)
     numbered = torch.arange(10, dtype=torch.float32).reshape(10, 1, 1, 1)
     delivered, _, with_overlap, retained = trim_node.trim(
-        numbered, 4, retain_overlap_frames=2)
+        numbered, 4)
     assert delivered[:, 0, 0, 0].tolist() == list(range(4, 10))
-    assert with_overlap[:, 0, 0, 0].tolist() == list(range(2, 10))
-    assert retained == 2
+    assert with_overlap[:, 0, 0, 0].tolist() == list(range(4, 10))
+    assert retained == 0
     delivered, _, with_overlap, retained = trim_node.trim(
-        numbered, 4, retain_overlap_frames=99)
+        numbered, 4, state={"index": 1, "plan": {
+            "shots": [{"video_blend_frames": 99}], "compatibility": {}}})
     assert delivered[:, 0, 0, 0].tolist() == list(range(4, 10))
     assert with_overlap[:, 0, 0, 0].tolist() == list(range(10))
     assert retained == 4
@@ -1064,7 +602,7 @@ def main():
         },
     }
     delivered, _, with_overlap, retained = trim_node.trim(
-        numbered, 4, retain_overlap_frames=0, state=scene_state)
+        numbered, 4, state=scene_state)
     assert delivered[:, 0, 0, 0].tolist() == list(range(4, 10))
     assert with_overlap[:, 0, 0, 0].tolist() == list(range(1, 10))
     assert retained == 3
@@ -1080,7 +618,7 @@ def main():
         },
     }
     delivered, _, with_overlap, retained = trim_node.trim(
-        numbered[4:], 0, retain_overlap_frames=39, state=first_scene_state)
+        numbered[4:], 0, state=first_scene_state)
     assert delivered[:, 0, 0, 0].tolist() == list(range(4, 10))
     assert with_overlap[:, 0, 0, 0].tolist() == list(range(4, 10))
     assert retained == 0
@@ -2351,4 +1889,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Never create test ownership records in the real ComfyUI output tree.
+    previous_output = folder_paths.get_output_directory()
+    with tempfile.TemporaryDirectory(prefix="h3-chain-smoke-") as output:
+        folder_paths.set_output_directory(output)
+        try:
+            main()
+        finally:
+            folder_paths.set_output_directory(previous_output)

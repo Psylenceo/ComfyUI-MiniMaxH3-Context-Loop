@@ -1,4 +1,6 @@
 <p align="center">
+
+See [0.7 migration notes](docs/MIGRATING_TO_0_7.md) for retired legacy nodes.
   <img src="assets/minimax-h3-context-loop.svg" alt="MiniMax H3 Context Loop 0.6 — scene plans that survive the render" width="100%">
 </p>
 

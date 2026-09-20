@@ -116,16 +116,23 @@ def schedule():
     ])
 
 
-workflow = json.loads((
-    ROOT / "example_workflows" / "Archive" /
-    "Looping Seamless Chain V2 - Scheduled Refs - MiniMax H3.json"
-).read_text(encoding="utf-8"))
-plan_node = next(node for node in workflow["nodes"]
-                 if node.get("type") == "MiniMaxH3ChainPlan")
-plan = json.loads(plan_node["widgets_values"][0])
+# Minimal historical prompt fixture; no archived workflow dependency.
+prompt_cases = {
+    1: ["subject_definitions:",
+        "<Subject 1> is defined by @hero_face and @hero_look.",
+        "@song is the current frame-exact source audio."],
+    4: ["subject_definitions:",
+        "<Subject 1> is defined by @hero_face and @hero_look.",
+        "@performance provides a weak reference for motion.",
+        "@performance_audio is the synchronized soundtrack.",
+        "@song is the current frame-exact source audio."],
+    8: ["subject_definitions:",
+        "<Subject 1> is defined by @hero_look.",
+        "@song is the current frame-exact source audio."],
+}
 
 for scene in (1, 4, 8):
-    source = "\n".join(plan["shots"][scene - 1]["prompt"])
+    source = "\n".join(prompt_cases[scene])
     compiled, mapping, _bindings = chain._compile_scheduled_reference_prompt(
         schedule(), scene, 14, source)
     assert "@hero" not in compiled
@@ -157,8 +164,8 @@ assert warning_prompt == (
 assert len(warning_bindings["compliance_warnings"]) == 1
 assert "unknown scheduled reference tag @missing" in warning_summary
 compliance_options = (
-    chain.MiniMaxH3ScheduledReferenceToVideo.INPUT_TYPES()["optional"]
-    ["prompt_compliance"])
+    chain.MiniMaxH3TaggedReferenceToVideo.INPUT_TYPES()["optional"]
+    ["reference_policy"])
 assert compliance_options[0] == ["strict", "soft", "disabled"]
 assert compliance_options[1]["default"] == "strict"
 disabled_prompt, disabled_summary, disabled_bindings = (
@@ -172,42 +179,42 @@ assert disabled_bindings["compliance_mode"] == "disabled"
 assert "@tags passed unchanged" in disabled_summary
 assert chain._reference_compliance_mode(True) == "strict"
 assert chain._reference_compliance_mode(False) == "soft"
-assert chain.MiniMaxH3ScheduledReferenceToVideo.VALIDATE_INPUTS(True) is True
-assert chain.MiniMaxH3ScheduledReferenceToVideo.VALIDATE_INPUTS(False) is True
+assert chain.MiniMaxH3TaggedReferenceToVideo.VALIDATE_INPUTS(True) is True
+assert chain.MiniMaxH3TaggedReferenceToVideo.VALIDATE_INPUTS(False) is True
 assert "must be strict, soft, or disabled" in (
-    chain.MiniMaxH3ScheduledReferenceToVideo.VALIDATE_INPUTS("unknown"))
+    chain.MiniMaxH3TaggedReferenceToVideo.VALIDATE_INPUTS("unknown"))
 
 disabled_graph = FakeDynamicPrompt({
     "audio": {
-        "class_type": "MiniMaxH3ScheduledAudioReference", "inputs": {}},
+        "class_type": "MiniMaxH3TaggedAudioReference", "inputs": {}},
     "wrapper": {
-        "class_type": "MiniMaxH3ScheduledReferenceToVideo",
+        "class_type": "MiniMaxH3TaggedReferenceToVideo",
         "inputs": {
-            "reference_schedule": ["audio", 0],
-            "prompt_compliance": "disabled",
+            "references": ["audio", 0],
+            "reference_policy": "disabled",
         },
     },
 })
 skipped_schedule, skipped_fingerprint, skipped_status = (
-    chain.MiniMaxH3ScheduledAudioReference().add(
-        None, "song", "all", dynprompt=disabled_graph, unique_id="audio"))
+    chain.MiniMaxH3TaggedAudioReference().add(
+        None, "song", dynprompt=disabled_graph, unique_id="audio"))
 assert skipped_schedule["entries"] == []
 assert chain._generation_fingerprint_value(skipped_fingerprint)[0] == (
     skipped_schedule["fingerprint"])
-assert "skipped because compliance is disabled" in skipped_status
+assert "skipped because reference policy is disabled" in skipped_status
 
 disabled_picture_graph = FakeDynamicPrompt({
     "picture": {
-        "class_type": "MiniMaxH3ScheduledPictureReference", "inputs": {}},
+        "class_type": "MiniMaxH3TaggedPictureReference", "inputs": {}},
     "wrapper": disabled_graph.nodes["wrapper"] | {
         "inputs": {
-            "reference_schedule": ["picture", 0],
-            "prompt_compliance": "disabled",
+            "references": ["picture", 0],
+            "reference_policy": "disabled",
         },
     },
 })
-unchecked_picture = chain.MiniMaxH3ScheduledPictureReference().add(
-    chain.torch.zeros((1, 4, 4, 3)), "!!!", "not-a-selector",
+unchecked_picture = chain.MiniMaxH3TaggedPictureReference().add(
+    chain.torch.zeros((1, 4, 4, 3)), "!!!",
     dynprompt=disabled_picture_graph, unique_id="picture")[0]
 assert len(unchecked_picture["entries"]) == 1
 assert unchecked_picture["entries"][0]["tag"].startswith("reference_")
@@ -239,25 +246,25 @@ assert "Reference schedule ignored" in malformed_summary
 soft_graph = FakeDynamicPrompt({
     "audio": disabled_graph.nodes["audio"],
     "wrapper": {
-        "class_type": "MiniMaxH3ScheduledReferenceToVideo",
+        "class_type": "MiniMaxH3TaggedReferenceToVideo",
         "inputs": {
-            "reference_schedule": ["audio", 0],
-            "prompt_compliance": "soft",
+            "references": ["audio", 0],
+            "reference_policy": "soft",
         },
     },
 })
 try:
-    chain.MiniMaxH3ScheduledAudioReference().add(
-        None, "song", "all", dynprompt=soft_graph, unique_id="audio")
+    chain.MiniMaxH3TaggedAudioReference().add(
+        None, "song", dynprompt=soft_graph, unique_id="audio")
 except ValueError as exc:
-    assert "received no audio (None)" in str(exc)
+    assert "received no AUDIO value" in str(exc)
 else:
     raise AssertionError("soft compliance accepted missing scheduled audio")
 
-picture_inputs = chain.MiniMaxH3ScheduledPictureReference.INPUT_TYPES()[
+picture_inputs = chain.MiniMaxH3TaggedPictureReference.INPUT_TYPES()[
     "required"]
-video_inputs = chain.MiniMaxH3ScheduledVideoReference.INPUT_TYPES()["required"]
-audio_inputs = chain.MiniMaxH3ScheduledAudioReference.INPUT_TYPES()["required"]
+video_inputs = chain.MiniMaxH3TaggedVideoReference.INPUT_TYPES()["required"]
+audio_inputs = chain.MiniMaxH3TaggedAudioReference.INPUT_TYPES()["required"]
 assert "declaration" not in picture_inputs
 assert "declaration" not in video_inputs
 assert "audio_declaration" not in video_inputs
@@ -268,31 +275,26 @@ lazy_audio = LazyAudio({
     "sample_rate": 8000,
 })
 lazy_schedule, lazy_fingerprint, lazy_status = (
-    chain.MiniMaxH3ScheduledAudioReference().add(
-        lazy_audio, "lazy_voice", "1:2"))
+    chain.MiniMaxH3TaggedAudioReference().add(
+        lazy_audio, "lazy_voice"))
 assert lazy_audio.reads > 0
 assert lazy_schedule["entries"][0]["value"] is lazy_audio
 assert len(lazy_schedule["entries"][0]["content_hash"]) == 64
 assert chain._generation_fingerprint_value(lazy_fingerprint)[0] == (
     lazy_schedule["fingerprint"])
-assert "@lazy_voice audio on 1:2" in lazy_status
+assert "@lazy_voice" in lazy_status
 try:
-    chain.MiniMaxH3ScheduledAudioReference().add(
-        None, "missing_voice", "1")
+    chain.MiniMaxH3TaggedAudioReference().add(
+        None, "missing_voice")
 except ValueError as exc:
     message = str(exc)
-    assert "received no audio (None)" in message
+    assert "received no AUDIO value" in message
     assert "source_audio_slice" in message
-    assert "generated_audio" in message
-    assert "connect Load Audio directly" in message
-    assert "source_plus_timeline" in message
-    assert "muted or bypassed" in message
-    assert "playable browser preview" in message
 else:
     raise AssertionError("missing scheduled audio was accepted")
 try:
-    chain.MiniMaxH3ScheduledAudioReference().add(
-        lambda: b"legacy VHS_AUDIO", "legacy", "1")
+    chain.MiniMaxH3TaggedAudioReference().add(
+        lambda: b"legacy VHS_AUDIO", "legacy")
 except ValueError as exc:
     assert "ComfyUI AUDIO" in str(exc)
 else:
@@ -317,11 +319,11 @@ assert "always-visible Scene seed" in base_seed_help
 assert "audio_tag" in video_inputs
 assert video_inputs["timeline_mode"][0] == [
     "restart_each_scene", "sequential"]
-assert "state" in chain.MiniMaxH3ScheduledReferenceToVideo.INPUT_TYPES()[
+assert "state" in chain.MiniMaxH3TaggedReferenceToVideo.INPUT_TYPES()[
     "optional"]
 apply_arguments = inspect.signature(
-    chain.MiniMaxH3ScheduledReferenceToVideo.apply).parameters
-assert "state" in apply_arguments and "prompt_compliance" in apply_arguments
+    chain.MiniMaxH3TaggedReferenceToVideo.apply).parameters
+assert "state" in apply_arguments and "reference_policy" in apply_arguments
 assert "timeline_mode" not in chain._reference_entry_contract({
     "kind": "video", "tag": "motion", "scenes": "all",
     "content_hash": "video", "timeline_mode": "restart_each_scene",
@@ -408,8 +410,8 @@ sequential_audio = {
         7000, dtype=chain.torch.float32).reshape(1, 1, 7000),
     "sample_rate": 240,
 }
-sequential_schedule = chain.MiniMaxH3ScheduledVideoReference().add(
-    sequential_video, "motion", "", "motion_audio", "sequential",
+sequential_schedule = chain.MiniMaxH3TaggedVideoReference().add(
+    sequential_video, "motion", "motion_audio", "sequential",
     audio=sequential_audio)[0]
 sequential_entry = sequential_schedule["entries"][0]
 assert sequential_entry["timeline_mode"] == "sequential"
@@ -417,8 +419,8 @@ sequential_state = {
     "index": 2,
     "plan": {
         "shots": [
-            {"raw_frames": 243, "generation_start_frame": 0},
-            {"raw_frames": 243, "generation_start_frame": 221},
+            {"raw_frames": 243, "generation_start_frame": 0, "prompt": "@motion"},
+            {"raw_frames": 243, "generation_start_frame": 221, "prompt": "@motion"},
         ],
     },
 }
@@ -1437,11 +1439,19 @@ finally:
     chain._launch_directory = original_launch_directory
 
 i2va_workflow = json.loads((
-    ROOT / "example_workflows" / "Archive" /
-    "Looping Single Image I2VA 20s V2 - MiniMax H3.json"
+    ROOT / "example_workflows" / "I2V Normal - MiniMax H3 0.6.json"
 ).read_text(encoding="utf-8"))
-i2va_plan_node = next(node for node in i2va_workflow["nodes"]
-                       if node.get("type") == "MiniMaxH3ChainPlan")
+# Preserve the original Plan's positional API without keeping archived graphs.
+i2va_plan_inputs = [
+    json.dumps({"defaults": {"steps": 20}, "shots": [
+        {"id": "opening_from_image", "prompt": "Continue <Picture 1>.",
+         "duration_seconds": 10, "seed": "1001"},
+        {"id": "motion_context_continuation", "prompt": "Continue the motion.",
+         "duration_seconds": 10, "seed": "1002"},
+    ]}),
+    "i2va_single_image_20s_v2_demo", "i2va-single-image-v2", 960, 544, 5,
+    "video", "head", "disabled", "generated_audio", 5, 10, 20, 0, 20,
+]
 context_choices = chain.MiniMaxH3ChainPlan.INPUT_TYPES()["required"][
     "context_length"][0]
 assert context_choices == [
@@ -1449,7 +1459,7 @@ assert context_choices == [
     141, 158, 175, 192, 209, 226, 243,
 ]
 normalized = chain.MiniMaxH3ChainPlan().build(
-    *i2va_plan_node["widgets_values"])[0]
+    *i2va_plan_inputs)[0]
 assert [shot["raw_frames"] for shot in normalized["shots"]] == [243, 243]
 assert [shot["delivered_frames"] for shot in normalized["shots"]] == [243, 238]
 assert normalized["total_delivered_frames"] == 481
@@ -1468,7 +1478,7 @@ external_plan_json = json.dumps({
     }],
 })
 external_normalized = chain.MiniMaxH3ChainPlan().build(
-    *i2va_plan_node["widgets_values"],
+    *i2va_plan_inputs,
     plan_json_input=external_plan_json,
 )[0]
 assert [shot["id"] for shot in external_normalized["shots"]] == [
@@ -1478,13 +1488,13 @@ assert external_normalized["shots"][0]["prompt"].startswith(
     "Externally directed continuity.")
 
 empty_external_fallback = chain.MiniMaxH3ChainPlan().build(
-    *i2va_plan_node["widgets_values"],
+    *i2va_plan_inputs,
     plan_json_input="  \n\t",
 )[0]
 assert empty_external_fallback["plan_hash"] == normalized["plan_hash"]
 try:
     chain.MiniMaxH3ChainPlan().build(
-        *i2va_plan_node["widgets_values"],
+        *i2va_plan_inputs,
         plan_json_input="not valid JSON",
     )
 except ValueError as exc:

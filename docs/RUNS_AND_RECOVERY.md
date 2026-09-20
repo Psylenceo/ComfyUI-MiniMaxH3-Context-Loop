@@ -597,8 +597,7 @@ audio latents:
   batch to Upscale Segment Save.
 
 For H3 pass-2 conditioning, **Upscale Reference Conditioning** first reads the
-exact cache descriptor recorded on the selected source revision. Tagged and
-Scheduled Ref2VA create that cache automatically: native H3 reference latents
+exact cache descriptor recorded on the selected source revision. Tagged Ref2VA creates that cache automatically: native H3 reference latents
 remain in safetensors while compact Qwen presentation frames allow the saved
 compiled prompt to be tokenized again. **H3 Conditioning Sync From Latents**
 then compares the original scene video latent with the actual LBH output. It

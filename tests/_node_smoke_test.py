@@ -187,12 +187,13 @@ def main():
     trim = nodes.MiniMaxH3LoopTrim()
     numbered = T(np.arange(10, dtype=np.float32).reshape(10, 1, 1, 1))
     delivered, _, with_overlap, retained = trim.trim(
-        numbered, 4, retain_overlap_frames=2)
+        numbered, 4)
     assert delivered.a[:, 0, 0, 0].tolist() == list(range(4, 10))
-    assert with_overlap.a[:, 0, 0, 0].tolist() == list(range(2, 10))
-    assert retained == 2
+    assert with_overlap.a[:, 0, 0, 0].tolist() == list(range(4, 10))
+    assert retained == 0
     delivered, _, with_overlap, retained = trim.trim(
-        numbered, 4, retain_overlap_frames=99)
+        numbered, 4, state={"index": 1, "plan": {
+            "shots": [{"video_blend_frames": 99}], "compatibility": {}}})
     assert delivered.a[:, 0, 0, 0].tolist() == list(range(4, 10))
     assert with_overlap.a[:, 0, 0, 0].tolist() == list(range(10))
     assert retained == 4
@@ -204,7 +205,7 @@ def main():
         },
     }
     delivered, _, with_overlap, retained = trim.trim(
-        numbered, 4, retain_overlap_frames=0, state=scene_state)
+        numbered, 4, state=scene_state)
     assert delivered.a[:, 0, 0, 0].tolist() == list(range(4, 10))
     assert with_overlap.a[:, 0, 0, 0].tolist() == list(range(1, 10))
     assert retained == 3
@@ -220,7 +221,7 @@ def main():
         },
     }
     delivered, _, with_overlap, retained = trim.trim(
-        numbered[4:], 0, retain_overlap_frames=39, state=first_scene_state)
+        numbered[4:], 0, state=first_scene_state)
     assert delivered.a[:, 0, 0, 0].tolist() == list(range(4, 10))
     assert with_overlap.a[:, 0, 0, 0].tolist() == list(range(4, 10))
     assert retained == 0
@@ -535,84 +536,8 @@ def main():
     assert abs(ref2[nodes.MC_AUDIO_KEY] - 22.0) < 1e-9
     print("vae path: unchanged, end_frame %.1f" % ref2[nodes.MC_AUDIO_KEY])
 
-    # save -> load -> context_latent roundtrip across "runs"
-    import time
-    saver = nodes.MiniMaxH3MotionContextSaveLatent()
-    loader = nodes.MiniMaxH3MotionContextLoadLatent()
-    (p1,) = saver.save(prev, "h3_context/clip")
-    time.sleep(0.02)
-    prev2 = {"samples": Nested([
-        prev["samples"].parts[0],
-        T(prev["samples"].parts[1].a * 2.0),  # distinguishable content
-    ])}
-    (p2,) = saver.save(prev2, "h3_context/clip")
-    assert p1 != p2
-    (loaded,) = loader.load("h3_context")  # folder -> newest = p2
-    parts = loaded["samples"]
-    assert isinstance(parts, list) and len(parts) == 2
-    captured.clear()
-    node.apply(
-        conditioning=[["c", {}]], vae=VAE(), latent=target,
-        context_frames=context, context_length=22, encode_mode="video",
-        anchor_mode="head", crop="disabled", audio_context_length=22,
-        audio_mode="timeline", context_latent=loaded)
-    ref3 = captured["minimax_refs"][0]
-    want = float(prev2["samples"].parts[1].a[0, 0, 0, -1])
-    got = float(ref3["audio_latent"].a[0, 0, 0, -1])
-    assert got == want, (got, want)  # newest save's content came through
-    assert abs(ref3[nodes.MC_AUDIO_KEY] - 22.2) < 1e-6
-    ic1 = loader.IS_CHANGED("h3_context")
-    assert isinstance(ic1, str) and p2 in ic1  # cache keys on the real file
-    print("save/load roundtrip: newest of 2 saves loaded, pinned, "
-          "end_frame %.4f, cache key tracks the file" %
-          ref3[nodes.MC_AUDIO_KEY])
-
-    # retry safety with indexed slots: generating clip 3, re-rolling it
-    # must overwrite slot 3 and always load slot 2, never its own save
-    prevA = {"samples": Nested([prev["samples"].parts[0],
-                                T(np.full((1, 32, 2, audio_t), 7.0,
-                                          dtype=np.float32))])}
-    prevB1 = {"samples": Nested([prev["samples"].parts[0],
-                                 T(np.full((1, 32, 2, audio_t), 8.0,
-                                           dtype=np.float32))])}
-    prevB2 = {"samples": Nested([prev["samples"].parts[0],
-                                 T(np.full((1, 32, 2, audio_t), 9.0,
-                                           dtype=np.float32))])}
-    (pa,) = saver.save(prevA, "h3_context/clip", clip_index=2)   # clip 2 ok
-    assert pa.endswith("_00002.safetensors"), pa  # natural slot name
-    time.sleep(0.02)
-    (pb1,) = saver.save(prevB1, "h3_context/clip", clip_index=3)  # clip 3 try 1
-    time.sleep(0.02)
-    (pb2,) = saver.save(prevB2, "h3_context/clip", clip_index=3)  # re-roll
-    assert pb1 == pb2 and pa != pb1  # re-roll overwrote its own slot
-    # generating clip 3, continuing FROM clip 2: loader index is 2, literally
-    (l3,) = loader.load("h3_context", clip_index=2)
-    got = float(l3["samples"][1].a[0, 0, 0, 0])
-    assert got == 7.0, got  # clip 2's latent, NOT the rejected attempt (8/9)
-    # newest-file mode would have returned the reject: prove the hazard
-    (lnew,) = loader.load("h3_context", clip_index=0)
-    assert float(lnew["samples"][1].a[0, 0, 0, 0]) == 9.0
-    # asking for a slot that was never saved says so plainly
-    try:
-        loader.load("h3_context", clip_index=7)
-    except FileNotFoundError as e:
-        assert "no saved latent for clip 7" in str(e)
-    else:
-        raise AssertionError("missing slot did not refuse")
-    # an auto-numbered near-miss (trailing underscore) is never matched,
-    # and the error explains the rename
-    (pauto,) = saver.save(prevA, "h3_context/clip", clip_index=0)
-    assert pauto.endswith("_.safetensors"), pauto
-    import re as _re
-    runno = int(_re.search(r"_(\d{5})_\.safetensors$", pauto).group(1))
-    try:
-        loader.load("h3_context", clip_index=runno)
-    except FileNotFoundError as e:
-        assert "trailing underscore" in str(e) and "rename" in str(e), str(e)
-    else:
-        raise AssertionError("auto-numbered file was matched by index")
-    print("indexed slots: re-roll overwrites its slot, loads previous "
-          "clip's latent; auto mode confirmed to return the reject")
+    assert not hasattr(nodes, "MiniMaxH3MotionContextSaveLatent")
+    assert not hasattr(nodes, "MiniMaxH3MotionContextLoadLatent")
 
     print("smoke test passed")
 

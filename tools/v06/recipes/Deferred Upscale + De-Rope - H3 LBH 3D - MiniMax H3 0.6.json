@@ -101,7 +101,9 @@
         "motion_ref_mode": "exclude_video_keep_audio",
         "prompt_override": "",
         "override_ref_image_size": "inherit",
-        "override_reference_policy": "strict"
+        "override_reference_policy": "strict",
+        "override_semantic_anchor_size": "inherit",
+        "override_semantic_anchor_mode": "inherit"
       },
       "inputs": {
         "state": [

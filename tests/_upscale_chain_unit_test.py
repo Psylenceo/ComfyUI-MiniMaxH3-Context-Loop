@@ -223,23 +223,13 @@ def main():
         "MiniMaxH3ChainPass2Prepare",
         "MiniMaxH3ChainUpscaleSegmentSave",
         "MiniMaxH3ChainUpscaleLoopEnd",
-        "MiniMaxH3ChainUpscaleMerge",
         "MiniMaxH3ChainUpscaleManifestLoad",
     }
     assert required <= set(package.NODE_CLASS_MAPPINGS)
     assert upscale.UPSCALE_MANIFEST_TYPE == chain.MANIFEST_TYPE
     assert upscale.MiniMaxH3ChainUpscaleLoopEnd.RETURN_TYPES[0] == (
         chain.MANIFEST_TYPE)
-    assert upscale.MiniMaxH3ChainUpscaleMerge.DEPRECATED is True
-    legacy_chain_nodes = (
-        chain.MiniMaxH3ScheduledPictureReference,
-        chain.MiniMaxH3ScheduledVideoReference,
-        chain.MiniMaxH3ScheduledAudioReference,
-        chain.MiniMaxH3ScheduledReferenceToVideo,
-        chain.MiniMaxH3Legacy04PolicyAdapter,
-        chain.MiniMaxH3LazyMotionAVLoader,
-    )
-    assert all(node.DEPRECATED is True for node in legacy_chain_nodes)
+    assert "MiniMaxH3ChainUpscaleMerge" not in package.NODE_CLASS_MAPPINGS
     expected_derope_union = "H3_CHAIN_UPSCALE_STATE,H3_CHAIN_STATE"
     for node_name in (
             "MiniMaxH3ChainDeropeGuard",
@@ -1041,10 +1031,6 @@ def main():
         assert completed_record["format"] == "h3_chain_upscale_final_v1"
         assert completed_record["complete"] is True
         assert completed_record["completed_clip_count"] == completed_record["planned_clip_count"] == 2
-        legacy_merged = upscale.MiniMaxH3ChainUpscaleMerge().merge(
-            manifest, "none", "legacy_wrapper", 96)["result"][0]
-        assert pathlib.Path(legacy_merged).parent == merged_path.parent
-
         _flow, latent_state, _manifest, _ = adapter.adapt(
             selected_manifest, "archive_latent", "h3_latent", "{}",
             1, 0, True, 18)

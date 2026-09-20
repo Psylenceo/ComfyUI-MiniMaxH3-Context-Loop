@@ -32,15 +32,10 @@ const NODE_NAME = "MiniMaxH3ChainReview";
 const PLAN_NAME = "MiniMaxH3ChainPlan";
 const PLAN_NAMES = new Set([PLAN_NAME, "MiniMaxH3ChainPlanModern"]);
 const PROJECT_ASSET_MANAGER_NODES = new Set(["MiniMaxH3ProjectAssetManager", "MiniMaxH3ProjectAssetTree"]);
-const PROMPT_EDITOR_SETTING = "MiniMaxH3ContexLoop.ReviewGate.PromptEditor";
 const VIDEO_HEIGHT_PROPERTY = "h3_chain_review_video_height";
-const PROMPT_HEIGHT_PROPERTY = "h3_chain_review_prompt_height";
 const DEFAULT_VIDEO_HEIGHT = 300;
 const MIN_VIDEO_HEIGHT = 140;
 const MAX_VIDEO_HEIGHT = 1200;
-const DEFAULT_PROMPT_HEIGHT = 120;
-const MIN_PROMPT_HEIGHT = 120;
-const MAX_PROMPT_HEIGHT = 800;
 const notifiedTokens = new Set();
 const mountedReviewNodes = new Set();
 let notificationAudioContext = null;
@@ -129,9 +124,6 @@ function finishTrackedReviewExecution(kind, data) {
     );
 }
 
-function reviewPromptEditorEnabled() {
-    return app.ui?.settings?.getSettingValue?.(PROMPT_EDITOR_SETTING) === true;
-}
 
 // A browser can briefly retain the preceding companion module after updating
 // a custom node. Namespace access keeps Review Gate mountable in that state;
@@ -247,20 +239,6 @@ function injectStyles() {
         .h3r-capture-error { color:#ff9a9a; }
         .h3r-capture-actions { display:flex; justify-content:flex-end; gap:7px; }
         .h3r-label { display:flex; flex-direction:column; gap:4px; color:#aeb5c5; }
-        .h3r-prompt-panel { width:100%; height:120px; min-height:120px; max-height:800px;
-            display:flex; flex-direction:column; overflow:hidden;
-            border:1px solid #56637e; border-radius:5px; background:#101218; }
-        .h3r-prompt { width:100%; height:calc(100% - 11px); min-height:0; resize:none;
-            padding:7px; border:0; border-radius:0; background:transparent; color:#eef1f7; }
-        .h3r-prompt-grip { height:11px; flex:0 0 11px; cursor:ns-resize;
-            border-top:1px solid #343b4b; background:linear-gradient(180deg,#252a35,#171a21);
-            position:relative; touch-action:none; }
-        .h3r-prompt-grip::after { content:""; position:absolute; left:calc(50% - 20px); top:4px;
-            width:40px; height:2px; border-top:1px solid #7e899f;
-            border-bottom:1px solid #4f586b; }
-        .h3r-prompt-grip:hover { background:linear-gradient(180deg,#313848,#1d212b); }
-        .h3r-basic-prompt { width:100%; min-height:70px; resize:vertical; padding:7px;
-            border:1px solid #56637e; border-radius:5px; background:#101218; color:#eef1f7; }
         .h3r-prompt-notice { padding:8px 9px; border:1px solid #56637e;
             border-radius:6px; background:#202431; color:#cbd3e5; white-space:pre-wrap; }
         .h3r-row { display:flex; align-items:flex-end; gap:7px; }
@@ -1256,106 +1234,18 @@ function mount(node) {
     prefix.hidden = true;
     prefix.title = "Shared prompt prepended to every scene. It is shown for context and is not changed by retrying this scene.";
 
-    const basicPromptLabel = document.createElement("label");
-    basicPromptLabel.className = "h3r-label";
-    basicPromptLabel.append("Basic prompt (plain language draft)");
-    const basicPrompt = document.createElement("textarea");
-    basicPrompt.className = "h3r-basic-prompt";
-    basicPrompt.title = "A simple, non-H3-formatted scene idea kept alongside the scene prompt. Retrying sends this along; optimizing it into the scene prompt happens in Rich Scene Prompt Editor.";
-    basicPromptLabel.append(basicPrompt);
-    let basicPromptEditedInGate = false;
-    basicPrompt.addEventListener("input", () => { basicPromptEditedInGate = true; });
-
-    const promptLabel = document.createElement("label");
-    promptLabel.className = "h3r-label";
-    promptLabel.append("Scene prompt (used when retrying)");
-    const prompt = document.createElement("textarea");
-    prompt.className = "h3r-prompt";
-    prompt.title = "The connected Prompt Editor and this fallback field share the current Plan scene. Retry regenerates it from the same accepted predecessor.";
-    const promptPanel = document.createElement("div");
-    promptPanel.className = "h3r-prompt-panel";
-    const promptGrip = document.createElement("div");
-    promptGrip.className = "h3r-prompt-grip";
-    promptGrip.title = "Drag vertically to resize the prompt editor. Double-click to reset.";
-    promptGrip.setAttribute("role", "separator");
-    promptGrip.setAttribute("aria-label", "Resize scene prompt editor");
-    promptGrip.setAttribute("aria-orientation", "horizontal");
-    promptPanel.append(prompt, promptGrip);
-    promptLabel.append(promptPanel);
-    let promptEditedInGate = false;
-    prompt.addEventListener("input", () => { promptEditedInGate = true; });
-
+    // Snapshot values are fallbacks only; author prompts in the dedicated editors.
+    const basicPrompt = {value: ""};
+    const prompt = {value: ""};
     const promptNotice = document.createElement("div");
     promptNotice.className = "h3r-prompt-notice";
-    promptNotice.textContent = "Prompt editing in Review Gate is disabled by default in 0.5. Use Scene Prompt Editor or Rich Scene Prompt Editor, then Retry or Reroll here.\n\nTo restore the old field: ComfyUI Settings → MiniMax H3 Context Loop → Interface → Review Gate.";
-
-    function refreshPromptEditorSetting() {
-        const enabled = reviewPromptEditorEnabled();
-        basicPromptLabel.hidden = !enabled;
-        basicPrompt.disabled = !enabled;
-        promptLabel.hidden = !enabled;
-        prompt.disabled = !enabled;
-        promptGrip.hidden = !enabled;
-        promptNotice.hidden = enabled;
-    }
-    node._h3ReviewRefreshPromptSetting = refreshPromptEditorSetting;
-    refreshPromptEditorSetting();
-
-    function setPromptHeight(height, persist = false) {
-        const next = Math.round(Math.max(
-            MIN_PROMPT_HEIGHT,
-            Math.min(MAX_PROMPT_HEIGHT, Number(height) || DEFAULT_PROMPT_HEIGHT),
-        ));
-        promptPanel.style.height = `${next}px`;
-        promptGrip.setAttribute("aria-valuenow", String(next));
-        if (persist) {
-            node.properties[PROMPT_HEIGHT_PROPERTY] = next;
-            node.graph?.setDirtyCanvas?.(true, true);
-            app.graph?.setDirtyCanvas?.(true, true);
-        }
-    }
-    let promptResize = null;
-    promptGrip.addEventListener("pointerdown", (event) => {
-        event.preventDefault();
-        const layoutHeight = promptPanel.offsetHeight;
-        const visualHeight = promptPanel.getBoundingClientRect().height;
-        const displayScale = layoutHeight > 0 && visualHeight > 0
-            ? visualHeight / layoutHeight : 1;
-        promptResize = {
-            pointerId: event.pointerId,
-            startY: event.clientY,
-            startHeight: layoutHeight || DEFAULT_PROMPT_HEIGHT,
-            displayScale,
-        };
-        promptGrip.setPointerCapture?.(event.pointerId);
-    });
-    promptGrip.addEventListener("pointermove", (event) => {
-        if (!promptResize || event.pointerId !== promptResize.pointerId) return;
-        event.preventDefault();
-        setPromptHeight(promptResize.startHeight
-            + (event.clientY - promptResize.startY) / promptResize.displayScale);
-    });
-    function finishPromptResize(event) {
-        if (!promptResize || event.pointerId !== promptResize.pointerId) return;
-        promptResize = null;
-        setPromptHeight(promptPanel.offsetHeight, true);
-        promptGrip.releasePointerCapture?.(event.pointerId);
-    }
-    promptGrip.addEventListener("pointerup", finishPromptResize);
-    promptGrip.addEventListener("pointercancel", finishPromptResize);
-    promptGrip.addEventListener("dblclick", (event) => {
-        event.preventDefault();
-        setPromptHeight(DEFAULT_PROMPT_HEIGHT, true);
-    });
+    promptNotice.textContent = "Edit prompts in Scene Prompt Editor or Rich Scene Prompt Editor, then Retry or Reroll here.";
 
     function applySavedLayout() {
         node.properties ??= {};
         const restoredVideoHeight = Number(node.properties[VIDEO_HEIGHT_PROPERTY]);
         setVideoHeight(Number.isFinite(restoredVideoHeight)
             ? restoredVideoHeight : DEFAULT_VIDEO_HEIGHT);
-        const restoredPromptHeight = Number(node.properties[PROMPT_HEIGHT_PROPERTY]);
-        setPromptHeight(Number.isFinite(restoredPromptHeight)
-            ? restoredPromptHeight : DEFAULT_PROMPT_HEIGHT);
     }
     node._h3ReviewApplyLayout = applySavedLayout;
     applySavedLayout();
@@ -1503,8 +1393,7 @@ function mount(node) {
     resume.append(resumeTitle, resumeRow, resumeStatus, revisionsPanel);
 
     root.append(
-        head, videoPanel, captureRow, prefix, promptNotice, basicPromptLabel,
-        promptLabel, seedRow, candidateRow, actions, status, resume,
+        head, videoPanel, captureRow, prefix, promptNotice, seedRow, candidateRow, actions, status, resume,
     );
 
     let current = null;
@@ -2109,14 +1998,10 @@ function mount(node) {
                     : action === "next_candidate" ? "pause" : ""
                 : "";
             if (liveCandidateBatch && !candidateBatchAction) return;
-            const submittedPrompt = reviewPromptEditorEnabled() && promptEditedInGate
-                ? prompt.value
-                : (planScenePrompt(node, submittedReview)
+            const submittedPrompt = (planScenePrompt(node, submittedReview)
                     ?? submittedReview.scene_prompt
                     ?? prompt.value);
-            const submittedBasicPrompt = reviewPromptEditorEnabled() && basicPromptEditedInGate
-                ? basicPrompt.value
-                : (submittedReview.basic_prompt ?? basicPrompt.value);
+            const submittedBasicPrompt = (submittedReview.basic_prompt ?? basicPrompt.value);
             const normalizedSeed = action === "retry" ? reviewSeed(seed.value) : seed.value;
             const normalizedDuration = action === "retry" || action === "reroll"
                 ? reviewDuration(duration.value) : null;
@@ -2205,11 +2090,9 @@ function mount(node) {
                     acceptedBasicPrompt);
                 if (current?.token === submittedToken) {
                     prompt.value = acceptedPrompt;
-                    promptEditedInGate = false;
                     if (acceptedBasicPrompt !== undefined) {
                         basicPrompt.value = acceptedBasicPrompt;
                     }
-                    basicPromptEditedInGate = false;
                     seed.value = body.seed;
                     duration.value = acceptedDuration;
                 }
@@ -2299,9 +2182,7 @@ function mount(node) {
         }
         if (!sameToken) {
             basicPrompt.value = data.basic_prompt ?? "";
-            basicPromptEditedInGate = false;
             prompt.value = data.scene_prompt ?? "";
-            promptEditedInGate = false;
             seed.value = data.seed ?? "";
             duration.value = reviewDurationText(data.raw_frames);
             prefix.textContent = data.prompt_prefix ?
@@ -2338,7 +2219,6 @@ function mount(node) {
             return false;
         }
         prompt.value = String(text ?? "").replace(/\r\n?/g, "\n");
-        promptEditedInGate = false;
         return true;
     };
 
@@ -2349,7 +2229,6 @@ function mount(node) {
             return false;
         }
         basicPrompt.value = String(text ?? "").replace(/\r\n?/g, "\n");
-        basicPromptEditedInGate = false;
         return true;
     };
 
@@ -2446,21 +2325,6 @@ document.addEventListener("visibilitychange", () => {
 
 app.registerExtension({
     name: "minimax_h3_context_loop.chain_review",
-    init() {
-        app.ui?.settings?.addSetting?.({
-            id: PROMPT_EDITOR_SETTING,
-            category: ["MiniMax H3 Context Loop", "Interface", "Review Gate"],
-            name: "Enable prompt editing inside Review Gate",
-            tooltip: "Disabled by default in 0.5. Keep prompt authoring in Scene Prompt Editor or Rich Scene Prompt Editor. Enable this only to restore the legacy Review Gate textarea.",
-            type: "boolean",
-            defaultValue: false,
-            onChange() {
-                for (const node of mountedReviewNodes) {
-                    node._h3ReviewRefreshPromptSetting?.();
-                }
-            },
-        });
-    },
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== NODE_NAME) return;
         const created = nodeType.prototype.onNodeCreated;

@@ -20,7 +20,6 @@ H3_PIXEL_CELL = 32
 H3_FRAMES_PER_VIDEO_LATENT = (1, 4, 4, 4, 4)
 MASK_CONVERSION_MODES = (
     "H3 exact (causal/token max)",
-    "legacy trilinear",
 )
 GRID_MODES = (
     "runtime exact (latent max)",
@@ -116,7 +115,7 @@ def resize_mask_to_video_latent(
     mask: torch.Tensor,
     video: torch.Tensor,
 ) -> torch.Tensor:
-    """Legacy trilinear conversion to the target H3 video latent dimensions."""
+    """Resize an existing mask to the target H3 video latent dimensions."""
     if video.ndim != 5:
         raise ValueError(
             "H3 target video latent must be [B,C,T,H,W], got %s." %
@@ -219,8 +218,7 @@ def reduce_h3_mask_to_video_latent(
         raise ValueError(
             "H3 exact mask conversion needs one static mask or exactly %d "
             "tracked masks for this %d-step target; received %d. In a loop, "
-            "connect Loop Mask Slice. Choose legacy trilinear only to retain "
-            "the older interpolated behavior." %
+            "connect Loop Mask Slice." %
             (expected_frames, latent_steps, source_frames)
         )
 

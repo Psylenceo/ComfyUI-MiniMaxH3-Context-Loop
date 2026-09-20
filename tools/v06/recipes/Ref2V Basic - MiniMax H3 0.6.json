@@ -336,8 +336,7 @@
       "settings": {
         "trim_frames": 0,
         "fps": 24,
-        "match_tail": true,
-        "retain_overlap_frames": 0
+        "match_tail": true
       },
       "inputs": {
         "images": [

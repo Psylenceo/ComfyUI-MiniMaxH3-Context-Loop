@@ -36,7 +36,7 @@ import {
     replacePromptReferenceOccurrence,
     taggedPictureReferenceMode,
     taggedPictureReferenceToken,
-} from "./h3_reference_preview_core.mjs?v=0.6.12";
+} from "./h3_reference_preview_core.mjs?v=0.6.13";
 import {
     PromptUndoHistory,
     RICH_PROMPT_GUIDES,

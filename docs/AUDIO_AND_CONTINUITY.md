@@ -92,15 +92,11 @@ Version 0.5 separates three independent decisions and one exact-target switch:
 | Generated continuity | `on`, `off` | Whether the previous sampled audio latent continues into the next scene |
 | Lock source audio | `on`, `off` | Whether each exact source window occupies the complete target audio latent and is protected from denoising |
 
-Set these controls and the default incoming boundary on the deprecated
-**Manual Chain Policy (Legacy)** node. Its output may connect directly to Plan
-or pass through an
-**Advanced Policy Override**. Advanced Policy preserves every audio choice and
-replaces only the incoming transition with a named experimental recipe such as
-Drift-Control AV. Use the **Legacy 0.4 Policy Adapter** only for a genuine 0.4
-import, a raw implementation/context pair, or an independent numeric audio
-overlap. It can also accept an incoming Chain Policy, in which case its legacy
-`audio_mode` is ignored and the modern audio intent is preserved.
+Use **Generation Profile** for the standard combinations. **Advanced Policy
+Override** preserves its audio policy and changes the incoming transition.
+For custom combinations, the original **Context Loop Plan** still accepts its
+audio/continuation controls and per-scene Plan JSON audio policies. The Manual
+Chain Policy and Legacy 0.4 Adapter authoring nodes were retired in 0.7.
 
 Policy layers are ordered left to right. Each downstream layer replaces only
 the boundary fields it owns; the last boundary layer wins, while the audio

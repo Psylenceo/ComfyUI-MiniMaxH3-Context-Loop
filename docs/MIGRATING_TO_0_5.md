@@ -1,5 +1,8 @@
 # Migrating workflows to version 0.5
 
+> Historical 0.5 documentation. For the current retirement list and supported
+> replacements, see [0.7 migration notes](MIGRATING_TO_0_7.md).
+
 Version 0.5 is backward compatible. Existing 0.4 node ids, positional outputs,
 widget order, manifests, and checkpoints remain supported. Migration is
 recommended for clearer graphs and model-free validation, but it is not

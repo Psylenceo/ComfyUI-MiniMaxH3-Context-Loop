@@ -404,8 +404,7 @@ def main() -> None:
     assert {path.name for path in paths} == WORKFLOWS
     assert all("MiniMax H3 0.6.json" in path.name for path in paths)
     assert not (LEGACY_NAMES & {path.name for path in paths})
-    assert ARCHIVE_05.is_dir()
-    assert LEGACY_NAMES <= {path.name for path in ARCHIVE_05.glob("*.json")}
+    assert not list((EXAMPLES / "Archive").rglob("*.json"))
     uuids = set()
     for path in paths:
         workflow = load(path)

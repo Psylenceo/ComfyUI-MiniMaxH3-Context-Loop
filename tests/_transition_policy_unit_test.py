@@ -591,39 +591,9 @@ plan_inputs = chain.MiniMaxH3ChainPlan.INPUT_TYPES()
 assert "transition_policy" not in plan_inputs["optional"]
 assert "MiniMaxH3TransitionPolicy" not in chain.CHAIN_NODE_CLASS_MAPPINGS
 
-legacy_adapter = chain.MiniMaxH3Legacy04PolicyAdapter()
-legacy_combined, legacy_status = legacy_adapter.build(
-    "source_plus_timeline", "feathered_av", 39, 33)
-legacy_audio = legacy_combined["audio_policy"]
-legacy_transition = legacy_combined["transition_policy"]
-assert legacy_audio == chain.migrate_legacy_audio_mode("source_plus_timeline")
-assert legacy_transition["continuation_mode"] == "feathered_av"
-assert legacy_transition["context_length"] == 39
-assert legacy_transition["expert_override"] is True
-assert legacy_combined["audio_policy"] == legacy_audio
-assert legacy_combined["transition_policy"] == legacy_transition
-assert legacy_combined["audio_context_length"] == 33
-assert "legacy 0.4 migration" in legacy_status
-matched = legacy_adapter.build(
-    "generated_audio", "masked_av", 39)[0]
-matched_audio = matched["audio_policy"]
-matched_transition = matched["transition_policy"]
-assert matched_audio == chain.migrate_legacy_audio_mode("generated_audio")
-assert matched_transition["preset"] == "hard_av"
-assert matched_transition["expert_override"] is False
-matched_audio_feather = legacy_adapter.build(
-    "generated_audio", "audio_feathered_av", 39)[0]["transition_policy"]
-assert matched_audio_feather["preset"] == "soft_av"
-assert matched_audio_feather["expert_override"] is False
-assert chain.CHAIN_NODE_CLASS_MAPPINGS[
-    "MiniMaxH3Legacy04PolicyAdapter"] is (
-        chain.MiniMaxH3Legacy04PolicyAdapter)
-assert len(legacy_adapter.OUTPUT_TOOLTIPS) == len(legacy_adapter.RETURN_TYPES)
-assert all(legacy_adapter.OUTPUT_TOOLTIPS)
-
 advanced_policy = chain.MiniMaxH3AdvancedPolicy()
-advanced_base = chain.MiniMaxH3ChainPolicy().build(
-    "guide", "source", "on", "on")[0]
+advanced_base = chain._contract_chain_policy(
+    "guide", "source", "on", "on", False)
 advanced_drift, advanced_status = advanced_policy.apply(
     advanced_base, "drift_av")
 assert advanced_drift["audio_policy"] == advanced_base["audio_policy"]
@@ -633,18 +603,10 @@ assert advanced_drift["transition_policy"]["continuation_mode"] == (
 assert advanced_drift["audio_context_length"] == 39
 assert "advanced override" in advanced_status
 
-legacy_overlay = legacy_adapter.build(
-    "generated_audio", "feathered_av", 39, 33,
-    chain_policy=advanced_base)[0]
-assert legacy_overlay["audio_policy"] == advanced_base["audio_policy"]
-assert legacy_overlay["transition_policy"]["continuation_mode"] == (
-    "feathered_av")
-assert legacy_overlay["audio_context_length"] == 33
-
 print(
     "transition policy: Cut/Guide/Tone Carry Guide/Latent Guide/Detail Guide/"
     "Detail AV/Drift-Control AV/Color-Stable Drift AV/Hard AV/Soft AV/"
     "Audio Feather AV presets, "
     "advanced/raw "
     "overrides, zero-context delivery, AV safety validation, legacy fallback "
-    "and adapter, Plan resolution, and one-wire registration pass")
+    "Plan resolution, and one-wire registration pass")

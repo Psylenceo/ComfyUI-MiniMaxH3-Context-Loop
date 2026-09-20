@@ -3,8 +3,8 @@
 ## Extend an existing video
 
 Use **MiniMax H3 Existing Video Context** when scene 1 must continue a decoded
-video rather than start from an empty timeline. The complete experimental model
-is [Extend Existing Video Model Workflow - MiniMax H3](<../example_workflows/Archive/Extend Existing Video Model Workflow - MiniMax H3.json>).
+video rather than start from an empty timeline. The old experimental example
+was retired in 0.7; the Existing Video Context node remains supported.
 
 ```text
 Plan ────────────────────────────────┐
@@ -51,8 +51,9 @@ Spectrum             off
 ```
 
 Chain Policy derives both visual and generated-audio overlap as 22 frames for
-Guide. Use the Legacy 0.4 Policy Adapter only when this imported-context workflow
-deliberately needs different visual and audio overlap lengths.
+Guide. For deliberately different visual and audio overlap lengths, use the
+original Context Loop Plan's independent context controls without a policy
+override, or configure per-scene continuation settings.
 
 ## Long visual context
 
@@ -225,8 +226,7 @@ scene-local image, video, or audio anchors.
 
 ## Re-film a synchronized performance
 
-The [three-angle guitar workflow](<../example_workflows/Archive/Three-Angle Guitar Ref2VA - EXPERIMENTAL - MiniMax H3.json>)
-uses **Reference Video Prep** to convert native VIDEO or decoded IMAGE/AUDIO
+Use **Reference Video Prep** to convert native VIDEO or decoded IMAGE/AUDIO
 into exact 24 fps Ref2VA input. Its soundtrack is copied without padding or
 time-stretching, allowing one performance to be generated from multiple camera
 angles in one pass.

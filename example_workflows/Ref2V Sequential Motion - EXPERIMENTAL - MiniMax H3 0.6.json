@@ -216,7 +216,7 @@
       ],
       "size": [
         360,
-        216
+        236
       ],
       "flags": {},
       "order": 6,
@@ -240,6 +240,11 @@
         {
           "name": "source_timeline",
           "type": "H3_SOURCE_TIMELINE",
+          "link": null
+        },
+        {
+          "name": "tagged_references",
+          "type": "H3_TAGGED_REFERENCES",
           "link": null
         }
       ],
@@ -1099,8 +1104,7 @@
       "widgets_values": [
         0,
         24,
-        true,
-        0
+        true
       ]
     },
     {
@@ -1336,7 +1340,8 @@
         "Node name for S&R": "MiniMaxH3ChainLoopEnd"
       },
       "widgets_values": [
-        "off"
+        "off",
+        "recursive_legacy"
       ]
     },
     {
@@ -1973,11 +1978,6 @@
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
           "link": 66
-        },
-        {
-          "name": "reference_schedule",
-          "type": "H3_REFERENCE_SCHEDULE",
-          "link": null
         }
       ],
       "outputs": [
@@ -2661,7 +2661,7 @@
         3440,
         90,
         440,
-        682
+        702
       ],
       "color": "#393f58",
       "font_size": 24,

@@ -425,7 +425,7 @@
       ],
       "size": [
         360,
-        504
+        552
       ],
       "flags": {},
       "order": 8,
@@ -503,7 +503,9 @@
         "exclude_video_keep_audio",
         "",
         "inherit",
-        "strict"
+        "strict",
+        "inherit",
+        "inherit"
       ]
     },
     {
@@ -960,7 +962,7 @@
       "type": "H3ConditioningSyncFromLatents",
       "pos": [
         3660,
-        1288
+        1336
       ],
       "size": [
         360,
@@ -1671,7 +1673,7 @@
       "type": "H3V2VInit",
       "pos": [
         3660,
-        784
+        832
       ],
       "size": [
         360,
@@ -2749,7 +2751,7 @@
         3620,
         90,
         440,
-        1470
+        1518
       ],
       "color": "#393f58",
       "font_size": 24,

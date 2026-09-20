@@ -216,7 +216,7 @@
       ],
       "size": [
         360,
-        256
+        236
       ],
       "flags": {},
       "order": 6,
@@ -245,11 +245,6 @@
         {
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
-          "link": null
-        },
-        {
-          "name": "reference_schedule",
-          "type": "H3_REFERENCE_SCHEDULE",
           "link": null
         }
       ],
@@ -289,7 +284,7 @@
       "type": "MiniMaxH3ChainCurrent",
       "pos": [
         3480,
-        536
+        516
       ],
       "size": [
         460,
@@ -1109,8 +1104,7 @@
       "widgets_values": [
         0,
         24,
-        true,
-        0
+        true
       ]
     },
     {
@@ -1785,11 +1779,6 @@
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
           "link": 61
-        },
-        {
-          "name": "reference_schedule",
-          "type": "H3_REFERENCE_SCHEDULE",
-          "link": null
         }
       ],
       "outputs": [
@@ -2433,7 +2422,7 @@
         3440,
         90,
         540,
-        886
+        866
       ],
       "color": "#393f58",
       "font_size": 24,

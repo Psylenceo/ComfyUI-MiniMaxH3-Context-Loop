@@ -323,8 +323,7 @@
       "settings": {
         "trim_frames": 0,
         "fps": 24,
-        "match_tail": true,
-        "retain_overlap_frames": 5
+        "match_tail": true
       },
       "inputs": {
         "images": [
@@ -518,7 +517,8 @@
       "key": "n36",
       "type": "MiniMaxH3ChainLoopEnd",
       "settings": {
-        "between_scene_cleanup": "off"
+        "between_scene_cleanup": "off",
+        "execution_mode": "recursive_legacy"
       },
       "inputs": {
         "flow": [
@@ -595,7 +595,12 @@
       "key": "source_components",
       "type": "GetVideoComponents",
       "settings": {},
-      "inputs": {"video": ["n39", "VIDEO"]}
+      "inputs": {
+        "video": [
+          "n39",
+          "VIDEO"
+        ]
+      }
     },
     {
       "key": "n40",

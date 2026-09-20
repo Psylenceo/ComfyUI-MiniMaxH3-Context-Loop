@@ -583,7 +583,7 @@ async def check():
             chain._plan_studio_source_audio_media = (
                 lambda *_args, **_kwargs: dict(source_audio_record))
             audio_payload = chain._register_plan_studio_source_previews(
-                plan, report, None, None, object())
+                plan, report, source_timeline=object())
         finally:
             chain._plan_studio_runtime_source_timeline = (
                 original_runtime_source_timeline)
@@ -624,7 +624,7 @@ async def check():
             chain._plan_studio_source_audio_media = (
                 lambda *_args, **_kwargs: None)
             no_audio_payload = chain._register_plan_studio_source_previews(
-                plan, {"scenes": []}, None, None, object())
+                plan, {"scenes": []}, source_timeline=object())
         finally:
             chain._plan_studio_runtime_source_timeline = (
                 original_runtime_source_timeline)

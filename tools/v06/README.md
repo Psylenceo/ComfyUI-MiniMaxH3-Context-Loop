@@ -4,8 +4,7 @@
 connections; it contains no UI widget arrays, node dimensions, link-slot numbers,
 or frontend metadata. Existing example prompts and intended connections were
 reviewed as reference material. The old archive-based builder is no longer used.
-The files under `example_workflows/Archive/` are never read or modified by this
-builder.
+The pre-0.6 example archive was retired in 0.7; this builder uses only recipes.
 
 From this checkout, run:
 

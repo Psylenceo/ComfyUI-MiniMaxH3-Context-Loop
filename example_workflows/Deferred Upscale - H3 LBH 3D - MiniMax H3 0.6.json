@@ -473,7 +473,7 @@
       ],
       "size": [
         360,
-        504
+        552
       ],
       "flags": {},
       "order": 9,
@@ -551,7 +551,9 @@
         "exclude_video_keep_audio",
         "",
         "inherit",
-        "strict"
+        "strict",
+        "inherit",
+        "inherit"
       ]
     },
     {
@@ -559,7 +561,7 @@
       "type": "RandomNoise",
       "pos": [
         2130,
-        1016
+        1064
       ],
       "size": [
         360,
@@ -601,7 +603,7 @@
       "type": "BasicScheduler",
       "pos": [
         2130,
-        1624
+        1672
       ],
       "size": [
         360,
@@ -642,7 +644,7 @@
       "type": "MinimaxH3LatentUpscaler3D",
       "pos": [
         2130,
-        1248
+        1296
       ],
       "size": [
         360,
@@ -688,7 +690,7 @@
       "type": "H3ConditioningSyncFromLatents",
       "pos": [
         2130,
-        1880
+        1928
       ],
       "size": [
         360,
@@ -1602,7 +1604,7 @@
         2090,
         90,
         440,
-        2062
+        2110
       ],
       "color": "#394c49",
       "font_size": 24,
