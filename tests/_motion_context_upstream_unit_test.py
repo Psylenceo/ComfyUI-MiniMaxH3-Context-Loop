@@ -21,7 +21,6 @@ shared_nodes._video_from_latent = lambda _latent: types.SimpleNamespace(
     shape=(1, 16, 30, 2, 2))
 shared_nodes._audio_tail_from_latent = lambda _latent, _frames: (
     "tail", 37, -1.0 / 3.0)
-shared_nodes._validate_visual_cond_noise_aug = float
 shared_nodes.payload_merge_calls = []
 
 
@@ -114,8 +113,6 @@ def apply(**overrides):
         "audio_vae": None,
         "context_audio": None,
         "video_context_latent": None,
-        "visual_cond_noise_aug": 0.995,
-        "future_end_anchor": False,
     }
     values.update(overrides)
     return adapter.apply_motion_context(FallbackMotionContext, **values)
@@ -149,7 +146,6 @@ def main():
         assert [value["resolved_frame_index"] for value in
                 delegated["conditioning"][0][1]["minimax_keyframes"]] == [70]
         metadata = output[0][1]
-        assert metadata["minimax_visual_cond_noise_aug"] == 0.995
         assert [value["resolved_frame_index"] for value in
                 metadata["minimax_keyframes"]] == [70, 0]
         assert metadata["minimax_keyframes"][-1][
@@ -186,8 +182,6 @@ def main():
         assert shared_nodes.payload_merge_calls[-1] == {
             "require_video": True, "require_audio": True}
 
-        upstream_calls = len(UpstreamMotionContext.calls)
-
         # Loop-only modes remain lossless through the internal engine.
         result = apply(video_context_latent="previous-video-latent")
         assert result == ("fallback-conditioning", 22)
@@ -204,14 +198,6 @@ def main():
             context_latent="previous-av-latent")
         assert result == ("fallback-conditioning", 22)
 
-        result = apply(future_end_anchor=True)
-        assert result == ("fallback-conditioning", 22)
-        assert len(UpstreamMotionContext.calls) == upstream_calls
-
-        # A partially native ComfyUI can expose arbitrary Guide layout while
-        # still dropping Guide audio when Ref2VA audio is active. The public
-        # provider rejects that safely; Chain repairs its marker-gated payload
-        # merge and runs the retained internal engine instead.
         original_repair = adapter._enable_internal_payload_merge
         adapter._enable_internal_payload_merge = lambda: (
             True, "test payload compatibility enabled")

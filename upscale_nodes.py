@@ -3352,58 +3352,6 @@ class MiniMaxH3ChainUpscaleManifestLoad:
         return manifest, json.dumps(manifest, ensure_ascii=False, indent=2), status
 
 
-class MiniMaxH3ChainUpscaleMerge:
-    DEPRECATED = True
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "manifest": (chain.MANIFEST_TYPE, {
-                    "tooltip": "Legacy compatibility input. New workflows "
-                               "connect this manifest directly to H3 Chain "
-                               "Assemble."}),
-                "audio_source": (["plan", "source", "generated", "none"],
-                                 {"default": "plan",
-                                  "tooltip": "Final audio policy. plan follows the "
-                                             "parent chain's configured mode."}),
-                "filename": ("STRING", {
-                    "default": "final",
-                    "tooltip": "Final MP4 basename; collisions are versioned."}),
-                "audio_bitrate": ("INT", {
-                    "default": 256, "min": 64, "max": 512,
-                    "tooltip": "AAC bitrate in kbps when audio is muxed."}),
-            },
-            "optional": {
-                "source_audio": ("AUDIO", {
-                    "tooltip": "Original full source track when audio_source "
-                               "resolves to source."}),
-                "source_timeline": (chain.SOURCE_TIMELINE_TYPE, {
-                    "tooltip": "Optional 0.5 Source Timeline. Usually the "
-                               "parent manifest's recovery descriptor is enough."}),
-            },
-        }
-
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("video_path",)
-    OUTPUT_TOOLTIPS = (
-        "Absolute path of the verified merged HQ MP4 under the child profile.",
-    )
-    FUNCTION = "merge"
-    OUTPUT_NODE = True
-    CATEGORY = "conditioning/minimax/context_loop/upscale"
-    DESCRIPTION = ("Deprecated compatibility wrapper. New workflows connect "
-                   "Upscale Loop End directly to H3 Chain Assemble.")
-
-    @classmethod
-    def IS_CHANGED(cls, *args, **kwargs):
-        return float("NaN")
-
-    def merge(self, manifest, audio_source, filename, audio_bitrate,
-              source_audio=None, source_timeline=None):
-        return chain.MiniMaxH3ChainAssemble().assemble(
-            manifest, audio_source, filename, audio_bitrate,
-            source_audio=source_audio, source_timeline=source_timeline)
 
 
 UPSCALE_NODE_CLASS_MAPPINGS = {
@@ -3427,7 +3375,6 @@ UPSCALE_NODE_CLASS_MAPPINGS = {
     "MiniMaxH3ChainUpscaleLoopEnd": MiniMaxH3ChainUpscaleLoopEnd,
     "MiniMaxH3ChainUpscaleHandoff": MiniMaxH3ChainUpscaleHandoff,
     "MiniMaxH3ChainUpscaleAdvance": MiniMaxH3ChainUpscaleAdvance,
-    "MiniMaxH3ChainUpscaleMerge": MiniMaxH3ChainUpscaleMerge,
     "MiniMaxH3ChainUpscaleManifestLoad": MiniMaxH3ChainUpscaleManifestLoad,
 }
 
@@ -3454,6 +3401,5 @@ UPSCALE_NODE_DISPLAY_NAME_MAPPINGS = {
     "MiniMaxH3ChainPass2Prepare": "MiniMax H3 Pass-2 AV Prepare",
     "MiniMaxH3ChainUpscaleSegmentSave": "MiniMax H3 Upscale Segment Save",
     "MiniMaxH3ChainUpscaleLoopEnd": "MiniMax H3 Upscale Loop End",
-    "MiniMaxH3ChainUpscaleMerge": "MiniMax H3 Upscale Merger (Legacy)",
     "MiniMaxH3ChainUpscaleManifestLoad": "MiniMax H3 Upscale Manifest Load",
 }

@@ -37,7 +37,7 @@ import {
     sharedPrompt,
     visualContextCompositions,
 } from "./h3_chain_plan_core.mjs?v=0.7.9";
-import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.7.26";
+import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.7.27";
 import {
     applySceneAudioOverride,
     applySceneLipSync,
@@ -57,7 +57,7 @@ import {
 import {
     availableLoRARoutes,
     loraRouteLabel,
-} from "./h3_lora_scheduler_core.mjs?v=0.7.25";
+} from "./h3_lora_scheduler_core.mjs?v=0.7.27";
 import {
     MODERN_PLAN_NODE as MODERN_NODE_NAME,
     MODERN_PLAN_WIDGET_NAMES as MODERN_BACKING_WIDGETS,

@@ -178,7 +178,7 @@
       ],
       "size": [
         360,
-        216
+        236
       ],
       "flags": {},
       "order": 5,
@@ -202,6 +202,11 @@
         {
           "name": "source_timeline",
           "type": "H3_SOURCE_TIMELINE",
+          "link": null
+        },
+        {
+          "name": "tagged_references",
+          "type": "H3_TAGGED_REFERENCES",
           "link": null
         }
       ],
@@ -241,7 +246,7 @@
       "type": "MiniMaxH3ChainCurrent",
       "pos": [
         3820,
-        1608
+        1628
       ],
       "size": [
         460,
@@ -370,7 +375,7 @@
       "type": "MiniMaxH3ChainAssemble",
       "pos": [
         4390,
-        2396
+        2416
       ],
       "size": [
         440,
@@ -570,7 +575,7 @@
       ],
       "size": [
         420,
-        292
+        260
       ],
       "flags": {},
       "order": 10,
@@ -609,11 +614,6 @@
         {
           "name": "drift_sigmas",
           "type": "SIGMAS",
-          "link": null
-        },
-        {
-          "name": "boundary_anchors",
-          "type": "H3_BOUNDARY_ANCHORS",
           "link": null
         },
         {
@@ -659,10 +659,7 @@
       "properties": {
         "Node name for S&R": "MiniMaxH3ChainContext"
       },
-      "widgets_values": [
-        0.999,
-        false
-      ]
+      "widgets_values": []
     },
     {
       "id": 12,
@@ -750,7 +747,7 @@
       "type": "BasicScheduler",
       "pos": [
         4430,
-        1636
+        1604
       ],
       "size": [
         360,
@@ -1015,8 +1012,7 @@
       "widgets_values": [
         0,
         24,
-        true,
-        5
+        true
       ]
     },
     {
@@ -1149,7 +1145,7 @@
       "type": "ModelAttentionBackend",
       "pos": [
         3820,
-        2108
+        2128
       ],
       "size": [
         360,
@@ -1309,7 +1305,7 @@
       ],
       "size": [
         1080,
-        948
+        972
       ],
       "flags": {},
       "order": 23,
@@ -1334,11 +1330,6 @@
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
           "link": 44
-        },
-        {
-          "name": "reference_schedule",
-          "type": "H3_REFERENCE_SCHEDULE",
-          "link": null
         },
         {
           "name": "chain_policy",
@@ -1433,7 +1424,8 @@
         20,
         5,
         "guide",
-        ""
+        "",
+        "main"
       ]
     },
     {
@@ -1441,7 +1433,7 @@
       "type": "MiniMaxH3ChainManifestLoad",
       "pos": [
         3820,
-        2396
+        2416
       ],
       "size": [
         440,
@@ -1567,7 +1559,8 @@
         "Node name for S&R": "MiniMaxH3ChainLoopEnd"
       },
       "widgets_values": [
-        "off"
+        "off",
+        "recursive"
       ]
     },
     {
@@ -1689,7 +1682,7 @@
       "type": "MiniMaxH3ProjectAssetManager",
       "pos": [
         1200,
-        1228
+        1252
       ],
       "size": [
         1080,
@@ -2174,7 +2167,7 @@
       29,
       0,
       24,
-      6,
+      5,
       "H3_PROJECT_ASSETS"
     ],
     [
@@ -2265,7 +2258,7 @@
         40,
         90,
         3600,
-        2070
+        2082
       ],
       "color": "#315566",
       "font_size": 24,
@@ -2277,7 +2270,7 @@
         3780,
         90,
         540,
-        2166
+        2186
       ],
       "color": "#393f58",
       "font_size": 24,
@@ -2289,7 +2282,7 @@
         4390,
         90,
         580,
-        1762
+        1730
       ],
       "color": "#394c49",
       "font_size": 24,
@@ -2347,7 +2340,7 @@
       "title": "RECOVERY • DISABLED / NO SAMPLING",
       "bounding": [
         3780,
-        2306,
+        2326,
         1090,
         490
       ],

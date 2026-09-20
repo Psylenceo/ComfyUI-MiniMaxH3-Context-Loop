@@ -98,9 +98,8 @@ For a new graph, connect **Generation Profile** to Plan and begin with:
 | Scene continuity | **Visual continuity** |
 | Audio profile | **Generate audio** |
 
-Some shipped examples still contain the compatible **Manual Chain Policy
-(Legacy)** node. Its saved Guide/generated defaults are safe for a first run;
-you do not need to rebuild the workflow before testing it.
+Use the current example catalog. The old Manual Chain Policy node was removed
+in 0.7; see [migration notes](MIGRATING_TO_0_7.md) for older custom workflows.
 
 ### Review Gate
 

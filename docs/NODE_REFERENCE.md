@@ -50,12 +50,12 @@ for compatibility.
 | **MiniMax H3 Generation Profile** | Widgets: Scene continuity, Audio profile. Optional: `lip_sync_options`. | `chain_policy`, `status` | Turns two user choices into the complete policy expected by Plan. |
 | **MiniMax H3 Plan (Modern)** | Required `chain_policy`; organized Project, Canvas, Generation defaults, and Delivery settings; optional `project_assets`. | `plan`, `summary`, scene count, width, height, blend frames | Recommended for new graphs. Keeps the familiar scene-column editor, removes all legacy fallback controls, and compiles the same Plan contract as the original node. |
 | **MiniMax H3 Context Loop Plan** | Widgets: Scene Plan, `run_name`, size, duration, seed. Optional sockets: `chain_policy`, `project_assets`. | `plan`, `summary`, scene count, width, height, blend frames | Original compatibility-preserving Plan. Existing workflows keep it unchanged. Connect Generation Profile, then use **Upgrade to Modern Plan…** from its context menu when desired. |
-| **MiniMax H3 Chain Preflight** | `plan`. Optional: source timeline/audio, active tagged references or legacy reference schedule, scene/range and resume checks. | checked `plan`, `preflight`, `ready`, `status`, report JSON | Validates the full plan before model-heavy nodes execute. Connect the same reference registry used by Ref2VA, then wire its Plan output to Loop Start. |
-| **MiniMax H3 Context Loop Start** | `plan`. Optional: scene range, source timeline, source audio, external context, active tagged references or legacy reference schedule. | `flow`, `state`, `status` | Starts scene 1, a bounded range, or a compatible resume. Connect the same reference route used by Ref2VA so its internal preflight resolves prompt `@tags`; never connect both reference routes. |
+| **MiniMax H3 Chain Preflight** | `plan`. Optional: source timeline/audio, active tagged references, scene/range and resume checks. | checked `plan`, `preflight`, `ready`, `status`, report JSON | Validates the full plan before model-heavy nodes execute. Connect the same reference registry used by Ref2VA, then wire its Plan output to Loop Start. |
+| **MiniMax H3 Context Loop Start** | `plan`. Optional: scene range, source timeline, source audio, external context, active tagged references. | `flow`, `state`, `status` | Starts scene 1, a bounded range, or a compatible resume. Connect the same reference route used by Ref2VA so its internal preflight resolves prompt `@tags`. |
 | **MiniMax H3 Context Loop Current Shot** | `state`. Optional source-audio fallback. | state, scene index/count, prompt, seed, raw length, steps, size, source-audio slice, blend frames | Exposes the current scene as ordinary ComfyUI values. |
 | **MiniMax H3 Current Tagged Ref2VA Scene** | `state`, CLIP, video VAE, audio VAE, tagged references. Optional: Tagged Scene Options. | state, positive conditioning, latent, typed scene data | Compact prompt-driven Ref2VA route. It replaces the visible Current Shot + Tagged Ref2VA pair in new reference graphs. |
-| **MiniMax H3 Context Loop Context** | state, conditioning, video VAE, latent. Optional: audio VAE, model, drift sigmas, anchors, lip-sync voice. | conditioning, trim frames, continuation flag, latent, model | Adds the selected visual/audio continuation. Scene 1 is effectively a pass-through. |
-| **MiniMax H3 Context Loop Trim** | decoded images, trim count. Optional: audio, FPS, overlap controls, state. | delivered images/audio, overlap-ready images, overlap count | Removes the repeated head context and retains any frames needed for assembly blending. |
+| **MiniMax H3 Context Loop Context** | state, conditioning, video VAE, latent. Optional: audio VAE, model, drift sigmas, lip-sync voice. | conditioning, trim frames, continuation flag, latent, model | Adds the selected visual/audio continuation. Scene 1 is effectively a pass-through. |
+| **MiniMax H3 Context Loop Trim** | decoded images, trim count. Optional: audio, FPS, timing match, state. | delivered images/audio, overlap-ready images, overlap count | Removes the repeated head context and retains any frames needed for assembly blending. |
 | **MiniMax H3 Context Loop Segment + Checkpoint** | state, delivered images, sampled latent. Optional: audio, overlap-ready images, denoised latent. | `segment`, `status` | Saves the scene movie, latent continuation, dependency record, and immutable revision. |
 | **MiniMax H3 Pending Review** | Widget: defer completed batch. | `pending_review` | Connects to Review Gate to persist a complete candidate batch and stop without holding an execution open. |
 | **MiniMax H3 Context Loop Review Gate** | state, segment. Widgets: enabled, timeout, candidate count, memory cleanup, partial assembly. Optional: `pending_review`. | reviewed `segment`, `status` | Pauses for live approve/retry/reroll/candidate selection, or stores and later resolves a deferred batch when Pending Review is connected. |
@@ -78,8 +78,6 @@ recovery layer around them.
 | **Scene LoRA Scheduler** | Model plus lazily revealed LoRA inputs; state → scene model | Different scenes use different connected LoRA routes. |
 | **Lip-Sync Options** | Timing/denoise widgets; optional vocal stem → lip-sync options and voice | The Generation Profile uses **Lip-sync to source audio**. |
 | **Advanced Policy Override** | chain policy + advanced transition → chain policy | You need Tone, Latent, Detail, Drift-Control, or Color-Stable Drift behavior. |
-| **Manual Chain Policy (Legacy)** | Low-level transition/audio widgets → chain policy | An existing workflow already uses it. Prefer Generation Profile for new graphs. |
-| **Legacy 0.4 Policy Adapter** | Old 0.4 fields; optional current policy → chain policy | You are rebuilding or migrating an old control surface. |
 
 See [Scene authoring](SCENE_AUTHORING.md), [Audio and
 continuity](AUDIO_AND_CONTINUITY.md), and the [complete Plan format](../H3_CHAIN_FORMAT_GUIDE.md).
@@ -92,8 +90,6 @@ continuity](AUDIO_AND_CONTINUITY.md), and the [complete Plan format](../H3_CHAIN
 | **Tagged Ref2VA** | Tagged refs + CLIP/VAEs + current scene values → conditioning, latent, fingerprint | Compile only the references used by the current prompt. |
 | **Tagged Scene Options** | Reference/backend widgets → options | Keep non-default reference settings off the compact Current Tagged Scene node. |
 | **Scene Data Extract** | typed scene data + selected field → typed value | Recover a secondary Current Tagged Scene value such as source-audio slice or RefMod sources. |
-| **Scheduled Picture / Video / Audio Ref** | Media + scene selector/options → schedule | Assign media by scene number or range instead of prompt tags. |
-| **Scheduled Ref2VA** | Schedule + current scene + CLIP/VAEs → conditioning, latent, fingerprint | Compile the active scheduled references for one scene. |
 | **Source Timeline** | Source media/path and timing options → Source Timeline | Register the reusable video/audio timeline once. |
 | **Audio Tracks** | Optional full mix, vocals, instrumental AUDIO → Source Timeline | Use vocals for source-locked lip-sync while preserving the full mix for delivery; mix stems only when a full mix is absent. See [grouped audio](AUDIO_AND_CONTINUITY.md#grouped-songs-full-mix-vocals-and-instrumental). |
 | **Reference Video Prep** | Video + fit/timing controls → prepared reference | Prepare motion/reference video for H3 timing. |
@@ -101,9 +97,9 @@ continuity](AUDIO_AND_CONTINUITY.md), and the [complete Plan format](../H3_CHAIN
 | **Frame Index Switch** | Scene index + image inputs → selected image | Alternate last-frame targets across scenes. |
 | **Existing Video Context** | Plan plus source video or frames; optional audio → external context | Prepend an existing clip and continue from its tail. |
 
-Lazy motion loaders, source-timeline previews, semantic anchors, boundary-anchor
-prepasses, and Patch Priority are advanced reference tools. Their behavior is
-covered by [Scheduled references](SCHEDULED_REFERENCES.md) and [Advanced
+Tagged lazy motion sources, source-timeline previews, semantic anchors,
+and Patch Priority are advanced reference tools. Their behavior is
+covered by [Tagged references](SCHEDULED_REFERENCES.md) and [Advanced
 workflows](ADVANCED_WORKFLOWS.md).
 
 ## Runs, recovery, and output

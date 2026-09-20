@@ -74,22 +74,22 @@ def main():
         recipe = json.loads((ROOT / "tools/v06/recipes" / path.name).read_text())
         for node in recipe["nodes"]:
             if node["type"] == "MiniMaxH3ChainContext":
-                assert node["settings"]["visual_cond_noise_aug"] == 0.999
-                assert node["settings"]["future_end_anchor"] is False
+                assert "visual_cond_noise_aug" not in node["settings"]
+                assert "future_end_anchor" not in node["settings"]
                 assert "boundary_anchors" not in node["inputs"]
             if node["type"] == "MiniMaxH3ProjectAssetManager":
                 assert node["settings"]["ownership_json"] == ""
             if node["type"] == "MiniMaxH3ChainReview":
                 assert "pending_review" not in node["inputs"]
     wf = json.loads((ROOT / "example_workflows/T2V Normal - MiniMax H3 0.6.json").read_text())
-    context = next(n for n in wf["nodes"] if n["type"] == "MiniMaxH3ChainContext")
-    context["widgets_values"] = context["widgets_values"][:-2]
+    profile = next(n for n in wf["nodes"] if n["type"] == "MiniMaxH3GenerationProfile")
+    profile["widgets_values"] = profile["widgets_values"][:-1]
     try:
         validate_workflow(wf, schemas)
     except AssertionError:
         pass
     else:
-        raise AssertionError("Missing nightly Context widgets were not caught")
+        raise AssertionError("Missing Generation Profile widget was not caught")
     print(f"H3 nightly schemas: all {len(paths)} workflows; local H3 + external contracts, widget types/choices/ranges, required sockets, converted inputs and safe nightly defaults pass")
 
 

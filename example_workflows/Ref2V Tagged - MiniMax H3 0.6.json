@@ -216,7 +216,7 @@
       ],
       "size": [
         360,
-        256
+        236
       ],
       "flags": {},
       "order": 6,
@@ -245,11 +245,6 @@
         {
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
-          "link": null
-        },
-        {
-          "name": "reference_schedule",
-          "type": "H3_REFERENCE_SCHEDULE",
           "link": null
         }
       ],
@@ -289,7 +284,7 @@
       "type": "MiniMaxH3ChainCurrent",
       "pos": [
         3480,
-        536
+        516
       ],
       "size": [
         460,
@@ -672,7 +667,7 @@
       ],
       "size": [
         420,
-        292
+        260
       ],
       "flags": {},
       "order": 11,
@@ -711,11 +706,6 @@
         {
           "name": "drift_sigmas",
           "type": "SIGMAS",
-          "link": null
-        },
-        {
-          "name": "boundary_anchors",
-          "type": "H3_BOUNDARY_ANCHORS",
           "link": null
         },
         {
@@ -761,10 +751,7 @@
       "properties": {
         "Node name for S&R": "MiniMaxH3ChainContext"
       },
-      "widgets_values": [
-        0.999,
-        false
-      ]
+      "widgets_values": []
     },
     {
       "id": 13,
@@ -1117,8 +1104,7 @@
       "widgets_values": [
         0,
         24,
-        true,
-        0
+        true
       ]
     },
     {
@@ -1798,11 +1784,6 @@
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
           "link": 61
-        },
-        {
-          "name": "reference_schedule",
-          "type": "H3_REFERENCE_SCHEDULE",
-          "link": null
         }
       ],
       "outputs": [
@@ -2446,7 +2427,7 @@
         3440,
         90,
         540,
-        886
+        866
       ],
       "color": "#393f58",
       "font_size": 24,
@@ -2458,7 +2439,7 @@
         4050,
         90,
         600,
-        1782
+        1750
       ],
       "color": "#394c49",
       "font_size": 24,

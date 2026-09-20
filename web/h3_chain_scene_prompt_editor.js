@@ -37,7 +37,7 @@ import {
     replacePromptReferenceOccurrence,
     taggedPictureReferenceMode,
     taggedPictureReferenceToken,
-} from "./h3_reference_preview_core.mjs?v=0.7.26";
+} from "./h3_reference_preview_core.mjs?v=0.7.27";
 import {
     PromptUndoHistory,
     promptUndoDirection,

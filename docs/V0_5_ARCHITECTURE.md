@@ -1,5 +1,8 @@
 # Version 0.5 workflow architecture
 
+> Historical 0.5 documentation. For the current retirement list and supported
+> replacements, see [0.7 migration notes](MIGRATING_TO_0_7.md).
+
 This document freezes the contracts and migration boundaries for the 0.5
 workflow-UX release. Implementations may evolve behind these contracts, but a
 later step must not silently change their meaning.

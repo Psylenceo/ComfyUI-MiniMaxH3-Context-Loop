@@ -181,7 +181,7 @@
       ],
       "size": [
         360,
-        256
+        236
       ],
       "flags": {},
       "order": 5,
@@ -211,11 +211,6 @@
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
           "link": 2
-        },
-        {
-          "name": "reference_schedule",
-          "type": "H3_REFERENCE_SCHEDULE",
-          "link": null
         }
       ],
       "outputs": [
@@ -254,7 +249,7 @@
       "type": "MiniMaxH3ChainCurrent",
       "pos": [
         3820,
-        1648
+        1628
       ],
       "size": [
         460,
@@ -386,7 +381,7 @@
       "type": "MiniMaxH3ChainAssemble",
       "pos": [
         4390,
-        2436
+        2416
       ],
       "size": [
         440,
@@ -593,7 +588,7 @@
       ],
       "size": [
         420,
-        292
+        260
       ],
       "flags": {},
       "order": 9,
@@ -633,11 +628,6 @@
           "name": "drift_sigmas",
           "type": "SIGMAS",
           "link": 22
-        },
-        {
-          "name": "boundary_anchors",
-          "type": "H3_BOUNDARY_ANCHORS",
-          "link": null
         },
         {
           "name": "lip_sync_voice",
@@ -684,10 +674,7 @@
       "properties": {
         "Node name for S&R": "MiniMaxH3ChainContext"
       },
-      "widgets_values": [
-        0.999,
-        false
-      ]
+      "widgets_values": []
     },
     {
       "id": 11,
@@ -839,6 +826,11 @@
         {
           "name": "negative",
           "type": "CONDITIONING",
+          "link": null
+        },
+        {
+          "name": "model_hires",
+          "type": "MODEL",
           "link": null
         }
       ],
@@ -1043,8 +1035,7 @@
       "widgets_values": [
         0,
         24,
-        true,
-        5
+        true
       ]
     },
     {
@@ -1177,7 +1168,7 @@
       "type": "ModelAttentionBackend",
       "pos": [
         3820,
-        2148
+        2128
       ],
       "size": [
         360,
@@ -1215,7 +1206,7 @@
       "type": "MiniMaxH3ChainManifestLoad",
       "pos": [
         3820,
-        2436
+        2416
       ],
       "size": [
         440,
@@ -1449,11 +1440,6 @@
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
           "link": 59
-        },
-        {
-          "name": "reference_schedule",
-          "type": "H3_REFERENCE_SCHEDULE",
-          "link": null
         },
         {
           "name": "chain_policy",
@@ -2552,7 +2538,7 @@
       27,
       0,
       23,
-      6,
+      5,
       "H3_PROJECT_ASSETS"
     ],
     [
@@ -2619,7 +2605,7 @@
         40,
         90,
         3600,
-        2092
+        2168
       ],
       "color": "#315566",
       "font_size": 24,
@@ -2631,7 +2617,7 @@
         3780,
         90,
         540,
-        2206
+        2186
       ],
       "color": "#393f58",
       "font_size": 24,
@@ -2655,7 +2641,7 @@
         5060,
         90,
         500,
-        698
+        666
       ],
       "color": "#393f58",
       "font_size": 24,
@@ -2713,7 +2699,7 @@
       "title": "RECOVERY • DISABLED / NO SAMPLING",
       "bounding": [
         3780,
-        2346,
+        2326,
         1090,
         490
       ],

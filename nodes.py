@@ -31,7 +31,6 @@ anchor_mode
 """
 
 import logging
-import math
 import os
 
 import comfy.utils
@@ -47,10 +46,6 @@ from .av_timing import (
 )
 from .h3_audio_grid import audio_grid_geometry, encode_exact_audio_grid
 
-try:
-    from safetensors.torch import load_file as _st_load, save_file as _st_save
-except ImportError:  # ComfyUI always ships safetensors; belt and braces
-    _st_load = _st_save = None
 
 from .patch_layout import (
     MC_KEY,
@@ -80,17 +75,6 @@ FRAME_PER_TOKEN = (1, 4, 4, 4, 4)
 FPS = 24  # H3's native rate; audio latents run at 40 Hz, hence FRAME_RESCALE 5/3
 FRAME_RESCALE = 5.0 / 3.0
 AUDIO_HZ = 40.0
-VISUAL_COND_NOISE_AUG_DEFAULT = 0.999
-
-
-def _validate_visual_cond_noise_aug(value):
-    """Validate ComfyUI's global H3 visual-condition augmentation value."""
-    resolved = float(value)
-    if not math.isfinite(resolved) or not 0.0 <= resolved <= 1.0:
-        raise ValueError(
-            "h3_motion_context: visual_cond_noise_aug must be a finite "
-            "number between 0 and 1, got %r." % (value,))
-    return resolved
 
 
 def _conditioning_has_refs(conditioning):
@@ -439,138 +423,6 @@ def _video_guide_tail_from_latent(latent, frames, target_video):
     return tail
 
 
-def _append_future_anchor_latent(
-        conditioning, latent, suffix_latent,
-        visual_cond_noise_aug=VISUAL_COND_NOISE_AUG_DEFAULT,
-        boundary_anchor=False):
-    """Append one explicit video-latent Guide after an H3 target timeline."""
-    guide_api = _activate_inline_patches(
-        require_video_merge=_conditioning_has_refs(conditioning))
-    native_guides = guide_api == "native"
-    visual_cond_noise_aug = _validate_visual_cond_noise_aug(
-        visual_cond_noise_aug)
-
-    video = _video_from_latent(latent)
-    frame_count = _pixel_frames(int(video.shape[2]))
-    if getattr(suffix_latent, "ndim", 0) != 5:
-        raise ValueError(
-            "h3_motion_context: future anchor must be a video latent with "
-            "shape [B,C,1,H,W].")
-    if int(suffix_latent.shape[0]) != 1 or int(suffix_latent.shape[2]) != 1:
-        raise ValueError(
-            "h3_motion_context: future anchor must contain exactly one "
-            "batch and one temporal latent step; got %s." %
-            (tuple(suffix_latent.shape),))
-    target_geometry = (
-        int(video.shape[1]), int(video.shape[3]), int(video.shape[4]))
-    suffix_geometry = (
-        int(suffix_latent.shape[1]), int(suffix_latent.shape[3]),
-        int(suffix_latent.shape[4]))
-    if suffix_geometry != target_geometry:
-        raise ValueError(
-            "h3_motion_context: future-anchor/target latent geometry differs: "
-            "%s vs %s." % (suffix_geometry, target_geometry))
-    if hasattr(suffix_latent, "to") and hasattr(video, "device"):
-        suffix_latent = suffix_latent.to(video.device, video.dtype)
-    suffix_latent = suffix_latent.clone()
-
-    suffix = {
-        "resolved_frame_index": frame_count,
-        "latent": suffix_latent,
-        "h3_chain_future_end_anchor": True,
-    }
-    if bool(boundary_anchor):
-        suffix["h3_chain_boundary_anchor"] = True
-    if not native_guides:
-        suffix[MC_KEY] = frame_count
-
-    out = []
-    for embedding, extra in conditioning:
-        metadata = extra.copy()
-        prior_frame_count = metadata.get("minimax_frame_count")
-        if (prior_frame_count is not None
-                and int(prior_frame_count) != frame_count):
-            raise ValueError(
-                "h3_motion_context: the conditioning carries keyframes "
-                "resolved for a %d frame clip, but the AV target is %d "
-                "frames." % (int(prior_frame_count), frame_count))
-        keyframes = list(metadata.get("minimax_keyframes") or [])
-        metadata["minimax_keyframes"] = keyframes + [suffix]
-        metadata["minimax_visual_cond_noise_aug"] = visual_cond_noise_aug
-        if not native_guides:
-            metadata["minimax_frame_count"] = frame_count
-        out.append([embedding, metadata])
-    return out
-
-
-def _append_explicit_future_end_anchor(
-        conditioning, latent, anchor_latent,
-        visual_cond_noise_aug=VISUAL_COND_NOISE_AUG_DEFAULT):
-    """Append a jointly generated scene-boundary latent as a future Guide."""
-    out = _append_future_anchor_latent(
-        conditioning, latent, anchor_latent,
-        visual_cond_noise_aug=visual_cond_noise_aug,
-        boundary_anchor=True)
-    frame_count = _pixel_frames(int(_video_from_latent(latent).shape[2]))
-    _LOG.info(
-        "h3_motion_context: appended one precomputed boundary-anchor latent "
-        "step as a clean Guide at frame %d; target mask, output length, and "
-        "trim unchanged",
-        frame_count)
-    return out
-
-
-def _append_future_end_anchor(
-        conditioning, latent, prefix_frames,
-        visual_cond_noise_aug=VISUAL_COND_NOISE_AUG_DEFAULT):
-    """Append one clean Guide from the end of an AV-preserved prefix.
-
-    ``latent`` is the sampler-ready AV target returned by masked-prefix
-    preparation.  Reading the anchor back from that target is intentional:
-    it preserves the exact spatial proxy, latent colour carry, dtype, and
-    device used by the AV prefix instead of rebuilding a subtly different
-    condition from decoded RGB or the unprocessed predecessor latent.
-
-    The Guide is placed at the first frame *after* the target timeline.  It is
-    therefore a conditioning row only: it never enters the decoded output,
-    changes the target mask, or contributes to Loop Trim.
-    """
-    video = _video_from_latent(latent)
-    prefix_frames = int(prefix_frames)
-    if prefix_frames < 1:
-        raise ValueError(
-            "h3_motion_context: future_end_anchor requires a positive AV "
-            "prefix.")
-    prefix_steps = next(
-        (steps for steps in range(1, int(video.shape[2]) + 1)
-         if _pixel_frames(steps) == prefix_frames),
-        None,
-    )
-    if prefix_steps is None:
-        raise ValueError(
-            "h3_motion_context: AV prefix of %d frames does not map to an "
-            "exact H3 video-latent run." % prefix_frames)
-    if prefix_steps >= int(video.shape[2]):
-        raise ValueError(
-            "h3_motion_context: future_end_anchor cannot use an AV prefix "
-            "that consumes the complete target timeline.")
-
-    # Use the final prepared prefix step, including any AV-only proxy/tone
-    # treatment, but present it as one phase-zero Guide step beyond the target.
-    suffix_latent = video[:1, :, prefix_steps - 1:prefix_steps]
-    out = _append_future_anchor_latent(
-        conditioning, latent, suffix_latent,
-        visual_cond_noise_aug=visual_cond_noise_aug)
-    frame_count = _pixel_frames(int(video.shape[2]))
-
-    _LOG.info(
-        "h3_motion_context: AV future anchor reused prepared prefix latent "
-        "step %d/%d as one clean Guide at frame %d; target mask, output "
-        "length, and trim unchanged",
-        prefix_steps, int(video.shape[2]), frame_count)
-    return out
-
-
 class MiniMaxH3MotionContext:
     @classmethod
     def INPUT_TYPES(cls):
@@ -672,18 +524,6 @@ class MiniMaxH3MotionContext:
                                "block directly, avoiding RGB decode and VAE "
                                "re-encode. Incompatible or imported context "
                                "falls back to context_frames."}),
-                "future_end_anchor": ("BOOLEAN", {
-                    "default": False,
-                    "tooltip": "Research option for Guide continuation. "
-                               "Reuse the final latent step of the predecessor "
-                               "context as one clean Guide immediately after "
-                               "the target timeline. The existing prefix, "
-                               "output length, and trim count are unchanged. "
-                               "This can retain a background/camera cue while "
-                               "the scheduled prefix stays weak. Keep visual "
-                               "condition noise augmentation at 0.999 so this "
-                               "suffix remains clean. It may pull the ending "
-                               "pose toward the predecessor."}),
             },
         }
 
@@ -707,9 +547,7 @@ class MiniMaxH3MotionContext:
     def apply(self, conditioning, vae, latent, context_frames, context_length,
               encode_mode, anchor_mode, crop, audio_context_length=22,
               audio_mode="timeline", context_latent=None, audio_vae=None,
-              context_audio=None, video_context_latent=None,
-              visual_cond_noise_aug=VISUAL_COND_NOISE_AUG_DEFAULT,
-              future_end_anchor=False, target_start=0):
+              context_audio=None, video_context_latent=None, target_start=0):
         has_refs = _conditioning_has_refs(conditioning)
         has_context_audio = (
             context_latent is not None or context_audio is not None)
@@ -728,9 +566,6 @@ class MiniMaxH3MotionContext:
                 and audio_mode == "timeline"),
         )
         native_guides = guide_api == "native"
-        visual_cond_noise_aug = _validate_visual_cond_noise_aug(
-            visual_cond_noise_aug)
-
         video = _video_from_latent(latent)
         latent_t = int(video.shape[2])
         width = int(video.shape[4]) * 16
@@ -844,12 +679,6 @@ class MiniMaxH3MotionContext:
                 keyframes.append({
                     "resolved_frame_index": p,
                     "latent": blk,
-                    # Private payload marker consumed by the optional
-                    # sigma-matched Guide scheduler.  ComfyUI preserves
-                    # unknown keyframe fields in minimax_payload, so this
-                    # distinguishes recursive predecessor context from
-                    # identity/keyframe/reference visual conditions without
-                    # changing stock H3 layout semantics.
                     "h3_chain_context_visual": True,
                 })
             else:
@@ -859,32 +688,7 @@ class MiniMaxH3MotionContext:
                     "resolved_frame_index": 0,
                     MC_KEY: p,
                     "latent": blk,
-                    "h3_chain_context_visual": True,
                 })
-
-        # Optional two-sided Guide experiment. Reuse only the last temporal
-        # latent step from the already prepared predecessor context and place
-        # it one pixel frame beyond the target. Condition rows are never part
-        # of the decoded target, so this acts as a sacrificial one-frame suffix
-        # without changing the raw/delivered frame count or Loop Trim.
-        #
-        # Deliberately omit h3_chain_context_visual. Guide Late Reveal can keep
-        # the recursive prefix weak or sigma-matched while this single suffix
-        # retains stock-clean strength on the composition-setting first step.
-        if bool(future_end_anchor):
-            if not blocks:
-                raise ValueError(
-                    "h3_motion_context: future_end_anchor requires positive "
-                    "visual context.")
-            suffix_latent = blocks[-1][:, :, -1:].clone()
-            suffix = {
-                "resolved_frame_index": frame_count,
-                "latent": suffix_latent,
-                "h3_chain_future_end_anchor": True,
-            }
-            if not native_guides:
-                suffix[MC_KEY] = frame_count
-            keyframes.append(suffix)
 
         ref_audio_t = 0
         motion_context_audio_ref = None
@@ -983,13 +787,6 @@ class MiniMaxH3MotionContext:
                     retained[MC_KEY] = position
                 kept.append(retained)
             metadata["minimax_keyframes"] = kept + keyframes
-            if blocks:
-                # This is the public ComfyUI H3 payload control. Core applies
-                # one value to every visual condition row in the active
-                # payload, including pre-existing Ref2VA/keyframe rows; it
-                # currently has no per-keyframe equivalent.
-                metadata["minimax_visual_cond_noise_aug"] = (
-                    visual_cond_noise_aug)
             if not native_guides:
                 metadata["minimax_frame_count"] = frame_count
             out.append([embedding, metadata])
@@ -1006,23 +803,14 @@ class MiniMaxH3MotionContext:
             out = node_helpers.conditioning_set_values(
                 out, {"minimax_refs": [motion_context_audio_ref]}, append=True)
 
-        if blocks:
-            _LOG.info(
-                "h3_motion_context: visual condition noise augmentation "
-                "%.3f (ComfyUI applies it to all visual condition rows in "
-                "this scene)", visual_cond_noise_aug)
-
         trim = span if anchor_mode == "head" and start == 0 else 0
         index_summary = ("%d..%d" % (indices[0], indices[-1])
                          if indices else "none")
         _LOG.info("h3_motion_context: %s/%s, %d frames at target %d -> %d "
-                  "cond blocks at "
-                  "indices %s%s, %d frame clip at %dx%d, trim %d, audio %s",
+                  "cond blocks at indices %s, %d frame clip at %dx%d, "
+                  "trim %d, audio %s",
                   encode_mode, anchor_mode, n, start, len(blocks),
-                  index_summary,
-                  (" + clean future anchor at %d" % frame_count
-                   if bool(future_end_anchor) else ""),
-                  frame_count, width, height, trim,
+                  index_summary, frame_count, width, height, trim,
                   ("%d frames -> %d latent steps (%.3fs) from %s, %s"
                    % (a_frames, ref_audio_t, ref_audio_t / AUDIO_HZ, audio_src,
                       "on the timeline ending at frame %.3f"
@@ -1085,13 +873,6 @@ class MiniMaxH3LoopTrim:
                                "duration equals frames/fps exactly without a "
                                "silence tail. H3's rounded 40 Hz grid can differ "
                                "from picture duration by about 8ms."}),
-                "retain_overlap_frames": ("INT", {
-                    "default": 0, "min": 0, "max": 4096,
-                    "tooltip": "Legacy/manual visual overlap for an external "
-                               "stitcher. In a 0.5 chain, connect Current "
-                               "Shot's state output below and this integer is "
-                               "ignored; Loop Trim then resolves the exact "
-                               "per-scene blend from the Plan automatically."}),
                 "state": ("H3_CHAIN_STATE", {
                     "tooltip": "Recommended 0.5 chain route: connect Current "
                                "Shot's state output. Loop Trim reads the active "
@@ -1123,7 +904,7 @@ class MiniMaxH3LoopTrim:
                    "without a separate default-versus-scene integer wire.")
 
     def trim(self, images, trim_frames, audio=None, fps=24.0, match_tail=True,
-             retain_overlap_frames=0, state=None):
+             state=None):
         n = max(0, int(trim_frames))
         total = int(images.shape[0])
         if n >= total:
@@ -1131,7 +912,7 @@ class MiniMaxH3LoopTrim:
                 "h3_motion_context: asked to trim %d frames from a %d frame clip"
                 % (n, total))
         out_images = images[n:] if n else images
-        requested_retained = max(0, int(retain_overlap_frames))
+        requested_retained = 0
         if state is not None:
             if not isinstance(state, dict):
                 raise ValueError(
@@ -1188,12 +969,6 @@ class MiniMaxH3LoopTrim:
                         "delivered frame counts.") from exc
             requested_retained = min(
                 requested_retained, n, repeated_frames)
-            manual = max(0, int(retain_overlap_frames))
-            if manual != requested_retained:
-                _LOG.info(
-                    "h3_motion_context: Loop Trim resolved scene %d blend "
-                    "from chain state (%d frames); legacy/manual value %d "
-                    "was ignored", index, requested_retained, manual)
         retained = min(n, requested_retained)
         overlap_images = images[n - retained:] if retained else out_images
 
@@ -1249,230 +1024,6 @@ class MiniMaxH3LoopTrim:
                       n, total - n, n / float(fps))
 
         return (out_images, out_audio, overlap_images, retained)
-
-
-def _resolve_latent_path(path, clip_index=0):
-    """Turn the loader's path input into a concrete file.
-
-    Accepts an absolute path, a path relative to ComfyUI's output folder,
-    or a directory (in either form). For a directory:
-
-      clip_index == 0   the NEWEST .safetensors inside is used. Simple,
-                        but NOT retry-safe: re-rolling a clip loads the
-                        rejected attempt's own save (see the node docs).
-                        Its run counter also numbers ATTEMPTS, not clips.
-      clip_index  > 0   exactly that clip's slot is loaded: clip 1 is
-                        *_00001.safetensors. Auto-mode files carry a
-                        trailing underscore (*_00001_.safetensors) and
-                        are never matched, because their numbers count
-                        runs and could hold a reject.
-    """
-    p = (path or "").strip().strip('"').strip("'")
-    if not p:
-        p = "h3_context"
-    candidates = [p, os.path.join(folder_paths.get_output_directory(), p)]
-    for c in candidates:
-        if os.path.isfile(c):
-            return c
-        if os.path.isdir(c):
-            idx = int(clip_index)
-            if idx > 0:
-                # indexed slots use the natural name: clip 2 lives in
-                # *_00002.safetensors. Auto-mode files carry a trailing
-                # underscore (*_00002_.safetensors) and are deliberately
-                # NOT matched: their numbers count runs, not clips, so a
-                # reject could be sitting in any of them.
-                endings = ("_%05d.safetensors" % idx,
-                           "_clip%03d.safetensors" % idx)  # older versions
-                files = [os.path.join(c, f) for f in os.listdir(c)
-                         if f.endswith(endings)]
-                if not files:
-                    near = [f for f in os.listdir(c)
-                            if f.endswith("_%05d_.safetensors" % idx)]
-                    hint = ""
-                    if near:
-                        hint = (" Found %s, which is an auto-numbered save "
-                                "(trailing underscore = numbered by RUN, so "
-                                "it may be a reject). If it really is clip "
-                                "%d, rename it to drop the trailing "
-                                "underscore: %s" %
-                                (near[0], idx,
-                                 near[0].replace("_%05d_" % idx,
-                                                 "_%05d" % idx)))
-                    raise FileNotFoundError(
-                        "h3_motion_context: no saved latent for clip %d "
-                        "(no *_%05d.safetensors in %s).%s"
-                        % (idx, idx, c, hint))
-            else:
-                files = [os.path.join(c, f) for f in os.listdir(c)
-                         if f.endswith(".safetensors")]
-                if not files:
-                    raise FileNotFoundError(
-                        "h3_motion_context: no saved latents in %s. Run a "
-                        "clip with the Save Latent node first." % c)
-            return max(files, key=os.path.getmtime)
-    raise FileNotFoundError(
-        "h3_motion_context: %r is neither a file nor a folder (also tried "
-        "relative to the ComfyUI output directory)." % p)
-
-
-class MiniMaxH3MotionContextSaveLatent:
-    """Save an H3 AV latent to disk so the NEXT run can load it.
-
-    Wiring the sampler's output straight into context_latent is a cycle:
-    the sampler would be consuming its own result. The latent that motion
-    context needs is the PREVIOUS clip's, which lives in the previous run
-    -- so it has to cross runs through disk, the same way the frames and
-    audio already do. Stock Save/Load Latent can't serialise H3's nested
-    video/audio pair; this saves the two streams side by side.
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "latent": ("LATENT", {
-                    "tooltip": "The sampler's output latent (the same one "
-                               "you wire into the decode nodes)."}),
-                "filename_prefix": ("STRING", {
-                    "default": "h3_context/clip",
-                    "tooltip": "Saved under the ComfyUI output folder. The "
-                               "default keeps all chain latents in one "
-                               "folder so the Load node can always pick "
-                               "the newest."}),
-                "clip_index": ("INT", {
-                    "default": 0, "min": 0, "max": 9999,
-                    "tooltip": "Which clip of the chain THIS is. Saves to "
-                               "that clip's fixed slot, so a re-roll "
-                               "overwrites its own reject instead of "
-                               "stacking new files. Generating clip 2: "
-                               "set 2 here and 1 on the Load node. 0 = "
-                               "old behaviour, a new numbered file every "
-                               "run (numbers count runs, not clips)."}),
-            },
-        }
-
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("latent_path",)
-    OUTPUT_TOOLTIPS = (
-        "Absolute path of the saved H3 AV safetensors checkpoint.",
-    )
-    FUNCTION = "save"
-    OUTPUT_NODE = True
-    CATEGORY = "conditioning/minimax"
-    DESCRIPTION = ("Save the sampler's AV latent so the next run's Motion "
-                   "Context node can pin audio from it via the matching "
-                   "Load node.")
-
-    def save(self, latent, filename_prefix, clip_index=0):
-        if _st_save is None:
-            raise RuntimeError("h3_motion_context: safetensors is not "
-                               "available; cannot save latents.")
-        parts = _streams_from_latent(latent)
-        if len(parts) < 2:
-            raise ValueError(
-                "h3_motion_context: latent has no audio stream; wire the "
-                "sampler output of an H3 AV graph.")
-        video = parts[0].cpu().contiguous()
-        audio = parts[1].cpu().contiguous()
-        folder, filename, counter, _, _ = folder_paths.get_save_image_path(
-            filename_prefix, folder_paths.get_output_directory())
-        if int(clip_index) > 0:
-            # fixed slot with the natural name: clip 2 -> *_00002. A
-            # re-roll of this clip overwrites its own save, so rejects
-            # never accumulate or get loaded later. Auto mode (below)
-            # keeps a trailing underscore, which is what excludes its
-            # run-numbered files from indexed loading.
-            path = os.path.join(folder, "%s_%05d.safetensors"
-                                % (filename, int(clip_index)))
-        else:
-            path = os.path.join(folder, "%s_%05d_.safetensors"
-                                % (filename, counter))
-        _st_save({"video": video, "audio": audio}, path,
-                 metadata={"format": "h3_motion_context_av_v1"})
-        _LOG.info("h3_motion_context: saved AV latent to %s (video %s, "
-                  "audio %s)", path, tuple(video.shape), tuple(audio.shape))
-        return (path,)
-
-
-class MiniMaxH3MotionContextLoadLatent:
-    """Load a saved H3 AV latent for the context_latent input.
-
-    clip_index means exactly what it says: set it to the clip you want to
-    CONTINUE FROM, and that clip's slot is loaded. Generating clip 2 from
-    clip 1: Load node 1, Save node 2. Re-rolling clip 2 changes nothing --
-    it reloads slot 1 and overwrites slot 2's reject. Accept, then bump
-    both numbers.
-
-    At 0 it loads the newest file in the folder instead. Simple, but NOT
-    retry-safe: a re-roll's newest file is the rejected attempt's own
-    save, so the retry gets conditioned on the audio you just rejected.
-
-    The output is ONLY for the Motion Context node's context_latent input.
-    It is not a decodable latent -- do not wire it into VAE decode.
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "latent_path": ("STRING", {
-                    "default": "h3_context",
-                    "tooltip": "A saved latent file, or a folder (relative "
-                               "paths resolve against the ComfyUI output "
-                               "directory). Pointing at a specific FILE "
-                               "always loads that file, ignoring "
-                               "clip_index."}),
-                "clip_index": ("INT", {
-                    "default": 0, "min": 0, "max": 9999,
-                    "tooltip": "The clip to CONTINUE FROM: that clip's "
-                               "slot is loaded. Generating clip 2 from "
-                               "clip 1: set 1 here and 2 on the Save "
-                               "node. 0 = newest file in the folder "
-                               "(NOT retry-safe: a re-roll loads its own "
-                               "rejected audio)."}),
-            },
-        }
-
-    RETURN_TYPES = ("LATENT",)
-    RETURN_NAMES = ("context_latent",)
-    OUTPUT_TOOLTIPS = (
-        "Saved previous-clip AV latent for Motion Context's context_latent "
-        "input. Do not send it to VAE Decode.",
-    )
-    FUNCTION = "load"
-    CATEGORY = "conditioning/minimax"
-    DESCRIPTION = ("Load a latent saved by H3 Motion Context Save Latent, "
-                   "for the context_latent input only.")
-
-    @classmethod
-    def IS_CHANGED(cls, latent_path, clip_index=0):
-        # the path string stays constant while the file behind it changes
-        # (newest save, or an overwritten slot), so cache on the resolved
-        # file identity instead -- otherwise ComfyUI would happily serve
-        # a stale latent forever
-        try:
-            p = _resolve_latent_path(latent_path, clip_index)
-            return "%s:%d" % (p, os.stat(p).st_mtime_ns)
-        except Exception:
-            return float("NaN")  # unresolvable: never cache
-
-    def load(self, latent_path, clip_index=0):
-        if _st_load is None:
-            raise RuntimeError("h3_motion_context: safetensors is not "
-                               "available; cannot load latents.")
-        path = _resolve_latent_path(latent_path, clip_index)
-        data = _st_load(path)
-        if "video" not in data or "audio" not in data:
-            raise ValueError(
-                "h3_motion_context: %s is not an h3_motion_context latent "
-                "(missing video/audio streams). Was it saved by the stock "
-                "Save Latent node instead?" % path)
-        _LOG.info("h3_motion_context: loaded AV latent from %s", path)
-        # a plain list, not a NestedTensor: only this repo's context_latent
-        # input accepts it, which is the point -- it cannot be mistaken
-        # for a decodable latent without failing loudly downstream
-        return ({"samples": [data["video"], data["audio"]]},)
 
 
 # The original public Motion Context / Save / Load ids belong to

@@ -216,7 +216,7 @@
       ],
       "size": [
         360,
-        256
+        236
       ],
       "flags": {},
       "order": 6,
@@ -245,11 +245,6 @@
         {
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
-          "link": null
-        },
-        {
-          "name": "reference_schedule",
-          "type": "H3_REFERENCE_SCHEDULE",
           "link": null
         }
       ],
@@ -418,7 +413,7 @@
       "type": "MiniMaxH3ChainAssemble",
       "pos": [
         2990,
-        3312
+        3292
       ],
       "size": [
         440,
@@ -644,7 +639,7 @@
       ],
       "size": [
         420,
-        292
+        260
       ],
       "flags": {},
       "order": 11,
@@ -683,11 +678,6 @@
         {
           "name": "drift_sigmas",
           "type": "SIGMAS",
-          "link": null
-        },
-        {
-          "name": "boundary_anchors",
-          "type": "H3_BOUNDARY_ANCHORS",
           "link": null
         },
         {
@@ -733,10 +723,7 @@
       "properties": {
         "Node name for S&R": "MiniMaxH3ChainContext"
       },
-      "widgets_values": [
-        0.999,
-        false
-      ]
+      "widgets_values": []
     },
     {
       "id": 13,
@@ -783,7 +770,7 @@
       "type": "BasicGuider",
       "pos": [
         3640,
-        572
+        540
       ],
       "size": [
         360,
@@ -1089,8 +1076,7 @@
       "widgets_values": [
         0,
         24,
-        true,
-        0
+        true
       ]
     },
     {
@@ -1223,7 +1209,7 @@
       "type": "ModelAttentionBackend",
       "pos": [
         2420,
-        3024
+        3004
       ],
       "size": [
         360,
@@ -1419,7 +1405,7 @@
       "type": "MiniMaxH3ChainManifestLoad",
       "pos": [
         2420,
-        3312
+        3292
       ],
       "size": [
         440,
@@ -1652,11 +1638,6 @@
         {
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
-          "link": null
-        },
-        {
-          "name": "reference_schedule",
-          "type": "H3_REFERENCE_SCHEDULE",
           "link": null
         }
       ],
@@ -2221,7 +2202,7 @@
         2380,
         90,
         480,
-        3082
+        3062
       ],
       "color": "#393f58",
       "font_size": 24,
@@ -2245,7 +2226,7 @@
         3600,
         90,
         500,
-        626
+        594
       ],
       "color": "#393f58",
       "font_size": 24,
@@ -2303,7 +2284,7 @@
       "title": "RECOVERY • DISABLED / NO SAMPLING",
       "bounding": [
         2380,
-        3222,
+        3202,
         1090,
         490
       ],

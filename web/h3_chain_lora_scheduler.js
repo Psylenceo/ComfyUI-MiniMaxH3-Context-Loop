@@ -6,7 +6,7 @@ import {
     loraInputRoute,
     loraSchedulerNodes,
     nextLoRARoute,
-} from "./h3_lora_scheduler_core.mjs?v=0.7.25";
+} from "./h3_lora_scheduler_core.mjs?v=0.7.27";
 
 const ROUTES_CHANGED_EVENT = "h3-lora-routes-changed";
 

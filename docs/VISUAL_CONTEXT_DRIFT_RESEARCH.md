@@ -1,5 +1,9 @@
 # MiniMax H3 recursive visual-context drift research
 
+> Historical research record. The nightly-only Visual Context Schedule, Joint
+> Boundary Anchors, Guide-noise and future-anchor controls were removed in 0.7.
+> This document is not a current node/setup guide.
+
 Status: active experiment, August 2026. This note records the mechanism and
 the tests needed before changing a production preset.
 

@@ -1,4 +1,3 @@
-export const SCHEDULED_REF2VA_TYPE = "MiniMaxH3ScheduledReferenceToVideo";
 export const TAGGED_REF2VA_TYPE = "MiniMaxH3TaggedReferenceToVideo";
 export const CURRENT_TAGGED_REF2VA_TYPE =
     "MiniMaxH3CurrentTaggedReferenceScene";
@@ -6,9 +5,6 @@ export const CORE_REF2VA_TYPE = "MiniMaxH3ReferenceToVideo";
 export const IMAGE_TO_VIDEO_TYPE = "MiniMaxH3ImageToVideo";
 export const FIRST_SCENE_IMAGE_TYPE = "MiniMaxH3ChainFirstSceneImage";
 export const FRAME_INDEX_SWITCH_TYPE = "MiniMaxH3ChainFrameIndexSwitch";
-export const PICTURE_REF_TYPE = "MiniMaxH3ScheduledPictureReference";
-export const VIDEO_REF_TYPE = "MiniMaxH3ScheduledVideoReference";
-export const AUDIO_REF_TYPE = "MiniMaxH3ScheduledAudioReference";
 export const TAGGED_PICTURE_REF_TYPE = "MiniMaxH3TaggedPictureReference";
 export const TAGGED_VIDEO_REF_TYPE = "MiniMaxH3TaggedVideoReference";
 export const TAGGED_MOTION_REF_TYPE = "MiniMaxH3TaggedMotionReference";
@@ -24,11 +20,6 @@ export const PROJECT_ASSET_MANAGER_TYPES = new Set([
     PROJECT_ASSET_MANAGER_TYPE, "MiniMaxH3ProjectAssetTree",
 ]);
 
-const SCHEDULE_TYPES = new Set([
-    PICTURE_REF_TYPE,
-    VIDEO_REF_TYPE,
-    AUDIO_REF_TYPE,
-]);
 const TAGGED_TYPES = new Set([
     TAGGED_PICTURE_REF_TYPE,
     TAGGED_VIDEO_REF_TYPE,
@@ -402,9 +393,6 @@ function findUpstreamType(start, wantedType) {
     return null;
 }
 
-export function findScheduledRef2VA(start) {
-    return findDownstreamType(start, SCHEDULED_REF2VA_TYPE);
-}
 
 export function findTaggedRef2VA(start) {
     return findDownstreamTypes(start, TAGGED_REF2VA_TYPES);
@@ -422,17 +410,6 @@ export function findProjectAssetManager(start) {
     return findUpstreamType(start, PROJECT_ASSET_MANAGER_TYPES);
 }
 
-export function collectScheduleNodes(wrapper) {
-    const result = [];
-    const seen = new Set();
-    let current = inputSource(wrapper, "reference_schedule");
-    while (current && SCHEDULE_TYPES.has(nodeType(current)) && !seen.has(current)) {
-        seen.add(current);
-        result.unshift(current);
-        current = inputSource(current, "previous");
-    }
-    return result;
-}
 
 export function collectTaggedNodes(wrapper) {
     const result = [];
@@ -472,93 +449,6 @@ export function collectSemanticAnchorNodes(wrapper) {
     return {bundle, nodes};
 }
 
-export function referenceIsActive(selector, scene) {
-    const text = String(selector ?? "").trim().toLowerCase();
-    if (!text || text === "all" || text === "*") return true;
-    const target = Number(scene);
-    if (!Number.isInteger(target) || target < 1) return false;
-    return text.split(",").some((piece) => {
-        const match = piece.trim().match(/^(\d+)(?::(\d+))?$/);
-        if (!match) return false;
-        const first = Number(match[1]);
-        const last = Number(match[2] ?? match[1]);
-        return first <= target && target <= last;
-    });
-}
-
-function baseRecord(node, kind, scene, inputName, tagName = "tag") {
-    const selector = String(widgetValue(node, "scenes", ""));
-    return {
-        node,
-        kind,
-        tag: referenceTag(widgetValue(node, tagName, "")),
-        selector: selector.trim() || "all",
-        active: referenceIsActive(selector, scene),
-        source: inputSource(node, inputName),
-        label: null,
-    };
-}
-
-export function scheduledReferenceRecords(editorNode, scene) {
-    const wrapper = findScheduledRef2VA(editorNode);
-    if (!wrapper) return {wrapper: null, records: []};
-    const nodes = collectScheduleNodes(wrapper);
-    const pictures = [];
-    const videos = [];
-    const pairedAudios = [];
-    const audios = [];
-
-    for (const node of nodes) {
-        const type = nodeType(node);
-        if (type === PICTURE_REF_TYPE) {
-            pictures.push(baseRecord(node, "picture", scene, "image"));
-        } else if (type === VIDEO_REF_TYPE) {
-            const video = baseRecord(node, "video", scene, "video");
-            videos.push(video);
-            const audioSource = inputSource(node, "audio");
-            if (audioSource) {
-                const explicit = referenceTag(widgetValue(node, "audio_tag", ""));
-                pairedAudios.push({
-                    node,
-                    kind: "audio",
-                    tag: explicit || `${video.tag}_audio`,
-                    selector: video.selector,
-                    active: video.active,
-                    source: audioSource,
-                    label: null,
-                    pairedWith: video,
-                });
-            }
-        } else if (type === AUDIO_REF_TYPE) {
-            audios.push(baseRecord(node, "audio", scene, "audio"));
-        }
-    }
-
-    let ordinal = 0;
-    for (const item of pictures) {
-        if (item.active) item.label = `<Picture ${++ordinal}>`;
-    }
-    ordinal = 0;
-    for (const item of videos) {
-        if (item.active) item.label = `<Video ${++ordinal}>`;
-    }
-    ordinal = 0;
-    // Core Ref2VA numbers paired video soundtracks before standalone audio.
-    for (const item of pairedAudios) {
-        if (item.active) item.label = `<Audio ${++ordinal}>`;
-    }
-    for (const item of audios) {
-        if (item.active) item.label = `<Audio ${++ordinal}>`;
-    }
-
-    return {
-        wrapper,
-        mode: "scheduled",
-        records: [...pictures, ...videos, ...pairedAudios, ...audios]
-            .filter((item) => item.tag)
-            .map((item) => ({...item, token: `@${item.tag}`})),
-    };
-}
 
 function promptTagSet(prompt) {
     return new Set([...String(prompt ?? "").matchAll(
@@ -712,6 +602,15 @@ export function projectAssetReferenceRecords(manager, prompt = "") {
                 ? taggedPictureReferenceToken(item.tag, "semantic") : null,
             supportsSemantic: item.kind === "picture" && !item.semanticOnly,
         }));
+}
+
+function baseRecord(node, kind, _scene, inputName, tagName = "tag") {
+    return {
+        node, kind,
+        tag: referenceTag(widgetValue(node, tagName, "")),
+        selector: "prompt tag", active: false,
+        source: inputSource(node, inputName), label: null,
+    };
 }
 
 export function taggedReferenceRecords(editorNode, prompt = "") {
@@ -1002,8 +901,6 @@ export function imageToVideoReferenceRecords(editorNode, scene = 1) {
 export function referencePreviewRecords(editorNode, scene, {prompt = ""} = {}) {
     const tagged = taggedReferenceRecords(editorNode, prompt);
     if (tagged.wrapper) return tagged;
-    const scheduled = scheduledReferenceRecords(editorNode, scene);
-    if (scheduled.wrapper) return scheduled;
     const core = coreReferenceRecords(editorNode);
     if (core.wrapper) return core;
     return imageToVideoReferenceRecords(editorNode, scene);

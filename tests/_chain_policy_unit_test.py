@@ -55,33 +55,8 @@ def make_plan(*, combined=None, audio_context_length=22):
         combined)
 
 
-node = chain.MiniMaxH3ChainPolicy()
-required = node.INPUT_TYPES()["required"]
-assert tuple(required["incoming_transition"][0]) == (
-    "cut", "guide", "hard_av", "soft_av")
-assert "audio_context_length" not in required
-assert list(required)[-1] == "lock_source_audio"
-assert required["lock_source_audio"][0] == "BOOLEAN"
-assert required["lock_source_audio"][1]["default"] is False
-assert node.DEPRECATED is True
-combined, status = node.build("soft_av", "source", "on", "off")
-assert combined["version"] == chain.CHAIN_POLICY_VERSION
-assert combined["audio_policy"] == chain._contract_audio_policy(
-    "source", "on", "off")
-assert combined["transition_policy"] == chain._contract_transition_policy(
-    "soft_av")
-assert combined["audio_context_length"] == 39
-assert "Soft AV" in status
-assert "final=source/ref=on/carry=off" in status
-assert "source timeline required" in status
-assert "audio context automatic (39f)" in status
-
-locked, locked_status = node.build(
-    "soft_av", "source", "on", "on", True)
-assert locked["audio_policy"] == chain._contract_audio_policy(
-    "source", "off", "off", "locked")
-assert "final=source/ref=off/carry=off/target=locked" in locked_status
-assert "source timeline required" in locked_status
+combined = chain._contract_chain_policy("soft_av", "source", "on", "off", False)
+locked = chain._contract_chain_policy("soft_av", "source", "on", "on", True)
 
 profile_node = chain.MiniMaxH3GenerationProfile()
 profile_inputs = profile_node.INPUT_TYPES()["required"]
@@ -163,36 +138,8 @@ assert contextual_plan["compatibility"]["audio_policy"][
     "lip_sync_options"] == lip_options
 context_optional = chain.MiniMaxH3ChainContext.INPUT_TYPES()["optional"]
 assert list(context_optional) == [
-    "audio_vae", "model", "drift_sigmas", "boundary_anchors",
-    "visual_cond_noise_aug", "future_end_anchor", "lip_sync_voice"]
+    "audio_vae", "model", "drift_sigmas", "lip_sync_voice"]
 assert context_optional["lip_sync_voice"][0] == "AUDIO"
-
-legacy = chain.MiniMaxH3Legacy04PolicyAdapter()
-legacy_combined, legacy_status = legacy.build(
-    "source_plus_timeline", "feathered_av", 39, 33)
-assert legacy.RETURN_NAMES == ("chain_policy", "status")
-assert legacy_combined["audio_policy"] == chain.migrate_legacy_audio_mode(
-    "source_plus_timeline")
-assert legacy_combined["transition_policy"]["continuation_mode"] == (
-    "feathered_av")
-assert legacy_combined["audio_context_length"] == 33
-assert "legacy 0.4 migration" in legacy_status
-assert legacy.INPUT_TYPES()["optional"]["chain_policy"][0] == (
-    chain.CHAIN_POLICY_TYPE)
-legacy_overlay, overlay_status = legacy.build(
-    "generated_audio", "drift_control_av", 39, 39,
-    chain_policy=combined)
-assert legacy_overlay["audio_policy"] == combined["audio_policy"]
-assert legacy_overlay["transition_policy"] == chain._contract_transition_policy(
-    "drift_av")
-assert "incoming audio preserved" in overlay_status
-legacy_locked = legacy.build(
-    "generated_audio", "masked_av", 39, 39,
-    chain_policy=locked)[0]
-assert legacy_locked["audio_policy"] == locked["audio_policy"]
-legacy_plan = make_plan(combined=legacy_combined)
-assert legacy_plan["compatibility"]["audio_context_length"] == 33
-assert legacy_plan["compatibility"]["continuation_mode"] == "feathered_av"
 
 plan_inputs = chain.MiniMaxH3ChainPlan.INPUT_TYPES()
 assert plan_inputs["optional"]["chain_policy"][0] == chain.CHAIN_POLICY_TYPE
@@ -203,20 +150,13 @@ assert chain.CHAIN_NODE_CLASS_MAPPINGS[
 assert chain.CHAIN_NODE_CLASS_MAPPINGS[
     "MiniMaxH3GenerationProfile"] is chain.MiniMaxH3GenerationProfile
 assert chain.CHAIN_NODE_CLASS_MAPPINGS[
-    "MiniMaxH3ChainPolicy"] is chain.MiniMaxH3ChainPolicy
-assert chain.CHAIN_NODE_CLASS_MAPPINGS[
     "MiniMaxH3AdvancedPolicy"] is chain.MiniMaxH3AdvancedPolicy
 assert chain.CHAIN_NODE_DISPLAY_NAME_MAPPINGS[
     "MiniMaxH3LipSyncOptions"] == "MiniMax H3 Lip-Sync Options"
 assert chain.CHAIN_NODE_DISPLAY_NAME_MAPPINGS[
     "MiniMaxH3GenerationProfile"] == "MiniMax H3 Generation Profile"
 assert chain.CHAIN_NODE_DISPLAY_NAME_MAPPINGS[
-    "MiniMaxH3ChainPolicy"] == "MiniMax H3 Manual Chain Policy (Legacy)"
-assert chain.CHAIN_NODE_DISPLAY_NAME_MAPPINGS[
     "MiniMaxH3AdvancedPolicy"] == "MiniMax H3 Advanced Policy Override"
-assert chain.CHAIN_NODE_DISPLAY_NAME_MAPPINGS[
-    "MiniMaxH3Legacy04PolicyAdapter"] == (
-        "MiniMax H3 Legacy 0.4 Policy Adapter")
 
 lora_plan = chain._normalize_plan(
     json.dumps({"shots": [
@@ -374,6 +314,6 @@ with patch.object(chain, "_st_load", side_effect=AssertionError("read tensors"))
             raise AssertionError("Invalid processing lane was silently accepted")
 
 print(
-    "generation profiles, legacy manual policy, and dynamic lazy scene LoRA routing: "
+    "generation profiles, original Plan, and dynamic lazy scene LoRA routing: "
     "clear one-wire Plan intent, canonical compatibility, and existing-loader "
     "MODEL selection pass")

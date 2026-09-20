@@ -5,17 +5,15 @@ This branch compiles them against **nightly**, not against a cached 0.6 H3
 schema. Filenames keep the shared `0.6` baseline suffix; in-canvas notes and
 guides identify nightly.
 
-Nightly additions are explicit recipe settings: Context's
-`visual_cond_noise_aug = 0.999`, `future_end_anchor = false`, and Carousel's
-empty `ownership_json`. Experimental guidance stays off, and templates never
-include a session's ownership proof. Other nightly-only nodes remain optional.
+Carousel recipes keep an empty `ownership_json`; templates never include a
+session's ownership proof. The old Guide-noise and future-anchor experiments
+were retired in 0.7; other nightly-only nodes remain available.
 
 `recipes/` is the source of truth. Each recipe names its node settings and
 connections; it contains no UI widget arrays, node dimensions, link-slot numbers,
 or frontend metadata. Existing example prompts and intended connections were
 reviewed as reference material. The old archive-based builder is no longer used.
-The files under `example_workflows/Archive/` are never read or modified by this
-builder.
+The pre-0.6 example archive was retired in 0.7; this builder uses only recipes.
 
 From this checkout, run:
 

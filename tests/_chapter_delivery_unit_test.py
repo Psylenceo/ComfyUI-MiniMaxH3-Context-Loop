@@ -230,25 +230,23 @@ def main():
         with patch.object(chain, "_chapter_manifest_from_manifest",
                           side_effect=AssertionError("Off must not seal a chapter")):
             passed, _json, number, path, status = delivery.select(
-                complete, enabled=False, chapter_number=2)
+                complete, enabled=False)
         assert passed == complete and number == 0 and path == ""
         assert "off" in status
         assert complete == before
 
         # The same enabled node follows the manifest tip as generation advances,
-        # including old workflows that carried a now-obsolete chapter number.
         for source, expected_number, expected_scenes in [
                 (partial_three, 1, [1, 2, 3]),
                 (partial_four, 2, [4]),
                 (complete, 2, [4, 5, 6])]:
             before = copy.deepcopy(source)
-            for obsolete_number in [0, 1, 99]:
-                selected, _json, number, path, _status = delivery.select(
-                    source, enabled=True, chapter_number=obsolete_number)
-                assert number == expected_number
-                assert [item["index"] for item in selected["segments"]] == expected_scenes
-                assert pathlib.Path(path).is_file()
-                assert source == before
+            selected, _json, number, path, _status = delivery.select(
+                source, enabled=True)
+            assert number == expected_number
+            assert [item["index"] for item in selected["segments"]] == expected_scenes
+            assert pathlib.Path(path).is_file()
+            assert source == before
 
         # Off is pass-through, not a request to reconstruct scenes that are not
         # present in an already chapter-scoped input.

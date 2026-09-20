@@ -2,9 +2,7 @@
 
 These are the released 0.6 workflows adapted to nightly's node definitions.
 They use fresh node serialization, the organized **Production Plan**, explicit
-**Generation Profile**, and numbered, non-overlapping project/generation columns. Older
-nightly files are preserved unchanged in
-[`Archive/pre-0.6-nightly/`](Archive/pre-0.6-nightly/).
+**Generation Profile**, and numbered, non-overlapping project/generation columns. Pre-0.6 examples were retired in 0.7; Git history retains them.
 The **0.6** filenames identify the shared catalog baseline, not a requirement
 to switch branches. This checkout's examples are intended for **nightly**.
 

@@ -26,38 +26,6 @@ sys.modules[PACKAGE] = package
 
 shared_nodes = types.ModuleType(PACKAGE + ".nodes")
 shared_nodes.MiniMaxH3MotionContext = object
-future_anchor_calls = []
-explicit_anchor_calls = []
-
-
-def append_future_end_anchor_stub(
-        conditioning, latent, prefix_frames, visual_cond_noise_aug=0.999):
-    future_anchor_calls.append({
-        "conditioning": conditioning,
-        "latent": latent,
-        "prefix_frames": prefix_frames,
-        "visual_cond_noise_aug": visual_cond_noise_aug,
-    })
-    return "future-anchor-conditioning"
-
-
-shared_nodes._append_future_end_anchor = append_future_end_anchor_stub
-
-
-def append_explicit_future_end_anchor_stub(
-        conditioning, latent, anchor_latent,
-        visual_cond_noise_aug=0.999):
-    explicit_anchor_calls.append({
-        "conditioning": conditioning,
-        "latent": latent,
-        "anchor_latent": anchor_latent,
-        "visual_cond_noise_aug": visual_cond_noise_aug,
-    })
-    return "explicit-boundary-conditioning"
-
-
-shared_nodes._append_explicit_future_end_anchor = (
-    append_explicit_future_end_anchor_stub)
 shared_nodes._claim_inline_patch_ownership = lambda _conditioning=None: "test patch owner"
 shared_nodes._prepare_native_guide_conditioning = lambda value: value
 shared_nodes._resize = lambda *args: None
@@ -305,40 +273,6 @@ assert float(noisy_39_a.max()) <= 1.0
 
 captured = {}
 
-context_optional = chain.MiniMaxH3ChainContext.INPUT_TYPES()["optional"]
-visual_aug_schema = context_optional["visual_cond_noise_aug"]
-assert visual_aug_schema[0] == "FLOAT"
-assert visual_aug_schema[1]["default"] == 0.999
-assert visual_aug_schema[1]["min"] == 0.0
-assert visual_aug_schema[1]["max"] == 1.0
-assert visual_aug_schema[1]["step"] == 0.001
-assert context_optional["future_end_anchor"][0] == "BOOLEAN"
-assert context_optional["future_end_anchor"][1]["default"] is False
-assert list(context_optional)[-2:] == ["future_end_anchor", "lip_sync_voice"]
-assert context_optional["lip_sync_voice"][0] == "AUDIO"
-assert context_optional["boundary_anchors"][0] == chain.BOUNDARY_ANCHORS_TYPE
-
-# A precomputed scene endpoint is valid on scene 1 as well as continuation
-# scenes and takes priority over the legacy copied-prefix toggle.
-original_anchor_selector = chain._boundary_anchor_for_state
-chain._boundary_anchor_for_state = lambda registry, state, latent: "anchor-1"
-try:
-    scene_one_plan = make_plan()
-    scene_one_result = chain.MiniMaxH3ChainContext().apply(
-        state={"index": 1, "plan": scene_one_plan, "segments": []},
-        conditioning="stock-conditioning",
-        vae=object(),
-        latent="target-latent",
-        boundary_anchors={"kind": "test-registry"},
-        future_end_anchor=True,
-    )
-finally:
-    chain._boundary_anchor_for_state = original_anchor_selector
-assert scene_one_result == (
-    "explicit-boundary-conditioning", 0, False, "target-latent", None)
-assert explicit_anchor_calls[-1]["anchor_latent"] == "anchor-1"
-assert explicit_anchor_calls[-1]["latent"] == "target-latent"
-
 
 class CapturingMotionContext:
     def apply(self, **kwargs):
@@ -362,16 +296,12 @@ try:
         conditioning="stock-conditioning",
         vae=object(),
         latent="target-latent",
-        visual_cond_noise_aug=0.995,
-        future_end_anchor=True,
     )
 finally:
     chain.MiniMaxH3MotionContext = original_motion_context
 
 assert result == ("tapered-conditioning", 39, True, "target-latent", None)
 assert captured["context_length"] == 39
-assert captured["visual_cond_noise_aug"] == 0.995
-assert captured["future_end_anchor"] is True
 assert tuple(captured["context_frames"].shape) == (39, 19, 31, 3)
 assert not torch.equal(captured["context_frames"], source[-39:])
 assert captured["context_latent"] is original_latent
@@ -557,25 +487,6 @@ try:
     assert second_result[4] == ("patched-model", "h3-model", 12)
     assert drift_calls[-1] == ("h3-model", 12, full_sigmas)
 
-    anchored_second_result = chain.MiniMaxH3ChainContext().apply(
-        state=second_state,
-        conditioning="stock-conditioning",
-        vae=object(),
-        latent="target-latent",
-        model="h3-model",
-        drift_sigmas=full_sigmas,
-        future_end_anchor=True,
-    )
-    assert anchored_second_result[:3] == (
-        "future-anchor-conditioning", 39, True)
-    assert future_anchor_calls[-1]["conditioning"] == "drift-conditioning"
-    # Drift-Control adds private schedule metadata after the anchor is read,
-    # but both routes retain the exact same prepared nested samples.
-    assert (future_anchor_calls[-1]["latent"]["samples"]
-            is anchored_second_result[3]["samples"])
-    assert future_anchor_calls[-1]["prefix_frames"] == 39
-    assert future_anchor_calls[-1]["visual_cond_noise_aug"] == 0.999
-
     split_second_result = chain.MiniMaxH3ChainContext().apply(
         state=second_state,
         conditioning="stock-conditioning",
@@ -680,39 +591,9 @@ plan_inputs = chain.MiniMaxH3ChainPlan.INPUT_TYPES()
 assert "transition_policy" not in plan_inputs["optional"]
 assert "MiniMaxH3TransitionPolicy" not in chain.CHAIN_NODE_CLASS_MAPPINGS
 
-legacy_adapter = chain.MiniMaxH3Legacy04PolicyAdapter()
-legacy_combined, legacy_status = legacy_adapter.build(
-    "source_plus_timeline", "feathered_av", 39, 33)
-legacy_audio = legacy_combined["audio_policy"]
-legacy_transition = legacy_combined["transition_policy"]
-assert legacy_audio == chain.migrate_legacy_audio_mode("source_plus_timeline")
-assert legacy_transition["continuation_mode"] == "feathered_av"
-assert legacy_transition["context_length"] == 39
-assert legacy_transition["expert_override"] is True
-assert legacy_combined["audio_policy"] == legacy_audio
-assert legacy_combined["transition_policy"] == legacy_transition
-assert legacy_combined["audio_context_length"] == 33
-assert "legacy 0.4 migration" in legacy_status
-matched = legacy_adapter.build(
-    "generated_audio", "masked_av", 39)[0]
-matched_audio = matched["audio_policy"]
-matched_transition = matched["transition_policy"]
-assert matched_audio == chain.migrate_legacy_audio_mode("generated_audio")
-assert matched_transition["preset"] == "hard_av"
-assert matched_transition["expert_override"] is False
-matched_audio_feather = legacy_adapter.build(
-    "generated_audio", "audio_feathered_av", 39)[0]["transition_policy"]
-assert matched_audio_feather["preset"] == "soft_av"
-assert matched_audio_feather["expert_override"] is False
-assert chain.CHAIN_NODE_CLASS_MAPPINGS[
-    "MiniMaxH3Legacy04PolicyAdapter"] is (
-        chain.MiniMaxH3Legacy04PolicyAdapter)
-assert len(legacy_adapter.OUTPUT_TOOLTIPS) == len(legacy_adapter.RETURN_TYPES)
-assert all(legacy_adapter.OUTPUT_TOOLTIPS)
-
 advanced_policy = chain.MiniMaxH3AdvancedPolicy()
-advanced_base = chain.MiniMaxH3ChainPolicy().build(
-    "guide", "source", "on", "on")[0]
+advanced_base = chain._contract_chain_policy(
+    "guide", "source", "on", "on", False)
 advanced_drift, advanced_status = advanced_policy.apply(
     advanced_base, "drift_av")
 assert advanced_drift["audio_policy"] == advanced_base["audio_policy"]
@@ -722,18 +603,10 @@ assert advanced_drift["transition_policy"]["continuation_mode"] == (
 assert advanced_drift["audio_context_length"] == 39
 assert "advanced override" in advanced_status
 
-legacy_overlay = legacy_adapter.build(
-    "generated_audio", "feathered_av", 39, 33,
-    chain_policy=advanced_base)[0]
-assert legacy_overlay["audio_policy"] == advanced_base["audio_policy"]
-assert legacy_overlay["transition_policy"]["continuation_mode"] == (
-    "feathered_av")
-assert legacy_overlay["audio_context_length"] == 33
-
 print(
     "transition policy: Cut/Guide/Tone Carry Guide/Latent Guide/Detail Guide/"
     "Detail AV/Drift-Control AV/Color-Stable Drift AV/Hard AV/Soft AV/"
     "Audio Feather AV presets, "
     "advanced/raw "
     "overrides, zero-context delivery, AV safety validation, legacy fallback "
-    "and adapter, Plan resolution, and one-wire registration pass")
+    "Plan resolution, and one-wire registration pass")

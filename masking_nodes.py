@@ -10,11 +10,11 @@ from .masking_ops import (
     H3_PIXEL_CELL,
     H3_VIDEO_FPS,
     MASK_CONVERSION_MODES,
+    resize_mask_to_video_latent,
     floor_h3_frame_count,
     normalize_comfy_mask,
     quantize_h3_pixel_mask,
     reduce_h3_mask_to_video_latent,
-    resize_mask_to_video_latent,
     temporal_audio_mask,
     trim_audio_to_frames,
 )
@@ -233,11 +233,7 @@ class MiniMaxH3ContexMaskedTarget:
                     "default": MASK_CONVERSION_MODES[0],
                     "tooltip": "H3 exact maps pixel masks with the video "
                                "VAE's causal 1/4/4/4/4 frame groups and "
-                               "2x2 latent-token max coverage. Legacy "
-                               "trilinear retains the older interpolated "
-                               "conversion for workflow comparison. Changing "
-                               "this changes generation; update the Plan's "
-                               "generation fingerprint before resuming.",
+                               "2x2 latent-token max coverage.",
                 }),
             },
         }
@@ -277,9 +273,6 @@ class MiniMaxH3ContexMaskedTarget:
             video_mask = reduce_h3_mask_to_video_latent(
                 generation_mask, video)
             conversion_summary = "H3 exact causal/token max"
-        elif mask_conversion == MASK_CONVERSION_MODES[1]:
-            video_mask = resize_mask_to_video_latent(generation_mask, video)
-            conversion_summary = "legacy trilinear"
         else:
             raise ValueError(
                 "Unknown H3 mask conversion mode %r." % mask_conversion)

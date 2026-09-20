@@ -123,7 +123,7 @@ second prompt copy.
 - `A−` and `A+` change persistent type size.
 - The node may sit inline before Loop Start or on an editor-only branch.
 
-The reference tray discovers downstream Scheduled Ref2VA, core Ref2VA, and core
+The reference tray discovers downstream Tagged Ref2VA, core Ref2VA, and core
 Image to Video nodes without introducing an execution socket or graph cycle.
 Hovering a loader-backed reference previews its image, video, or audio; computed
 tensors remain usable even when no browser-playable source file can be found.

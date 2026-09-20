@@ -142,16 +142,14 @@ def main():
         exact_video,
     )
     assert legacy.shape == (1, 1, 7, 4, 4)
-    legacy_target, legacy_info = nodes.MiniMaxH3ContexMaskedTarget().apply(
-        target,
-        torch.stack((torch.zeros((8, 8)), torch.ones((8, 8)))),
-        "white = generate",
-        "preserve source audio",
-        mask_conversion="legacy trilinear",
-    )
-    assert legacy_target["noise_mask"].unbind()[0].shape == (
-        1, 1, 2, 4, 4)
-    assert "mask legacy trilinear" in legacy_info
+    try:
+        nodes.MiniMaxH3ContexMaskedTarget().apply(
+            target, torch.zeros((8, 8)), "white = generate",
+            "preserve source audio", mask_conversion="legacy trilinear")
+    except ValueError as exc:
+        assert "Unknown H3 mask conversion" in str(exc)
+    else:
+        raise AssertionError("retired mask conversion was accepted")
 
     old_video_mask = torch.ones((1, 1, 2, 4, 4))
     old_video_mask[:, :, :1] = 0.0

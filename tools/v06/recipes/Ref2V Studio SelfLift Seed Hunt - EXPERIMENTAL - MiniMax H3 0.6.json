@@ -173,10 +173,7 @@
     {
       "key": "n17",
       "type": "MiniMaxH3ChainContext",
-      "settings": {
-        "visual_cond_noise_aug": 0.999,
-        "future_end_anchor": false
-      },
+      "settings": {},
       "inputs": {
         "state": [
           "n12",
@@ -253,7 +250,9 @@
         "candidate_count": 4,
         "batch_name": "hunt_1",
         "tiny_vae": "taeh3.safetensors",
-        "auto_remove_saved_takes": false
+        "auto_remove_saved_takes": false,
+        "review_enabled": true,
+        "run_mode": "resume"
       },
       "inputs": {
         "state": [
@@ -329,8 +328,7 @@
       "settings": {
         "trim_frames": 0,
         "fps": 24,
-        "match_tail": true,
-        "retain_overlap_frames": 5
+        "match_tail": true
       },
       "inputs": {
         "images": [

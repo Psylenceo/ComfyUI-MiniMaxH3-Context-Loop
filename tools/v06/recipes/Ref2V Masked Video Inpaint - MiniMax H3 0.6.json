@@ -191,10 +191,7 @@
     {
       "key": "n18",
       "type": "MiniMaxH3ChainContext",
-      "settings": {
-        "visual_cond_noise_aug": 0.999,
-        "future_end_anchor": false
-      },
+      "settings": {},
       "inputs": {
         "state": [
           "n13",
@@ -335,8 +332,7 @@
       "settings": {
         "trim_frames": 0,
         "fps": 24,
-        "match_tail": true,
-        "retain_overlap_frames": 5
+        "match_tail": true
       },
       "inputs": {
         "images": [
@@ -486,7 +482,8 @@
         "segment_crf": 18,
         "video_blend_frames": 0,
         "continuation_mode": "guide",
-        "alternate_take_json": ""
+        "alternate_take_json": "",
+        "working_branch_id": "main"
       },
       "inputs": {
         "plan": [
@@ -530,7 +527,8 @@
       "key": "n36",
       "type": "MiniMaxH3ChainLoopEnd",
       "settings": {
-        "between_scene_cleanup": "off"
+        "between_scene_cleanup": "off",
+        "execution_mode": "recursive"
       },
       "inputs": {
         "flow": [

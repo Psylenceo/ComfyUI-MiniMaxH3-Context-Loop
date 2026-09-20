@@ -179,7 +179,7 @@
       ],
       "size": [
         360,
-        216
+        236
       ],
       "flags": {},
       "order": 5,
@@ -203,6 +203,11 @@
         {
           "name": "source_timeline",
           "type": "H3_SOURCE_TIMELINE",
+          "link": null
+        },
+        {
+          "name": "tagged_references",
+          "type": "H3_TAGGED_REFERENCES",
           "link": null
         }
       ],
@@ -242,7 +247,7 @@
       "type": "MiniMaxH3ChainCurrent",
       "pos": [
         4370,
-        728
+        748
       ],
       "size": [
         460,
@@ -571,7 +576,7 @@
       ],
       "size": [
         420,
-        292
+        260
       ],
       "flags": {},
       "order": 10,
@@ -610,11 +615,6 @@
         {
           "name": "drift_sigmas",
           "type": "SIGMAS",
-          "link": null
-        },
-        {
-          "name": "boundary_anchors",
-          "type": "H3_BOUNDARY_ANCHORS",
           "link": null
         },
         {
@@ -660,17 +660,14 @@
       "properties": {
         "Node name for S&R": "MiniMaxH3ChainContext"
       },
-      "widgets_values": [
-        0.999,
-        false
-      ]
+      "widgets_values": []
     },
     {
       "id": 12,
       "type": "MiniMaxH3SigmaShift",
       "pos": [
         4370,
-        496
+        516
       ],
       "size": [
         360,
@@ -1016,8 +1013,7 @@
       "widgets_values": [
         0,
         24,
-        true,
-        39
+        true
       ]
     },
     {
@@ -1310,7 +1306,7 @@
       ],
       "size": [
         1080,
-        948
+        972
       ],
       "flags": {},
       "order": 23,
@@ -1335,11 +1331,6 @@
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
           "link": 46
-        },
-        {
-          "name": "reference_schedule",
-          "type": "H3_REFERENCE_SCHEDULE",
-          "link": null
         },
         {
           "name": "chain_policy",
@@ -1435,7 +1426,8 @@
         20,
         39,
         "guide",
-        ""
+        "",
+        "main"
       ]
     },
     {
@@ -1569,7 +1561,8 @@
         "Node name for S&R": "MiniMaxH3ChainLoopEnd"
       },
       "widgets_values": [
-        "off"
+        "off",
+        "recursive"
       ]
     },
     {
@@ -1782,7 +1775,7 @@
       "type": "MiniMaxH3ProjectAssetManager",
       "pos": [
         1200,
-        1228
+        1252
       ],
       "size": [
         1080,
@@ -2283,7 +2276,7 @@
       31,
       0,
       24,
-      6,
+      5,
       "H3_PROJECT_ASSETS"
     ],
     [
@@ -2390,7 +2383,7 @@
         40,
         90,
         3600,
-        2070
+        2082
       ],
       "color": "#315566",
       "font_size": 24,
@@ -2414,7 +2407,7 @@
         4330,
         90,
         540,
-        1078
+        1098
       ],
       "color": "#394c49",
       "font_size": 24,
@@ -2426,7 +2419,7 @@
         4940,
         90,
         580,
-        1530
+        1498
       ],
       "color": "#393f58",
       "font_size": 24,

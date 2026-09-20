@@ -92,15 +92,11 @@ Version 0.5 separates three independent decisions and one exact-target switch:
 | Generated continuity | `on`, `off` | Whether the previous sampled audio latent continues into the next scene |
 | Lock source audio | `on`, `off` | Whether each exact source window occupies the complete target audio latent and is protected from denoising |
 
-Set these controls and the default incoming boundary on the deprecated
-**Manual Chain Policy (Legacy)** node. Its output may connect directly to Plan
-or pass through an
-**Advanced Policy Override**. Advanced Policy preserves every audio choice and
-replaces only the incoming transition with a named experimental recipe such as
-Drift-Control AV. Use the **Legacy 0.4 Policy Adapter** only for a genuine 0.4
-import, a raw implementation/context pair, or an independent numeric audio
-overlap. It can also accept an incoming Chain Policy, in which case its legacy
-`audio_mode` is ignored and the modern audio intent is preserved.
+Use **Generation Profile** for the standard combinations. **Advanced Policy
+Override** preserves its audio policy and changes the incoming transition.
+For custom combinations, the original **Context Loop Plan** still accepts its
+audio/continuation controls and per-scene Plan JSON audio policies. The Manual
+Chain Policy and Legacy 0.4 Adapter authoring nodes were retired in 0.7.
 
 Policy layers are ordered left to right. Each downstream layer replaces only
 the boundary fields it owns; the last boundary layer wins, while the audio
@@ -283,65 +279,6 @@ mutated, and the entire treated prefix is trimmed before delivery. Advanced
 mode may pair either experimental Guide with another Guide context length; 22
 is the published baseline. Mixed plans must still use
 encode/anchor settings compatible with every AV-mask scene.
-
-Chain Context exposes `visual_cond_noise_aug` as a Guide-only diagnostic.
-`0.999` preserves ComfyUI's current H3 behavior; `0.995` and `0.990` add
-progressively more noise to visual condition rows and lower their pinned
-timestep. The full `0.000` to `1.000` range is exposed for causal diagnosis:
-`0.000` retains the same packed condition-row count and positions while
-replacing their latent content with seeded noise and removing the clean
-timestep pin. It is not a useful production setting. ComfyUI currently owns
-this as one value for the complete conditioning payload, so it also affects
-Ref2VA character, keyframe, and motion-reference rows in that continuation
-scene. AV prefixes are target latent rows rather than Guide rows, so the
-control is deliberately ignored by AV modes. Keep it at `0.999` outside
-controlled comparisons.
-
-For the next discriminating test, **MiniMax H3 Visual Context Schedule (Research)**
-accepts the H3 MODEL and Current Shot state. `matched` changes the same core
-value at every diffusion call to `clamp(1 - sigma, 0.000, 0.999)`. The
-recommended first A/B uses this exact target match. Experimental `next_step`
-uses the next lower endpoint in the original full sigma schedule instead. On
-H3's shifted 20-step simple schedule it is still only about `0.009` clean at
-evaluation 2, but reaches `0.999` on the final model call instead of stopping
-near `0.613`. Unlike static content corruption, H3 always receives condition
-content and a condition timestep describing the same mixture. The seeded
-condition noise is stable across calls, so the Guide is revealed along one
-coherent trajectory instead of being freshly randomized. Scene 1, Cut, and AV
-transitions pass through unchanged. Place one instance on each switched model
-branch and route each MODEL output through its associated sampler stages.
-`matched` and `custom` do not require `full_sigmas`; `next_step` requires the
-same original unsplit scheduler output on every model branch.
-
-The `manual` preset also requires that original `full_sigmas` connection. Its
-text input accepts clean fractions separated by commas, semicolons, spaces, or
-newlines. Values are indexed by absolute scheduler step, so they remain stable
-with solver sub-evaluations and split model branches. A short list holds its
-last value: `0, 0.999` gives the recursive Guide pure seeded noise on step 1,
-then the stock near-clean `0.999` mixture on step 2 and every later step.
-
-Keep `noise_backend=comfy_rows` for the first A/B. It preserves ComfyUI's
-existing packed-row noise draw exactly and changes only the recursive
-condition's mixture and timestep schedule. If that removes the early color
-shift but continuity is too weak, `dependent_latent` is a separate parity test:
-for Chain Context rows only, it draws seeded noise in latent shape at temporal
-length `target_T + visual_condition_count`, slices the condition prefix, and
-then patchifies, matching the reviewed RunningHub and DiffSynth runtimes.
-Authored keyframes and Ref2VA rows still use ComfyUI's original path.
-
-Keep `scope=chain_context_only` for the useful experiment. Chain Context marks
-only the predecessor video Guide records that it creates; a source-hash-gated
-compatibility forward assigns those records the dynamic content and timestep
-while native character, authored-keyframe, and Ref2VA rows retain their
-original strength. `all_visual_conditions` is the earlier public-wrapper
-diagnostic and intentionally weakens every visual condition in the payload.
-The selective implementation refuses unknown ComfyUI H3 forwards or competing
-object patches rather than guessing at changed packed-segment semantics.
-
-This remains a research control, not a new default. The selective compatibility
-path copies current H3 forward structure because ComfyUI's public API still has
-only one scalar for the complete visual payload. The maintainable production
-solution is equivalent per-condition support in core.
 
 Drift-Control AV v1 is also fixed to 39 frames. Its sigma rule, 8+4 temporal
 taper, mask quantization, audio behavior, and validated-step baseline enter the

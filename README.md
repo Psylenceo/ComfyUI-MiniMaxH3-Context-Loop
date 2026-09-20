@@ -114,8 +114,8 @@ if you need resume, latent upscale, or checkpoint-based reassembly later.
 Nightly now uses the clean **0.6 workflow catalog**, serialized for nightly's
 nodes. Choose **Normal** for Production Plan and Scene Prompt Editor. **Studio**
 adds Plan Studio, Project Asset Carousel, the rich prompt editor, and Checkpoint
-Manager; it does not change the generation graph. The previous nightly examples
-remain in [the archive](example_workflows/Archive/pre-0.6-nightly/).
+Manager; it does not change the generation graph. Pre-0.6 examples were retired in 0.7 and remain available in Git history.
+See [0.7 migration notes](docs/MIGRATING_TO_0_7.md).
 
 ## How the graph is organized
 
@@ -234,7 +234,7 @@ Existing workflows without a scene source keep their previous behavior.
 | Manage a project's media library | [Project Asset Carousel](docs/PROJECT_ASSETS.md) |
 | Write scenes and prompts | [Scene authoring](docs/SCENE_AUTHORING.md) |
 | Choose visual/audio continuity | [Audio and continuity](docs/AUDIO_AND_CONTINUITY.md) |
-| Use tagged or scheduled references | [Scheduled references](docs/SCHEDULED_REFERENCES.md) |
+| Use tagged references | [Tagged references](docs/SCHEDULED_REFERENCES.md) |
 | Retry, resume, recover, or assemble | [Runs and recovery](docs/RUNS_AND_RECOVERY.md) |
 | Inpaint, outpaint, extend, or bridge | [Masked editing](docs/MASKED_EDITING.md) |
 | Check runtime compatibility | [Compatibility](docs/COMPATIBILITY.md) |

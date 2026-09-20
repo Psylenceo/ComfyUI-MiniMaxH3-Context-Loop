@@ -311,7 +311,7 @@ def main():
         vae=VAE(), latent=target, context_frames=context, context_length=22,
         encode_mode="video", anchor_mode="head", crop="disabled",
         audio_context_length=22, audio_mode="timeline",
-        context_latent=previous, visual_cond_noise_aug=0.0,
+        context_latent=previous,
     )
 
     assert trim == 22
@@ -324,7 +324,6 @@ def main():
         "native guides; core-owned; no compatibility patch required")
     assert mm.PackedLayout.__init__ is stock_layout_init
     output_metadata = output[0][1]
-    assert output_metadata["minimax_visual_cond_noise_aug"] == 0.0
     assert "minimax_frame_count" not in output_metadata
     assert output_metadata["minimax_refs"] == refs
     keyframes = output_metadata["minimax_keyframes"]
@@ -332,86 +331,9 @@ def main():
     assert all(nodes.MC_KEY not in value for value in keyframes)
     assert keyframes[0]["resolved_frame_index"] == 0
     assert tuple(keyframes[0]["latent"].shape)[2] == 7
-    assert keyframes[0]["h3_chain_context_visual"] is True
     assert keyframes[1].get("latent") is None
-    assert "h3_chain_context_visual" not in keyframes[1]
     assert tuple(keyframes[1]["audio_latent"].shape)[-1] == 37
     assert abs(keyframes[1]["resolved_frame_index"]) < 1e-6
-
-    suffix_output, suffix_trim = nodes.MiniMaxH3MotionContext().apply(
-        conditioning=[["conditioning", {"minimax_refs": refs}]],
-        vae=VAE(), latent=target, context_frames=context, context_length=22,
-        encode_mode="video", anchor_mode="head", crop="disabled",
-        audio_context_length=0, future_end_anchor=True,
-    )
-    assert suffix_trim == 22
-    suffix_keyframes = suffix_output[0][1]["minimax_keyframes"]
-    assert len(suffix_keyframes) == 2
-    assert suffix_keyframes[0]["resolved_frame_index"] == 0
-    assert suffix_keyframes[0]["h3_chain_context_visual"] is True
-    assert suffix_keyframes[1]["resolved_frame_index"] == frame_count
-    assert tuple(suffix_keyframes[1]["latent"].shape)[2] == 1
-    assert suffix_keyframes[1]["h3_chain_future_end_anchor"] is True
-    assert "h3_chain_context_visual" not in suffix_keyframes[1]
-    assert all(nodes.MC_KEY not in value for value in suffix_keyframes)
-    suffix_layout = mm.PackedLayout(
-        7, latent_t, height, width, audio_t,
-        keyframes=suffix_keyframes, refs=refs)
-    suffix_origin = layout_patch._target_origin(suffix_layout)
-    suffix_segments = [
-        start for start, _stop, kind in suffix_layout.segments
-        if kind == "cond"
-    ]
-    assert len(suffix_segments) == 2
-    assert abs(float(suffix_layout.position_ids[suffix_segments[1], 0])
-               - (suffix_origin + FRAME_RESCALE * frame_count)) < 1e-9
-
-    # AV continuation keeps its prefix in the sampler target, then appends
-    # the same final prepared prefix step as a separate clean suffix Guide.
-    # The latent itself remains byte-for-byte untouched by this helper.
-    av_target_video = np.zeros(
-        (1, 16, latent_t, height, width), dtype=np.float64)
-    av_target_video[:, :, 11:12] = 7.0
-    av_target = {"samples": Nested([
-        T(av_target_video),
-        T(np.zeros((1, 32, 2, audio_t))),
-    ])}
-    av_video_before = av_target["samples"].parts[0].a.copy()
-    av_suffix_output = nodes._append_future_end_anchor(
-        [["conditioning", {"minimax_refs": refs}]],
-        av_target,
-        39,
-    )
-    assert np.array_equal(av_target["samples"].parts[0].a, av_video_before)
-    av_suffix_metadata = av_suffix_output[0][1]
-    assert av_suffix_metadata["minimax_visual_cond_noise_aug"] == 0.999
-    av_suffix = av_suffix_metadata["minimax_keyframes"][0]
-    assert av_suffix["resolved_frame_index"] == frame_count
-    assert av_suffix["h3_chain_future_end_anchor"] is True
-    assert "h3_chain_context_visual" not in av_suffix
-    assert tuple(av_suffix["latent"].shape) == (
-        1, 16, 1, height, width)
-    assert np.all(av_suffix["latent"].a == 7.0)
-    assert nodes.MC_KEY not in av_suffix
-
-    # A precomputed boundary registry supplies its own one-step endpoint
-    # latent rather than copying the predecessor prefix. It occupies the same
-    # post-target Guide position and is explicitly marked for diagnostics.
-    explicit_anchor = T(np.full(
-        (1, 16, 1, height, width), 11.0, dtype=np.float64))
-    explicit_output = nodes._append_explicit_future_end_anchor(
-        [["conditioning", {"minimax_refs": refs}]],
-        av_target,
-        explicit_anchor,
-    )
-    explicit_suffix = explicit_output[0][1]["minimax_keyframes"][0]
-    assert explicit_suffix["resolved_frame_index"] == frame_count
-    assert explicit_suffix["h3_chain_future_end_anchor"] is True
-    assert explicit_suffix["h3_chain_boundary_anchor"] is True
-    assert tuple(explicit_suffix["latent"].shape) == (
-        1, 16, 1, height, width)
-    assert np.all(explicit_suffix["latent"].a == 11.0)
-    assert nodes.MC_KEY not in explicit_suffix
 
     audio_only_output, audio_only_trim = nodes.MiniMaxH3MotionContext().apply(
         conditioning=[["conditioning", {"minimax_refs": refs}]],
@@ -449,10 +371,8 @@ def main():
     assert anchored_trim == 22
     assert len(anchored_keyframes) == 3
     assert anchored_keyframes[0]["latent"] is last_anchor
-    assert "h3_chain_context_visual" not in anchored_keyframes[0]
     assert anchored_keyframes[0]["resolved_frame_index"] == frame_count - 1
     assert all(nodes.MC_KEY not in value for value in anchored_keyframes)
-    assert anchored_keyframes[1]["h3_chain_context_visual"] is True
     assert first_anchor not in [value.get("latent")
                                 for value in anchored_keyframes]
     anchored_layout = mm.PackedLayout(

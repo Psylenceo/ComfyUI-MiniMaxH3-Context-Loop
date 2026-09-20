@@ -1,27 +1,12 @@
-# Scheduled references
+# Tagged references
 
-Use Scheduled Ref2VA when a picture, video, or audio reference should apply to
-selected scenes rather than every recursive iteration.
+Register pictures, videos and audio with Tagged reference nodes or the Project
+Asset Carousel. Mention their registered `@tags` in each scene that should use
+them. Tagged Ref2VA compiles only the active prompt references.
 
-```text
-Scheduled Picture Ref ─→ Scheduled Video Ref ─→ Scheduled Audio Ref
-                                                    ↓
-Current Shot ─ prompt, clip_index, clip_count ─→ Scheduled Ref2VA
-Current Shot ─ width, height, length ───────────→ Scheduled Ref2VA
-CLIP + video VAE + audio VAE ──────────────────→ Scheduled Ref2VA
-```
-
-## Scene selectors
-
-| Value | Active scenes |
-|---|---|
-| blank, `all`, or `*` | every scene |
-| `3` | scene 3 |
-| `1:5` | scenes 1 through 5 |
-| `1,3,5:8` | scenes 1, 3, and 5 through 8 |
-
-Disjoint selectors are safe for references because they do not skip the loop's
-motion dependency.
+The numeric Scheduled reference nodes were removed in 0.7. This guide keeps
+its historical filename so existing links continue to work. See
+[0.7 migration notes](MIGRATING_TO_0_7.md) for older workflows.
 
 ## Aliases and native labels
 
@@ -49,19 +34,15 @@ subject_definitions:
 <Subject 1> uses @hero_face for facial identity and @performance for movement.
 ```
 
-## Compliance policies
+## Reference policies
 
-- **strict** compiles valid active aliases and stops on unresolved/inactive tags
-  or invalid scheduled media.
-- **soft** compiles valid aliases, leaves unresolved prompt tags intact, logs a
-  warning, and continues.
-- **disabled** passes the prompt and all `@tags` through unchanged. Scheduler
-  validation becomes warning-only; unusable media is omitted and excess slots
-  are capped to stock H3 limits.
+Tagged Ref2VA provides `strict`, `soft` and `disabled` reference-policy modes.
+Strict validates registered sources and native capacity. Soft retains structural
+checks. Disabled makes pack-authored checks warning-only and skips missing or
+invalid tagged media. Unregistered `@syntax` remains user-managed, because it
+can represent subject or dialogue tags rather than project references.
 
-Errors outside the scheduler remain real errors, including invalid model/VAE
-wiring, sampling failures, continuation tensor incompatibility, and checkpoint
-integrity failures.
+Errors in model/VAE execution, sampling and checkpoint integrity remain errors.
 
 ## Preview and insertion
 
@@ -182,16 +163,16 @@ mods automatically.
 ## Resume fingerprints
 
 For static loaders, connect `schedule_fingerprint` to Plan's
-`generation_fingerprint`. Changing media bytes, tags, or selectors then
+`generation_fingerprint`. Changing media bytes or tags then
 invalidates incompatible checkpoints.
 
-Do not create a fingerprint cycle when a scheduled entry consumes Current Shot,
+Do not create a fingerprint cycle when a reference consumes Current Shot,
 such as `source_audio_slice`. Source-track mode already fingerprints the full
 source waveform at Loop Start.
 
 ## Automatic deferred-upscale cache
 
-Tagged and Scheduled Ref2VA enable `cache_for_upscale` by default. The wrapper
+Tagged Ref2VA enables `cache_for_upscale` by default. The wrapper
 stores native H3 picture/video/audio reference latents, original picture masters
 for larger pass-2 canvases, and the resized Qwen image or 2 fps video presentation.
 

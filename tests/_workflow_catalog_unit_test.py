@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "example_workflows"
 LEGACY_ARCHIVE = EXAMPLES / "Archive" / "pre-0.6-nightly"
 WORKFLOWS = {
+    "Ref2V Studio SelfLift Seed Hunt - EXPERIMENTAL - MiniMax H3 0.6.json",
     "Deferred De-Rope Only - MiniMax H3 0.6.json",
     "Deferred De-Rope Only - Fast Turbo - MiniMax H3 0.6.json",
     "Deferred Upscale + De-Rope - H3 LBH 3D - MiniMax H3 0.6.json",
@@ -236,6 +237,7 @@ def validate_modern_authoring(workflow: dict, path: Path) -> None:
         "Ref2V Tagged - MiniMax H3 0.6.json",
         "Ref2V Studio - MiniMax H3 0.6.json",
         "Ref2V Studio SelfLift - EXPERIMENTAL - MiniMax H3 0.6.json",
+        "Ref2V Studio SelfLift Seed Hunt - EXPERIMENTAL - MiniMax H3 0.6.json",
         "Ref2V Studio Source Audio - MiniMax H3 0.6.json",
         "Ref2V Tagged Source Audio - MiniMax H3 0.6.json",
     }
@@ -416,9 +418,7 @@ def main() -> None:
     assert {path.name for path in paths} == WORKFLOWS
     assert all("MiniMax H3 0.6.json" in path.name for path in paths)
     assert not (LEGACY_NAMES & {path.name for path in paths})
-    assert LEGACY_ARCHIVE.is_dir()
-    assert len(list(LEGACY_ARCHIVE.glob("*.json"))) == 19
-    assert LEGACY_NAMES <= {path.name for path in LEGACY_ARCHIVE.glob("*.json")}
+    assert not list((EXAMPLES / "Archive").rglob("*.json"))
     uuids = set()
     for path in paths:
         workflow = load(path)

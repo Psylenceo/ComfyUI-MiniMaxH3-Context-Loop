@@ -65,13 +65,7 @@ def _payload_audio_merge_error(exc: BaseException) -> bool:
 
 
 def _enable_internal_payload_merge() -> tuple[bool, str]:
-    """Enable the guarded keyframe/ref merge for a partially native core.
-
-    Some ComfyUI builds expose native arbitrary Guides but still drop Guide
-    audio when Ref2VA audio is present. The public upstream provider correctly
-    refuses that combination. Our internal engine can retain it when the
-    marker-gated payload compatibility wrapper owns the merge.
-    """
+    """Enable the guarded keyframe/ref merge for a partially native core."""
     try:
         from .patch_payload import (
             apply_patch,
@@ -169,7 +163,7 @@ def _fallback_reason(
         accepted: frozenset[str], *, context_length: int,
         effective_context: int, anchor_mode: str, audio_context_length: int,
         audio_mode: str, context_latent: Any, context_audio: Any,
-        video_context_latent: Any, future_end_anchor: bool) -> str | None:
+        video_context_latent: Any) -> str | None:
     if not _native_guides_available():
         return "ComfyUI does not expose native H3 guides"
     if int(context_length) <= 0 or int(effective_context) <= 0:
@@ -179,8 +173,6 @@ def _fallback_reason(
     if (video_context_latent is not None
             and "video_context_latent" not in accepted):
         return "direct video-latent Guide reuse"
-    if bool(future_end_anchor) and "future_end_anchor" not in accepted:
-        return "future end anchor"
     has_audio = context_latent is not None or context_audio is not None
     effective_audio = int(audio_context_length) or int(effective_context)
     if (has_audio and audio_mode == "timeline"
@@ -249,8 +241,8 @@ def _prepare_conditioning(
 
 def _decorate_output(
         output: Any, prior_count: int, trim: int, *,
-        visual_cond_noise_aug: float, audio_mode: str,
-        audio_context_length: int, context_latent: Any) -> Any:
+        audio_mode: str, audio_context_length: int,
+        context_latent: Any) -> Any:
     """Restore Loop-private guide markers and exact latent-audio placement."""
     from .nodes import FRAME_RESCALE, _audio_tail_from_latent
 
@@ -260,11 +252,9 @@ def _decorate_output(
         keyframes = [dict(value) for value in
                      (metadata.get("minimax_keyframes") or [])]
         added = keyframes[int(prior_count):]
-        has_visual = False
         for keyframe in added:
             if keyframe.get("latent") is not None:
                 keyframe["h3_chain_context_visual"] = True
-                has_visual = True
 
         if (context_latent is not None and audio_mode == "timeline"
                 and any(value.get("audio_latent") is not None
@@ -296,9 +286,6 @@ def _decorate_output(
                     keyframe["resolved_frame_index"] = audio_start
                 break
 
-        if has_visual:
-            metadata["minimax_visual_cond_noise_aug"] = float(
-                visual_cond_noise_aug)
         metadata["minimax_keyframes"] = keyframes
         decorated.append([embedding, metadata])
     return decorated
@@ -310,9 +297,7 @@ def apply_motion_context(
         anchor_mode: str, crop: str, audio_context_length: int = 0,
         audio_mode: str = "timeline", context_latent: Any = None,
         audio_vae: Any = None, context_audio: Any = None,
-        video_context_latent: Any = None,
-        visual_cond_noise_aug: float = 0.999,
-        future_end_anchor: bool = False):
+        video_context_latent: Any = None):
     """Use the registered upstream provider when it covers this Chain mode."""
     upstream_type, accepted = _registered_upstream(fallback_node_type)
     available = int(getattr(context_frames, "shape", (0,))[0])
@@ -332,7 +317,6 @@ def apply_motion_context(
             context_latent=context_latent,
             context_audio=context_audio,
             video_context_latent=video_context_latent,
-            future_end_anchor=bool(future_end_anchor),
         )
 
     if reason is not None:
@@ -355,8 +339,6 @@ def apply_motion_context(
             audio_vae=audio_vae,
             context_audio=context_audio,
             video_context_latent=video_context_latent,
-            visual_cond_noise_aug=visual_cond_noise_aug,
-            future_end_anchor=future_end_anchor,
         )
 
     try:
@@ -383,14 +365,7 @@ def apply_motion_context(
             audio_vae=audio_vae,
             context_audio=context_audio,
             video_context_latent=video_context_latent,
-            visual_cond_noise_aug=visual_cond_noise_aug,
-            future_end_anchor=future_end_anchor,
         )
-
-    from .nodes import _validate_visual_cond_noise_aug
-
-    visual_cond_noise_aug = _validate_visual_cond_noise_aug(
-        visual_cond_noise_aug)
 
     _ensure_delegated_payload_merge(
         prepared,
@@ -417,9 +392,7 @@ def apply_motion_context(
             ("context_latent", context_latent),
             ("audio_vae", audio_vae),
             ("context_audio", context_audio),
-            ("video_context_latent", video_context_latent),
-            ("visual_cond_noise_aug", visual_cond_noise_aug),
-            ("future_end_anchor", future_end_anchor)):
+            ("video_context_latent", video_context_latent)):
         if name in accepted:
             kwargs[name] = value
     if "target_start" in accepted:
@@ -461,13 +434,10 @@ def apply_motion_context(
             audio_vae=audio_vae,
             context_audio=context_audio,
             video_context_latent=video_context_latent,
-            visual_cond_noise_aug=visual_cond_noise_aug,
-            future_end_anchor=future_end_anchor,
         )
     output, trim = result[0], int(result[1])
     output = _decorate_output(
         output, prior_count, trim,
-        visual_cond_noise_aug=float(visual_cond_noise_aug),
         audio_mode=str(audio_mode),
         audio_context_length=int(audio_context_length),
         context_latent=context_latent,
