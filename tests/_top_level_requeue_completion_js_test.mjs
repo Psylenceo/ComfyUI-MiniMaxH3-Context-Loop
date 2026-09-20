@@ -5,6 +5,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 import * as core from "../web/h3_chain_top_level_requeue_core.mjs";
 import * as coordinator from "../web/h3_chain_top_level_requeue_coordinator.mjs";
+import {appendedReviewPrompts} from "../web/h3_chain_review_append.mjs";
 import {activeSceneFromOutput} from "../web/h3_chain_cancel_reroll_core.mjs";
 
 const source = fs.readFileSync(new URL("../web/h3_chain_top_level_requeue.js", import.meta.url), "utf8");
@@ -51,7 +52,7 @@ function harness({startClip = 1, sceneRange = "", endClip = 3, total = 3, nested
         },
     };
     const context = {
-        ...core, ...coordinator, app, api, activeSceneFromOutput,
+        ...core, ...coordinator, app, api, activeSceneFromOutput, appendedReviewPrompts,
         createNotificationStack: () => ({show: (...args) => notices.push(args), clear() {}, clearAll() {}}),
         projectMutationOptions: async (_node, _run, options) => options,
         window: {setTimeout}, console,
@@ -113,6 +114,18 @@ for (const nested of [false, true]) {
     assert.deepEqual(h.submissions, [{start: 2, range: ""}, {start: 3, range: ""}]);
     h.success();
     assert.equal(h.queueCount(), 2, "duplicate success cannot queue/reset again");
+}
+
+// Issue #90: an appended-scene continuation must survive the old final event.
+{
+    const h = harness({total: 2, endClip: 2});
+    await h.advance();
+    appendedReviewPrompts.add("auto-1");
+    h.finished(); h.success();
+    assert.equal(h.selection().start, 2,
+        "an approved appended-scene continuation owns the upcoming resume selection");
+    assert.equal(h.queueCount(), 1, "the old coordinator must not also queue an extension");
+    appendedReviewPrompts.delete("auto-1");
 }
 
 // Preserve an intentional resume point and restore the original range verbatim.

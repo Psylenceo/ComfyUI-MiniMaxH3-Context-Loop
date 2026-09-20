@@ -18395,6 +18395,7 @@ class MiniMaxH3ChainLoopStart:
                 source_audio=source_audio,
                 verify_resume_history=verify_resume_history,
                 artifact_verification=verification)
+            state["scene_range_explicit"] = bool(str(scene_range or "").strip())
             _LOG.info(
                 "H3 Loop Start scene %d ready: source/resume state %.2fs; "
                 "reused %d unchanged file hashes, hashed %d additional files.",
@@ -20238,6 +20239,22 @@ def _review_display_id(unique_id: Any, dynprompt: Any) -> str:
     return execution_id
 
 
+def _review_continuation_payload(state: dict) -> dict:
+    """Identify the queued Plan boundary without exposing its prompt content."""
+    try:
+        from comfy_execution.utils import get_executing_context
+        context = get_executing_context()
+        prompt_id = str(getattr(context, "prompt_id", "") or "")
+    except ImportError:  # Older ComfyUI: the browser can use executed events.
+        prompt_id = ""
+    return {
+        "prompt_id": prompt_id,
+        "end_clip": int(state.get("end_clip", len(state["plan"]["shots"]))),
+        "scene_range_explicit": state.get("scene_range_explicit", True),
+        "plan_scene_ids": [shot["id"] for shot in state["plan"]["shots"]],
+    }
+
+
 def _review_timeout_seconds(minutes: Any) -> float:
     value = float(minutes)
     if not math.isfinite(value) or value < 0:
@@ -21151,7 +21168,7 @@ class MiniMaxH3ChainReview:
                 "run_name": str(plan["run_name"]),
                 "clip_index": index,
                 "clip_count": len(plan["shots"]),
-                "end_clip": int(state.get("range_end", len(plan["shots"]))),
+                **_review_continuation_payload(state),
                 "shot_id": shot["id"],
                 "scene_prompt": shot.get("scene_prompt", shot["prompt"]),
                 "basic_prompt": shot.get("basic_prompt", ""),
@@ -21240,7 +21257,7 @@ class MiniMaxH3ChainReview:
             "run_name": str(plan["run_name"]),
             "clip_index": index,
             "clip_count": len(plan["shots"]),
-            "end_clip": int(state.get("range_end", len(plan["shots"]))),
+            **_review_continuation_payload(state),
             "shot_id": shot["id"],
             "scene_prompt": shot.get("scene_prompt", shot["prompt"]),
             "basic_prompt": shot.get("basic_prompt", ""),
@@ -22455,6 +22472,7 @@ class MiniMaxH3ChainLoopEnd:
             "index": index + 1,
             "range_start": int(state.get("range_start", 1)),
             "end_clip": int(state.get("end_clip", len(plan["shots"]))),
+            "scene_range_explicit": state.get("scene_range_explicit", True),
             # clone: a tensor view would retain the entire decoded clip
             "previous_frames": _tensor_cpu_clone(
                 selected_frames[-context_length:]),

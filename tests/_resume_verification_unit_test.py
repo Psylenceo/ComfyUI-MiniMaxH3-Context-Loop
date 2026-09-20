@@ -74,6 +74,34 @@ class ResumeVerificationTests(unittest.TestCase):
     def start(self, **kwargs):
         return chain.MiniMaxH3ChainLoopStart().start(self.plan, 3, **kwargs)
 
+    def test_append_review_resumes_after_saved_final_scene(self):
+        original = copy.deepcopy(self.plan)
+        original["shots"] = original["shots"][:2]
+        self.assertEqual(chain._history_hash(original, 2),
+                         chain._history_hash(self.plan, 2))
+        before = {path: Path(path).read_bytes() for path in self.artifacts}
+        _, state, _ = self.start()
+        self.assertEqual(state["index"], 3)
+        self.assertEqual(len(state["segments"]), 2)
+        self.assertFalse(state["scene_range_explicit"])
+        self.assertEqual(before, {path: Path(path).read_bytes() for path in self.artifacts})
+        utils = types.ModuleType("comfy_execution.utils")
+        utils.get_executing_context = lambda: types.SimpleNamespace(prompt_id="source-prompt")
+        with patch.dict(sys.modules, {"comfy_execution.utils": utils}):
+            public = chain._review_continuation_payload(state)
+        self.assertEqual(public["prompt_id"], "source-prompt")
+        self.assertEqual(public["plan_scene_ids"], ["scene_1", "scene_2", "scene_3"])
+        self.assertEqual(public["end_clip"], 3)
+        self.assertFalse(public["scene_range_explicit"])
+
+    def test_explicit_final_range_cannot_be_extended_by_review(self):
+        _, state, _ = self.start(scene_range="3")
+        public = chain._review_continuation_payload(state)
+        self.assertTrue(public["scene_range_explicit"])
+        state["end_clip"] = 2
+        self.assertEqual(chain._review_continuation_payload(state)["end_clip"], 2,
+                         "Review must use end_clip, not the obsolete range_end key")
+
     def test_loop_start_reads_only_context_once_but_each_new_queue_rechecks(self):
         original = chain._file_sha256
         checkpoints = {str(self.root / segment["checkpoint"]) for segment in self.segments}

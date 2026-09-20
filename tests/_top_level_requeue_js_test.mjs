@@ -270,6 +270,7 @@ async function exerciseProcessRequeue({submission, transitionOk = true, cancelAf
     globalThis.window={setTimeout};
     let moduleSource=source.replace('import {app} from "/scripts/app.js";', 'const app=globalThis.__h3App;')
         .replace('import {api} from "/scripts/api.js";', 'const api=globalThis.__h3Api;')
+        .replace(/import \{appendedReviewPrompts\} from ".*?";/, 'const appendedReviewPrompts=new Set();')
         .replace(/import \{activeSceneFromOutput\} from ".*?";/, 'const activeSceneFromOutput=()=>null;')
         .replace(/import \{[\s\S]*?\} from "\.\/h3_chain_top_level_requeue_core\.mjs\?v=.*?";/, 'const {DEFAULT_CLEANUP_DELAY_MS,HANDOFF_API_BASE,RECURSIVE_MODE,migrateRecursiveExecutionMode,checkpointPredecessorReady,cleanupDelayMs,isQueueSafe,matchingNextSceneHandoff,pendingNextSceneHandoffs,predecessorScene,resumeHint,handleTopLevelRequeueSuccessScheduling,loopEndMatchesObservedCurrent,topLevelRequeueCompletionMatches,topLevelRequeueFinishedMatches,createRequeueSelectionTracker}=globalThis.__h3Core;')
         .replace(/import \{createNotificationStack\} from ".*?";/, 'const {createNotificationStack}=globalThis.__h3Notification;')

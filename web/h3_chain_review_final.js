@@ -28,6 +28,8 @@ import {
     reviewSeed,
 } from "./h3_chain_review_core.mjs?v=0.7.26";
 import {projectMutationOptions} from "./h3_project_ownership.mjs?v=0.7.4";
+import {appendedReviewPrompts, appendedReviewScene, continueAppendedReview} from "./h3_chain_review_append.mjs?v=1";
+import {submitWithPromptIdentity} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.7.26";
 
 const NODE_NAME = "MiniMaxH3ChainReview";
 const PLAN_NAME = "MiniMaxH3ChainPlan";
@@ -44,6 +46,7 @@ let pendingFetchPromise = null;
 let pendingPollTimer = null;
 const activeSceneExecutions = new Map();
 const reviewInterruptionWaiters = new Map();
+const appendedReviewTokens = new Set();
 
 function sceneExecutionKey(runName, clipIndex, branchId = "main") {
     return `${String(runName ?? "").trim()}\u0000${Number(clipIndex)}\u0000${branchId}`;
@@ -374,12 +377,28 @@ function videoUrl(item) {
 }
 
 function upstreamPlanNode(reviewNode) {
-    return findUpstreamNode(reviewNode, PLAN_NAMES) ??
+    return connectedReviewPlan(reviewNode) ??
         allNodes(appRootGraph()).find((item) => PLAN_NAMES.has(nodeType(item)));
+}
+
+function connectedReviewPlan(reviewNode) {
+    const source = findUpstreamNode(reviewNode,
+        new Set([...PLAN_NAMES, "MiniMaxH3ChainPlanStudio"]));
+    if (nodeType(source) === "MiniMaxH3ChainPlanStudio"
+            && source.inputs?.some(input => input.name === "plan" && input.link != null)) {
+        return findUpstreamNode(source, PLAN_NAMES);
+    }
+    return source;
 }
 
 function widgetByName(node, name) {
     return node?.widgets?.find((item) => item.name === name);
+}
+
+function reviewPlanBranch(source, plan) {
+    return nodeType(source) === "MiniMaxH3ChainPlanStudio"
+        ? widgetByName(source, "working_branch_id")?.value ?? plan._branch_id ?? "main"
+        : plan._branch_id ?? "main";
 }
 
 function planResumeContext(reviewNode) {
@@ -392,7 +411,7 @@ function planResumeContext(reviewNode) {
     const plan = parsePlanJson(String(planWidget.value ?? ""));
     const runName = reviewRunName(planNode);
     if (!runName) throw new Error("The H3 Chain Plan run_name is empty.");
-    return {runName, clipCount: plan.shots.length, branchId: plan._branch_id ?? "main"};
+    return {runName, clipCount: plan.shots.length, branchId: reviewPlanBranch(planNode, plan)};
 }
 
 function reviewBranchMatches(reviewNode, review) {
@@ -566,6 +585,92 @@ function prepareResume(reviewNode, nextIndex, endIndex = null, clipCount = null)
     }
     startNode.graph?.setDirtyCanvas?.(true, true);
     return true;
+}
+
+function appendedReviewIntent(node, review) {
+    if (Number(review.clip_index) !== Number(review.clip_count)
+            || review.scene_range_explicit !== false) return null;
+    const start = findUpstreamNode(node, "MiniMaxH3ChainLoopStart");
+    const source = start && connectedReviewPlan(start);
+    const planWidget = widgetByName(source, "plan_json");
+    const startWidget = widgetByName(start, "start_clip");
+    const rangeWidget = widgetByName(start, "scene_range");
+    // A linked STRING is authoritative, not the hidden plan_json widget.
+    const externallyControlled = () => source?.inputs?.some(input =>
+        ["plan_json", "plan_json_input", "run_name", "working_branch_id"].includes(input.name)
+            && input.link != null) || start?.inputs?.some(input =>
+        ["start_clip", "scene_range"].includes(input.name) && input.link != null);
+    if (!planWidget || !startWidget || !rangeWidget || externallyControlled()) return null;
+    const plan = parsePlanJson(String(planWidget.value ?? ""));
+    plan._branch_id = reviewPlanBranch(source, plan);
+    const nextIndex = appendedReviewScene(review, plan, rangeWidget.value);
+    if (!nextIndex || reviewRunName(source) !== review.run_name) return null;
+    const graph = appRootGraph();
+    const workflow = app.extensionManager?.workflow?.activeWorkflow;
+    const originalStart = startWidget.value;
+    const promptId = review.prompt_id || activeSceneExecutions.get(sceneExecutionKey(
+        review.run_name, review.clip_index, review._branch_id ?? "main"))?.promptId;
+    const cancel = () => appendedReviewPrompts.delete(promptId);
+    return {nextIndex, cancel, arm: () => {
+        if (promptId && !appendedReviewTokens.has(review.token)) appendedReviewPrompts.add(promptId);
+    }, run: async report => {
+        if (appendedReviewTokens.has(review.token)) return;
+        appendedReviewTokens.add(review.token);
+        // Capture after selected-candidate edits have been written to the Plan.
+        const approvedPlan = planWidget.value;
+        let approved;
+        let prepared = false;
+        const current = () => {
+            if (appRootGraph() !== graph
+                    || appendedReviewScene(review, approved, rangeWidget.value) !== nextIndex
+                    || app.extensionManager?.workflow?.activeWorkflow !== workflow
+                    || !allNodes(graph).includes(node)
+                    || findUpstreamNode(node, "MiniMaxH3ChainLoopStart") !== start
+                    || connectedReviewPlan(start) !== source
+                    || externallyControlled()
+                    || planWidget.value !== approvedPlan
+                    || reviewPlanBranch(source, plan) !== (review._branch_id ?? "main")
+                    || reviewRunName(source) !== review.run_name
+                    || String(rangeWidget.value ?? "").trim()
+                    || startWidget.value !== (prepared ? nextIndex : originalStart)) {
+                throw new Error("The workflow, Plan, or resume selection changed; appended scenes were not queued.");
+            }
+        };
+        const read = async path => {
+            const response = await api.fetchApi(path);
+            if (!response.ok) throw new Error(`Cannot check the reviewed run: HTTP ${response.status}`);
+            return await response.json();
+        };
+        try {
+            approved = parsePlanJson(String(approvedPlan ?? ""));
+            approved._branch_id = reviewPlanBranch(source, approved);
+            report(`Approval received — finishing this run, then continuing at appended scene ${nextIndex}.`);
+            const outcome = await continueAppendedReview({
+                promptId, current,
+                history: async id => (await read(`/history/${encodeURIComponent(id)}`))[id],
+                queued: async id => {
+                    const queue = await read("/queue");
+                    return [...(queue.queue_running ?? []), ...(queue.queue_pending ?? [])]
+                        .some(item => item[1] === id);
+                },
+                sleep: () => new Promise(resolve => window.setTimeout(resolve, 1000)),
+                prepare: () => {
+                    prepared = true;
+                    startWidget.value = nextIndex;
+                    startWidget.callback?.(nextIndex);
+                    start.graph?.setDirtyCanvas?.(true, true);
+                },
+                submit: () => submitWithPromptIdentity({app, api, current}),
+            });
+            report(outcome.kind === "accepted"
+                ? `Appended scene ${nextIndex} queued from the saved scene ${nextIndex - 1} checkpoint.`
+                : "Continuation submission was not confirmed. Check the queue before submitting again.");
+        } catch (error) {
+            report(`Approval accepted. ${error.message}`);
+        } finally {
+            cancel();
+        }
+    }};
 }
 
 async function activateAcceptedCandidate(reviewNode, submittedReview, body) {
@@ -2189,6 +2294,7 @@ function mount(node) {
     }
 
     async function submit(action) {
+        let appended = null;
         if (!current?.token) {
             status.className = "h3r-status h3r-warning";
             status.textContent = "No live review token is attached. Checking the server…";
@@ -2226,6 +2332,8 @@ function mount(node) {
                     : action === "next_candidate" ? "pause" : ""
                 : "";
             if (liveCandidateBatch && !candidateBatchAction) return;
+            appended = action === "approve"
+                ? appendedReviewIntent(node, submittedReview) : null;
             const submittedPrompt = (planScenePrompt(node, submittedReview)
                     ?? submittedReview.scene_prompt
                     ?? prompt.value);
@@ -2244,6 +2352,7 @@ function mount(node) {
                 : action === "approve" ? "Sending approval…" :
                 action === "next_candidate" ? "Resuming to generate the next candidate…" :
                 action === "stop" ? "Sending stop decision…" : "Sending retry decision…";
+            appended?.arm();
             const response = await api.fetchApi(candidateBatchAction
                 ? "/minimax_h3_context_loop/review-candidate-batch"
                 : "/minimax_h3_context_loop/review",
@@ -2292,6 +2401,7 @@ function mount(node) {
                     status.textContent = "Pause queued. The current in-flight take " +
                         "will finish, then the carousel will wait for you.";
                 }
+                if (appended) void appended.run(message => { status.textContent = message; });
             } else if (action === "next_candidate") {
                 status.textContent = `Candidate ${submittedReview.candidates.length}/` +
                     `${submittedReview.candidate_count} reviewed — generating the next take ` +
@@ -2309,6 +2419,7 @@ function mount(node) {
                         ` ${body.kept_candidate_count} take${body.kept_candidate_count === 1 ? "" : "s"} kept.` +
                         (saved ? " The Plan seed was updated." : "");
                 }
+                if (appended) void appended.run(message => { status.textContent = message; });
             } else if (action === "retry" || action === "reroll") {
                 const acceptedPrompt = typeof body.scene_prompt === "string"
                     ? body.scene_prompt : submittedPrompt.trim();
@@ -2344,6 +2455,7 @@ function mount(node) {
                 setTimeout(() => void refreshResumeOptions({automatic: true}), 0);
             }
         } catch (error) {
+            appended?.cancel();
             root.classList.remove("h3r-busy");
             setActionsEnabled(Boolean(current?.token));
             status.className = "h3r-status h3r-warning";

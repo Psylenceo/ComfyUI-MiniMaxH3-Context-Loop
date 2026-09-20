@@ -83,6 +83,12 @@ specialized fallback for loop-only modes.
    or **Approve & stop**.
 7. The active **Assemble** node writes the final MP4 after the last scene.
 
+To extend a running Plan, append scenes before approving its last scene. With
+Loop Start's `scene_range` left blank, **Approve & continue** finishes the current
+run, then queues the updated workflow at the first appended scene using the
+saved checkpoint. Keep that workflow and branch open until it queues. Explicit
+scene ranges and **Approve & stop** do not automatically extend the run.
+
 To reuse a still as a reference, scrub the saved Review Gate preview, click
 **Capture frame…**, check the destination project and tag, then **Save to
 Carousel**. Reusing a tag creates a numbered take. Capture requires `ffmpeg`
