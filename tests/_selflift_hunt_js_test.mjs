@@ -19,7 +19,7 @@ class Element {
     getAttribute(name) { return this[name]; }
 }
 let extension, nextTimer=0, gets=0, confirmClean=false, cleanError=false, removedBatch=false;
-const timers = new Map(), events = new Map(), posts=[], previewPosts=[];
+const timers = new Map(), events = new Map(), posts=[], previewPosts=[], selectionPosts=[];
 const batch = { id:"a".repeat(64), run_name:"test", scene:1, scene_name:"walk", batch_name:"hunt_1",
     created_at:123,
     phase:"waiting", active:true, selected:null, low_steps:20, high_steps:5,
@@ -32,6 +32,14 @@ const app = {graph:{}, registerExtension:value => {extension=value;}, queuePromp
 const api = { apiURL:path=>`/proxy${path}`, addEventListener:(name,cb)=>events.set(name,cb),
     async fetchApi(path, options={}) {
         if (options.method === "POST") {
+            if (path === "/h3/selflift/selection") {
+                const body=JSON.parse(options.body); selectionPosts.push(body);
+                if (body.selection_version !== (batch.selection_version ?? 0))
+                    return {ok:false,json:async()=>({error:"This hunt selection changed; refresh"})};
+                Object.assign(batch,{marked:body.ordinals,main:body.main,
+                    selection_version:(batch.selection_version ?? 0)+1});
+                return {ok:true,json:async()=>({ok:true})};
+            }
             if (path === "/h3/selflift/upscale-preview") {
                 const body=JSON.parse(options.body); previewPosts.push(body); batch.upscale_request=body.ordinal;
                 return {ok:true,json:async()=>({ok:true})};
@@ -42,6 +50,8 @@ const api = { apiURL:path=>`/proxy${path}`, addEventListener:(name,cb)=>events.s
                 return {ok:true,json:async()=>({ok:true,files:7,bytes:1048576})};
             }
             const body=JSON.parse(options.body); posts.push(body); batch.selected=body.ordinal;
+            Object.assign(batch,{marked:body.ordinals,main:body.ordinal,
+                selected_ordinals:body.ordinals,selection_version:(batch.selection_version ?? 0)+1});
             return {ok:true,json:async()=>({ok:true})};
         }
         gets++;
@@ -143,13 +153,13 @@ batch.phase="low";batch.current=4;await tick();
 assert.equal(button.disabled,false,"completed takes stay selectable while low sampling is busy");
 assert.equal(button.textContent,"Use take 2 now");
 await button.onclick();
-assert.deepEqual(posts,[{id:batch.id,ordinal:2}]);
+assert.deepEqual(posts,[{id:batch.id,ordinal:2,ordinals:[2],created_at:123,selection_version:0}]);
 assert.equal(node.properties.h3_selflift_batch,batch.id);
 assert.ok(node._h3SelfLiftHunt.status.textContent.includes("Finishing and saving take 4; then upscale take 2"));
 assert.equal(node.root.querySelectorAll("video")[0],videos[0],"choosing early preserves preview playback");
 assert.equal(videos[0].currentTime,2.5);
 batch.phase="preview";await tick();
-assert.equal(button.disabled,false,"completed takes stay selectable during tiny decode");
+assert.equal(button.disabled,true,"approved marks stay locked during the remaining tiny decode");
 assert.ok(node._h3SelfLiftHunt.status.textContent.includes("skip remaining candidates"));
 batch.phase="high";await tick();
 assert.equal(button.disabled,true);
@@ -175,6 +185,40 @@ recovered.onNodeCreated();await settle();
 assert.equal(part(recovered,"gate-notice").hidden,true,"old workflows without the widget default to review on");
 assert.equal(recovered.properties.h3_selflift_preview.ordinal,1,"saved browsing position survives recreation without changing the approval");
 recovered.onRemoved();
+// Draft marks are durable, independent of browsing and shared by both tabs.
+batch.selected=null;delete batch.marked;delete batch.main;delete batch.selected_ordinals;
+batch.phase="waiting";batch.active=true;batch.selection_version=0;await tick();
+part(node,"dots").children[0].onclick();
+await part(node,"mark").onclick();
+assert.deepEqual(batch.marked,[1]);assert.equal(batch.main,1);
+assert.equal(batch.selected,null,"marking does not release the gate");
+part(node,"dots").children[2].onclick();
+await part(node,"mark").onclick();
+assert.deepEqual(batch.marked,[1,3]);assert.equal(batch.main,1);
+await part(node,"main").onclick();
+assert.equal(batch.main,3);assert.deepEqual(batch.marked,[1,3]);
+assert.equal(part(node,"mark").disabled,true,"main is always included");
+assert.equal(part(second,"approve").textContent,"Finish 2 marked · main take 3");
+assert.equal(part(second,"dots").children[0].dataset.marked,"true");
+assert.equal(part(second,"dots").children[2].dataset.marked,"true");
+part(node,"dots").children[0].onclick();
+assert.equal(batch.main,3,"browsing an alternate never changes the main");
+const reload=new Node(4);reload.properties.h3_selflift_batch=batch.id;reload.onNodeCreated();await settle();
+assert.equal(part(reload,"approve").textContent,"Finish 2 marked · main take 3");
+reload.onRemoved();
+// Stale-client edits fail and refresh instead of silently overwriting marks.
+batch.selection_version++;await part(node,"mark").onclick();
+assert.deepEqual(batch.marked,[1,3]);
+assert.ok(part(node,"status").textContent.includes("selection changed"));
+await button.onclick();
+assert.deepEqual(posts.pop(),{id:batch.id,ordinal:3,ordinals:[1,3],created_at:123,selection_version:4});
+assert.deepEqual(batch.selected_ordinals,[1,3]);
+batch.phase="awaiting_save";batch.active=false;await tick();
+assert.equal(button.disabled,true,"a returned sampler is still finishing through Save");
+assert.equal(part(node,"clean").disabled,true,"cannot delete low passes before all full saves");
+assert.equal(part(node,"mark").disabled,true);
+assert.equal(part(node,"main").disabled,true);
+Object.assign(batch,{phase:"finished",active:false,selected:2,marked:[2],main:2});await tick();
 videos[0].listeners.error();
 assert.equal(part(node,"media-notice").hidden,false,"failed video loading has a readable retry hint");
 videos[0].error={code:4};const loadsBeforeRetry=videos[0].loads;
@@ -182,7 +226,7 @@ await node.root.querySelectorAll("button").find(b=>b.textContent==="Refresh save
 assert.equal(videos[0].loads,loadsBeforeRetry+1,"refresh retries a failed media load");
 videos[0].error=null;videos[0].listeners.loadeddata();
 assert.equal(part(node,"media-notice").hidden,true);
-batch.created_at=124;batch.selected=null;await tick();
+batch.created_at=124;batch.selected=null;delete batch.marked;delete batch.main;await tick();
 assert.ok(videos[0].src.includes("h3_hunt_created=124"),"recreated batches do not reuse cached media from a deleted hunt");
 assert.equal(node.properties.h3_selflift_preview.ordinal,1);
 document.hidden=true;const before=gets;await tick();assert.equal(gets,before);

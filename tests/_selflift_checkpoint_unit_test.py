@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Exercise Chain's real carry, resume, selected-window and gate paths on temp data."""
+import asyncio
 import importlib
 import json
 from pathlib import Path
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -107,6 +109,110 @@ class CheckpointTests(unittest.TestCase):
                 self.assertEqual(folder.exists(), not enabled)
                 self.assertEqual(preview.exists(), not enabled)
                 self.assertEqual("SelfLift temporary" in status, enabled)
+
+    def test_marked_takes_save_as_revisions_then_review_together_with_main_last(self):
+        hunt = importlib.import_module(PACKAGE + ".selflift_hunt")
+        selection = importlib.import_module(PACKAGE + ".selflift_selection")
+        self.assertEqual(selection.MAX_FINISHED_TAKES, chain.MAX_REVIEW_CANDIDATES)
+        store = importlib.import_module(PACKAGE + ".selflift_hunt_store").HuntStore(self.root)
+        plan = chain._normalize_plan(json.dumps({"shots": [
+            {"id": "walk", "prompt": "A dog walks.", "length": 90}]}),
+            "marked_takes", 64, 64, 5, "video", "head", "disabled", "generated_audio",
+            5, 1., 8, 11, 18, "test", 0, "latent_guide")
+        state = chain._initial_state(plan, 1)
+        base_seed = plan["shots"][0]["seed"]
+        record = store.create({"id": "c" * 64, "run_name": plan["run_name"], "branch_id": "main",
+            "scene": 1, "phase": "awaiting_save", "selected": 1, "main": 1,
+            "selected_ordinals": [1, 2], "selection_id": "selection-1", "finishing_id": None})
+        store.update(record["id"], lambda r: r.update(selected=1, candidates=[
+            {"ordinal": 1, "seed": str(base_seed)}, {"ordinal": 2, "seed": str(base_seed + 1)}]))
+        folder = store.locate(record["id"])
+        (folder / "source.safetensors").write_bytes(b"temporary source")
+        canonical = Path(chain._artifact_paths(plan, 1)["metadata"])
+        images = torch.zeros(90, 64, 64, 3)
+        audio = {"sample_rate": 8000, "waveform": torch.zeros(1, 2, 30000)}
+
+        def inputs(ordinal):
+            chosen = hunt.selected_state(state, base_seed + ordinal - 1)
+            marker = {"id": record["id"], "created_at": record["created_at"],
+                "selection_id": "selection-1", "finishing_id": None, "main": 1,
+                "ordinals": [2, 1], "ordinal": ordinal, "source_plan": plan}
+            chosen[selection.BATCH_STATE] = marker
+            chosen[hunt.CLEANUP_STATE] = {"id": record["id"], "created_at": record["created_at"],
+                "scene": 1, "selected": 1, "selection_id": "selection-1", "finishing_id": None}
+            latent = {**self.latent, selection.BATCH_STATE: {
+                k: marker[k] for k in ("id", "selection_id", "ordinal")}}
+            return chosen, latent
+
+        def video_fixture(_images, path, *_args, **_kwargs):
+            Path(path).write_bytes(b"saved scene video fixture")
+
+        secondary, secondary_latent = inputs(2)
+        primary, primary_latent = inputs(1)
+        saver = chain.MiniMaxH3ChainSegmentSave()
+        with patch.object(chain, "_write_segment_video", side_effect=video_fixture):
+            alternate = saver.save(secondary, images, secondary_latent, audio)["result"][0]
+            self.assertFalse(canonical.exists(), "Alternate must not activate the scene for resume")
+            self.assertTrue(folder.is_dir(), "No early cleanup of unfinished marked takes")
+            self.assertTrue((self.root / alternate["revision_metadata"]).is_file())
+            self.assertNotIn(selection.NEXT_TAKE, json.loads(
+                (self.root / alternate["revision_metadata"]).read_text())["segment"])
+            bypassed = asyncio.run(chain.MiniMaxH3ChainReview().review(
+                secondary, alternate, True, False, 0, False, False, "none", candidate_count=8))
+            self.assertIs(bypassed["result"][0], alternate)
+            with patch.object(chain.MiniMaxH3ChainLoopEnd, "_recurse", return_value={"expand": {}}) as recurse:
+                chain.MiniMaxH3ChainLoopEnd().end(
+                    ["start", 0], secondary, images, secondary_latent, alternate)
+                continued = recurse.call_args.args[1]
+                self.assertEqual(continued["index"], 1)
+                self.assertEqual(continued["plan"], plan)
+                self.assertEqual(continued["segments"], [])
+            atomic_json = chain._atomic_json
+            def fail_main_commit(path, value):
+                if Path(path) == canonical:
+                    raise OSError("main commit failed")
+                return atomic_json(path, value)
+            with patch.object(chain, "_atomic_json", side_effect=fail_main_commit):
+                with self.assertRaisesRegex(OSError, "main commit failed"):
+                    saver.save(primary, images, primary_latent, audio)
+            self.assertTrue(folder.exists(), "A failed main save keeps the entire hunt")
+            self.assertTrue((self.root / alternate["checkpoint"]).is_file())
+            self.assertEqual(selection.next_take(store, store.read(record["id"]), None), 1)
+            main = saver.save(primary, images, primary_latent, audio)["result"][0]
+
+        self.assertFalse(folder.exists(), "Cleanup may run only after both full saves")
+        self.assertEqual(json.loads(canonical.read_text())["segment"]["revision"], main["revision"])
+        self.assertEqual([s["revision"] for s in main[selection.FINISHED_TAKES]],
+                         [alternate["revision"], main["revision"]])
+        for item in main[selection.FINISHED_TAKES]:
+            self.assertTrue((self.root / item["checkpoint"]).is_file())
+        sent = []
+
+        def send(event, payload, client_id=None):
+            if event != "minimax_h3_context_loop_review":
+                return
+            sent.append(payload)
+            chain._PENDING_REVIEWS[payload["token"]]["future"].set_result({
+                "action": "approve", "candidate_revision": main["revision"],
+                "kept_candidate_revisions": payload["kept_candidate_revisions"]})
+
+        with patch.object(chain, "PromptServer", types.SimpleNamespace(instance=types.SimpleNamespace(
+                send_sync=send, client_id="test"))), \
+                patch.object(chain, "_review_video", return_value=({"filename": "fixture.mp4"}, True, "")):
+            reviewed = asyncio.run(chain.MiniMaxH3ChainReview().review(
+                primary, main, True, False, 0, False, False, "none", candidate_count=8, unique_id="review"))
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["candidate_count"], 2, "Do not run additional expensive seed hunts")
+        self.assertEqual(sent[0]["candidate_index"], 2, "Main is the initially displayed candidate")
+        self.assertTrue(sent[0]["candidate_generation_complete"])
+        self.assertEqual(sent[0]["kept_candidate_revisions"], [alternate["revision"], main["revision"]])
+        self.assertEqual(reviewed["result"][0]["revision"], main["revision"])
+        # A later Review choice can still promote an alternate's own checkpoint.
+        selected, chosen = chain._select_review_candidate(primary, main,
+                                                          {"candidate_revision": alternate["revision"]})
+        self.assertEqual(selected["revision"], alternate["revision"])
+        self.assertEqual(chosen["plan"]["shots"][0]["seed"], base_seed + 1)
+        self.assertEqual(selected["_h3_review_decision"]["action"], "candidate_selected")
 
     def test_compact_and_editorial_trim_preserve_matching_time_axis(self):
         compact = chain._compact_latent(self.latent)

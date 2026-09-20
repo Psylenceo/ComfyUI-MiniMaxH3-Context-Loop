@@ -55,6 +55,7 @@ function injectStyles() {
         .h3sh-button { padding:7px 10px; border:1px solid #63708b; border-radius:5px;
             background:#292e3a; color:#eef1f7; cursor:pointer; font:inherit; }
         .h3sh-button:hover { background:#343b4b; }
+        .h3sh-dot[data-marked="true"] { box-shadow:0 0 0 2px #87be97; }
         .h3sh-root button:disabled { opacity:.42; cursor:not-allowed; }
         .h3sh-root button:focus-visible, .h3sh-root summary:focus-visible,
         .h3sh-root select:focus-visible { outline:2px solid #a9c2ff; outline-offset:2px; }
@@ -80,8 +81,8 @@ function injectStyles() {
         .h3sh-dot:hover { background:#526078; }
         .h3sh-dot[aria-pressed="true"] { outline:2px solid #a9c2ff; outline-offset:2px; background:#6f8fd0; }
         .h3sh-dot[data-chosen="true"] { border-color:#70d39c; background:#347a54; }
-        .h3sh-actions { display:flex; flex-wrap:wrap; gap:6px; }
-        .h3sh-actions > button { flex:1 1 180px; }
+        .h3sh-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
+        .h3sh-actions > button { min-width:0; overflow-wrap:anywhere; }
         .h3sh-view { color:#b9c4d9; font-size:11px; }
         .h3sh-approve { border-color:#4b9d72; background:#204332; font-weight:650; }
         .h3sh-approve:hover { background:#2b5740; }
@@ -196,8 +197,10 @@ function mount(node) {
     dots.setAttribute("aria-label", "Browse saved takes");
     const choose = text("button", "Use this take — finish upscale", "h3sh-button h3sh-approve");
     const upscale = text("button", "Preview upscale", "h3sh-button h3sh-upscale-preview");
+    const mark = text("button", "Mark for upscale", "h3sh-button h3sh-mark");
+    const main = text("button", "Make main", "h3sh-button h3sh-main");
     const actions = text("div", "", "h3sh-actions");
-    actions.append(upscale, choose);
+    actions.append(mark, main, upscale, choose);
     const viewLabel = text("span", "", "h3sh-view");
     candidates.append(nav, meta, dots, viewLabel, actions);
     const empty = text("p", "Completed motion previews will appear here.", "h3sh-empty");
@@ -210,7 +213,8 @@ function mount(node) {
     help.append(text("summary", "Silent motion preview · Help & recovery"),
         text("p", "Tiny-VAE previews show approximate motion and composition, not final detail or sound. Browse with the arrows or dots, then choose a take. The current candidate finishes and saves before the rest are skipped."),
         text("p", "Preview upscale runs the configured latent lift and corrections, then the Tiny VAE, without high-resolution denoising or approving the take. Inspect lift artifacts and switch back to the low preview. A clean preview does not guarantee a clean final render."),
-        text("p", "After OOM/restart, keep batch name, seed and settings fixed and queue the matching workflow in resume mode. Completed takes and upscale previews are reused; only the chosen take runs the high-resolution finishing steps."), recover);
+        text("p", "Mark several takes for upscale and choose one main take. Finish marked saves the alternates first and the main last, then shows all finished choices in Review Gate. Only the accepted main continues the scene chain."),
+        text("p", "After OOM/restart, keep batch name, seed and settings fixed and queue the matching workflow in resume mode. Saved low/high passes and completed clips are reused. Selection changes are shared across tabs; cleanup waits until every marked take is saved."), recover);
     toolbar.append(select, reload, clean);
     root.append(head, gateNotice, toolbar, player, empty, mediaStatus, candidates, status, cleanupStatus, help);
     let optionsKey = "";
@@ -219,6 +223,7 @@ function mount(node) {
     let cleaning = false;
     let choosing = false;
     let requesting = false;
+    let marking = false;
     let currentBatch = null;
     let currentTake = null;
     function clearVideo() {
@@ -250,8 +255,9 @@ function mount(node) {
         select.value = key;
         const batch = batches.find(b => b.id === key);
         currentBatch = batch;
-        clean.disabled = cleaning || choosing || requesting || !batch || batch.active;
-        select.disabled = cleaning || choosing || requesting;
+        clean.disabled = cleaning || choosing || requesting || marking || !batch || batch.active
+            || batch.phase === "awaiting_save";
+        select.disabled = cleaning || choosing || requesting || marking;
         if (!batch) {
             recover.hidden = true;
             clearVideo(); dots.replaceChildren(); dotsKey = "";
@@ -271,18 +277,25 @@ function mount(node) {
         const hunting = batch.active && ["low", "preview"].includes(batch.phase);
         const previewPending = batch.active && batch.upscale_request != null;
         const automatic = batch.review_enabled === false;
+        const marked = batch.marked ?? (batch.selected != null ? [batch.selected] : []);
+        const mainOrdinal = batch.main ?? batch.selected;
+        const locked = batch.phase === "awaiting_save" || (batch.active &&
+            (batch.phase === "high" || batch.selected != null || automatic));
         status.textContent = batch.error ? `Paused — ${batch.error}`
             : batch.active && automatic ? batch.phase === "high"
                 ? `Review gate off · upscaling take ${batch.selected} automatically.`
                 : "Review gate off · saving one low-resolution take, then upscaling automatically."
             : hunting ? `Generating take ${batch.current || batch.candidates.length + 1} · ${batch.candidates.length} ready to review.`
             : batch.active && batch.phase === "upscale_preview" ? `Previewing take ${batch.upscale_request}'s latent upscale · no high denoising or approval.`
-            : batch.active && batch.phase === "high" ? `Upscaling take ${batch.selected}. You can still browse saved previews.`
+            : batch.phase === "awaiting_save" ? `Saving marked takes in sequence · main take ${batch.selected} finishes last. Resume the matching workflow if interrupted.`
+            : batch.active && batch.phase === "high" ? `Upscaling take ${batch.current ?? batch.selected}. Main take ${batch.selected}. You can still browse saved previews.`
             : batch.active ? "Choose a take to finish its upscale."
             : batch.phase === "finished" ? "Upscale finished. Saved takes are available for another version."
             : "Saved takes · queue the matching workflow to resume.";
         if (hunting && batch.selected && !automatic) {
-            status.textContent += ` · Finishing and saving take ${batch.current}; then upscale take ${batch.selected} and skip remaining candidates.`;
+            const finishing = (batch.selected_ordinals?.length ?? 1) > 1
+                ? `${batch.selected_ordinals.length} marked takes (main ${batch.selected} last)` : `take ${batch.selected}`;
+            status.textContent += ` · Finishing and saving take ${batch.current}; then upscale ${finishing} and skip remaining candidates.`;
         }
         if (hunting && previewPending) status.textContent += ` · Upscale preview for take ${batch.upscale_request} is queued after the current candidate is saved.`;
         const remembered = node.properties.h3_selflift_preview;
@@ -308,7 +321,8 @@ function mount(node) {
         const position = batch.candidates.indexOf(take);
         takeTitle.textContent = `Take ${take.ordinal} · ${position + 1} of ${batch.candidates.length} ready`;
         seedLabel.textContent = `Seed ${take.seed}`;
-        chosenLabel.textContent = batch.selected === take.ordinal ? "Chosen for upscale" : "";
+        chosenLabel.textContent = mainOrdinal === take.ordinal ? "Main take · included in upscale"
+            : marked.includes(take.ordinal) ? "Marked for upscale" : "";
         previous.disabled = position === 0;
         next.disabled = position === batch.candidates.length - 1;
         // Only change the source when the viewed take changes. New candidates,
@@ -341,20 +355,36 @@ function mount(node) {
         for (const dot of dots.querySelectorAll("button")) {
             dot.setAttribute("aria-pressed", String(Number(dot.dataset.ordinal) === take.ordinal));
             dot.dataset.chosen = String(Number(dot.dataset.ordinal) === batch.selected);
+            dot.dataset.marked = String(marked.includes(Number(dot.dataset.ordinal)));
         }
+        mark.textContent = marked.includes(take.ordinal) ? "Marked for upscale ✓" : "Mark for upscale";
+        mark.setAttribute("aria-pressed", String(marked.includes(take.ordinal)));
+        const markLimit = batch.max_marked ?? 20;
+        const atLimit = marked.length >= markLimit && !marked.includes(take.ordinal);
+        mark.disabled = cleaning || choosing || requesting || marking || locked || !hasPreview
+            || mainOrdinal === take.ordinal || atLimit;
+        mark.title = atLimit ? `Mark at most ${markLimit} takes for one final review.`
+            : mainOrdinal === take.ordinal ? "The main take is always included. Choose another main before unmarking this take."
+            : "Keep this take for full high-resolution finishing; this does not release the gate.";
+        main.textContent = mainOrdinal === take.ordinal ? "Main take ★" : "Make main";
+        main.disabled = cleaning || choosing || requesting || marking || locked || !hasPreview
+            || mainOrdinal === take.ordinal || atLimit;
+        main.title = atLimit ? `Unmark another take first; the main must be included in the ${markLimit}-take limit.`
+            : "Choose the take that continues the chain; automatically includes it in the marked set.";
         upscale.textContent = showingUpscale ? "Show low preview" : take.upscale_preview ? "Show upscale preview"
             : previewPending && batch.upscale_request === take.ordinal ? "Preparing upscale preview…" : "Preview upscale";
-        upscale.disabled = cleaning || choosing || requesting || !hasPreview || (!take.upscale_preview &&
+        upscale.disabled = cleaning || choosing || requesting || marking || !hasPreview || (!take.upscale_preview &&
             (!batch.active || automatic || batch.selected != null || previewPending ||
                 !["low", "preview", "waiting"].includes(batch.phase)));
         upscale.title = take.upscale_preview ? "Switch between the saved low and upscale previews; no generation."
             : !batch.active ? "Queue the matching workflow in resume mode to preview its upscale."
             : "Run the latent lift and Tiny VAE only. Keep the gate open; do not approve or run high denoising.";
-        choose.disabled = cleaning || choosing || requesting || !hasPreview || previewPending ||
-            (batch.active && (batch.phase === "high" || automatic));
+        choose.disabled = cleaning || choosing || requesting || marking || !hasPreview || previewPending || locked;
         choose.textContent = !hasPreview ? "Automatic take — no review required"
+            : marked.length ? `Finish ${marked.length} marked · main take ${mainOrdinal}`
             : hunting ? `Use take ${take.ordinal} now` : `Use take ${take.ordinal} — finish upscale`;
-        choose.title = hunting ? "Finish and save the current candidate, skip the rest, then upscale this take."
+        choose.title = marked.length ? "Finish the marked takes sequentially, with the main last."
+            : hunting ? "Finish and save the current candidate, skip the rest, then upscale this take."
             : "Select this take for upscale. If the hunt is stopped, queue its matching workflow to continue.";
     }};
     function move(offset) {
@@ -364,6 +394,28 @@ function mount(node) {
     }
     previous.onclick = () => move(-1);
     next.onclick = () => move(1);
+    async function saveMarks(makeMain) {
+        if (!currentBatch || !currentTake || (makeMain ? main : mark).disabled) return;
+        const batch = currentBatch, ordinal = currentTake.ordinal;
+        let marked = [...(batch.marked ?? (batch.selected != null ? [batch.selected] : []))];
+        const mainOrdinal = makeMain ? ordinal : batch.main ?? batch.selected ?? ordinal;
+        marked = makeMain || !marked.includes(ordinal) ? [...new Set([...marked, ordinal, mainOrdinal])]
+            : marked.filter(value => value !== ordinal);
+        marking = true; panel.render();
+        let errorMessage = "";
+        try {
+            const response = await api.fetchApi("/h3/selflift/selection", {method:"POST",
+                headers:{"Content-Type":"application/json"}, body:JSON.stringify({id:batch.id,
+                    created_at:batch.created_at, selection_version:batch.selection_version ?? 0,
+                    main:mainOrdinal, ordinals:marked})});
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || "Could not update marked takes");
+        } catch (error) { errorMessage = error.message; }
+        finally { await refresh(); marking = false; panel.render(); }
+        if (errorMessage) status.textContent = errorMessage;
+    }
+    mark.onclick = () => saveMarks(false);
+    main.onclick = () => saveMarks(true);
     nav.addEventListener("keydown", event => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault(); move(event.key === "ArrowLeft" ? -1 : 1);
@@ -392,12 +444,16 @@ function mount(node) {
     };
     choose.onclick = async () => {
         if (!currentBatch || !currentTake || choose.disabled) return;
-        const key = currentBatch.id, ordinal = currentTake.ordinal;
+        const key = currentBatch.id;
+        const ordinal = currentBatch.marked?.length ? currentBatch.main : currentTake.ordinal;
+        const ordinals = currentBatch.marked?.length ? [...currentBatch.marked] : [ordinal];
+        const created_at = currentBatch.created_at, selection_version = currentBatch.selection_version ?? 0;
         choosing = true; panel.render();
         let errorMessage = "";
         try {
             const response = await api.fetchApi("/h3/selflift/choose", {method:"POST",
-                headers:{"Content-Type":"application/json"}, body:JSON.stringify({id:key, ordinal})});
+                headers:{"Content-Type":"application/json"}, body:JSON.stringify({id:key, ordinal, ordinals,
+                    created_at, selection_version})});
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || "Could not select take");
             node.properties.h3_selflift_batch = key;

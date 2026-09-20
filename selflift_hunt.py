@@ -94,20 +94,34 @@ def selected_state(state, seed):
     return result
 
 
-def approve(store, key, ordinal):
+def approve(store, key, ordinal, ordinals=None, created_at=None, version=None):
+    from .selflift_selection import check_edit, selection, set_selection
     def change(record):
+        check_edit(record, created_at, version)
         if record.get("upscale_request") is not None and key in _ACTIVE:
             raise ValueError("Wait for the upscale preview, then choose a take to finish.")
         if record.get("phase") == "high" and key in _ACTIVE:
             raise ValueError("The selected take is already being upscaled; wait for it to finish.")
         if record.get("review_enabled", True) is False and key in _ACTIVE:
             raise ValueError("Review gate is off for this running hunt; wait for it to finish.")
-        take = next((v for v in record["candidates"] if v["ordinal"] == ordinal), None)
-        if take is None or not take.get("preview"):
-            raise ValueError("Choose a completed preview.")
-        if not (store.locate(key) / take["checkpoint"]).is_file():
-            raise ValueError("This take's middle-pass file is missing.")
-        record["selected"] = ordinal
+        marked = selection(record, ordinal, [ordinal] if ordinals is None else ordinals)
+        for take in record["candidates"]:
+            if take["ordinal"] in marked and not (store.locate(key) / take["checkpoint"]).is_file():
+                raise ValueError("A marked take's middle-pass file is missing.")
+        set_selection(record, ordinal, marked, approve=True)
+    with _ACTIVE_LOCK:
+        if key in _CLEANING:
+            raise ValueError("This saved hunt is being cleaned.")
+        return store.update(key, change)
+
+
+def mark_takes(store, key, main, ordinals, created_at, version):
+    from .selflift_selection import check_edit, selection, set_selection
+    def change(record):
+        check_edit(record, created_at, version)
+        if key in _ACTIVE and (record.get("selected") is not None or record.get("review_enabled", True) is False):
+            raise ValueError("Wait for the approved takes to finish before changing the selection.")
+        set_selection(record, main, selection(record, main, ordinals))
     with _ACTIVE_LOCK:
         if key in _CLEANING:
             raise ValueError("This saved hunt is being cleaned.")
@@ -141,6 +155,8 @@ def clean_saved_hunt(store, key, expected=None):
     with _ACTIVE_LOCK:
         if key in _ACTIVE or key in _CLEANING:
             raise ValueError("Stop the running hunt before cleaning its saved takes.")
+        if key in store._index() and store.read(key).get("phase") == "awaiting_save":
+            raise ValueError("Marked takes are awaiting scene save; resume the matching workflow before cleanup.")
         _CLEANING.add(key)
     try:
         return store.remove(key, expected)
@@ -167,6 +183,7 @@ def cleanup_after_segment_save(state, output_root, logger):
             "run_name": plan["run_name"], "branch_id": plan.get("_branch_id", "main"),
             "scene": state["index"],
             "finishing_id": marker.get("finishing_id"),
+            "selection_id": marker.get("selection_id"),
         })
     except (OSError, ValueError, KeyError) as exc:
         logger.warning("H3 SelfLift scene saved; temporary hunt cleanup skipped: %s", exc)
@@ -188,7 +205,8 @@ class MiniMaxH3SelfLiftSeedHunt:
         schema.setdefault("optional", {})["auto_remove_saved_takes"] = ("BOOLEAN", {
             "default": False, "label_on": "Clean after scene save", "label_off": "Keep saved takes",
             "tooltip": "Delete this hunt's temporary latents and previews only after Segment Save "
-                       "successfully saves the chosen clip/checkpoint. Keep off to upscale multiple takes. "
+                       "successfully saves every marked clip/checkpoint, including the main take. "
+                       "Keep off to retain low passes for later choices. "
                        "Requires selected_state connected to Segment Save. Failed runs keep recovery files.",
         })
         # Append optional controls to preserve positional values in old workflows.
@@ -216,7 +234,8 @@ class MiniMaxH3SelfLiftSeedHunt:
     CATEGORY = "sampling/minimax/context_loop"
     DESCRIPTION = ("Experimental SelfLift seed hunt: saves each low-resolution pass before tiny-VAE preview. "
         "Supports Euler or experimental RES4LYF Radau IA 2s (eta=0). "
-        "Choose a take to run only its remaining high-resolution steps. Saved takes survive OOM/restart. "
+        "Mark one or more takes and choose a main; finish their remaining high-resolution steps sequentially. "
+        "Saved takes survive OOM/restart. "
         "Choose early to finish saving the current candidate, skip the rest and upscale your selection. "
         "Turn Review gate off to run one take without a pause, retaining middle-pass recovery. "
         "Keep seed fixed to resume. Wire selected_state to Segment Save and Review Gate/Loop End. "
@@ -241,6 +260,7 @@ class MiniMaxH3SelfLiftSeedHunt:
         from .selflift_state import prepare_previous_context, settings_signature, SIGNATURE
         from .selflift_hunt_store import HuntStore, digest, save_bundle, load_bundle, atomic_json
         from .selflift_preview import check_preview, save_preview
+        from .selflift_selection import BATCH_STATE, ordered_takes, next_take, validate_marker
 
         plan = state["plan"]
         if run_mode not in ("resume", "regenerate"):
@@ -301,9 +321,16 @@ class MiniMaxH3SelfLiftSeedHunt:
         key = base_key
         claimed = False
         try:
-            key = await _work(store.attempt_key, {"id": base_key,
-                "run_name": plan["run_name"], "branch_id": contract["branch_id"]},
-                regenerate=run_mode == "regenerate")
+            continuing = state.get(BATCH_STATE)
+            if continuing:
+                if continuing.get("base_key") != base_key or continuing.get("finishing_id") != finishing_id:
+                    raise ValueError("The SelfLift finishing recipe changed; resume the matching saved workflow.")
+                await _work(validate_marker, store, state, continuing)
+                key = continuing["id"]
+            else:
+                key = await _work(store.attempt_key, {"id": base_key,
+                    "run_name": plan["run_name"], "branch_id": contract["branch_id"]},
+                    regenerate=run_mode == "regenerate")
             with _ACTIVE_LOCK:
                 if key != base_key and (key in _ACTIVE or key in _CLEANING):
                     raise ValueError("This SelfLift attempt is already running or being cleaned.")
@@ -469,10 +496,13 @@ class MiniMaxH3SelfLiftSeedHunt:
                     record = await _work(update, phase="high", current=None, error=None)
                     break
                 await asyncio.sleep(.5)
-            selected = next(v for v in record["candidates"] if v["ordinal"] == record["selected"])
+            order = ordered_takes(record)
+            multiple = len(order) > 1
+            ordinal = await _work(next_take, store, record, finishing_id) if multiple else record["selected"]
+            selected = next(v for v in record["candidates"] if v["ordinal"] == ordinal)
             suffix = "." + finishing_id if finishing_id else ""
             finished_path = folder / ("finished_%04d%s.safetensors" % (selected["ordinal"], suffix))
-            await _work(update, phase="high", error=None)
+            await _work(update, phase="high", current=ordinal, error=None)
             notify()
             if finished_path.is_file():
                 logging.info("[SelfLift] scene %d: reusing finished take %d; no sampling", scene, selected["ordinal"])
@@ -484,14 +514,25 @@ class MiniMaxH3SelfLiftSeedHunt:
                 await _work(save_bundle, finished_path, output)
             chosen_state = selected_state(state, int(selected["seed"]))
             chosen_state.pop(CLEANUP_STATE, None)
+            if multiple:
+                marker = {"id": key, "created_at": record["created_at"], "base_key": base_key,
+                          "selection_id": record["selection_id"], "finishing_id": finishing_id,
+                          "main": record["selected"], "ordinals": order, "ordinal": ordinal,
+                          "source_plan": plan}
+                chosen_state[BATCH_STATE] = marker
+                output = dict(output)
+                output[BATCH_STATE] = {k: marker[k] for k in ("id", "selection_id", "ordinal")}
             if auto_remove_saved_takes:
                 chosen_state[CLEANUP_STATE] = {"id": key, "created_at": record["created_at"],
-                    "selected": selected["ordinal"], "scene": scene, "finishing_id": finishing_id}
-            await _work(update, phase="finished")
+                    "selected": record["selected"], "scene": scene, "finishing_id": finishing_id,
+                    "selection_id": record.get("selection_id")}
+            await _work(update, phase="awaiting_save" if multiple else "finished")
             notify()
             status = "SelfLift take %d; seed %s; %d low + %d high steps" % (
                 selected["ordinal"], selected["seed"], total-high, high)
             status += "; %s attempt %s" % (run_mode, key[:12])
+            if multiple:
+                status += "; %d marked takes; main take %d (finished last)" % (len(order), record["selected"])
             if model_hires is not None:
                 status += "; separate finishing checkpoint"
             if not review_enabled:
@@ -501,9 +542,10 @@ class MiniMaxH3SelfLiftSeedHunt:
             return {"ui": {"h3_selflift_hunt": [key]}, "result": (output,
                 status, chosen_state)}
         except BaseException as exc:
+            error = str(exc)[:500]
             try:
                 if claimed:
-                    await _work(store.update, key, lambda r: r.update(phase="paused", error=str(exc)[:500]))
+                    await _work(store.update, key, lambda r: r.update(phase="paused", error=error))
             except Exception:
                 pass
             raise
@@ -525,14 +567,22 @@ def register_routes():
         return
 
     async def listing(request):
+        from .selflift_selection import MAX_FINISHED_TAKES
         store = HuntStore(folder_paths.get_output_directory())
         rows = await asyncio.to_thread(store.list)
         # No prompts/conditioning, media probing, or tensor reads on UI requests.
         fields = ("id", "run_name", "branch_id", "scene", "scene_name", "batch_name", "created_at",
                   "phase", "current", "selected", "candidates", "error", "low_steps", "high_steps", "review_enabled",
-                  "upscale_request")
-        return web.json_response({"batches": [dict({k: row.get(k) for k in fields},
-            active=row["id"] in _ACTIVE) for row in rows]}, headers={"Cache-Control": "no-store"})
+                  "upscale_request", "marked", "main", "selected_ordinals", "selection_version")
+        batches = []
+        for row in rows:
+            public = dict({k: row.get(k) for k in fields}, active=row["id"] in _ACTIVE,
+                          max_marked=MAX_FINISHED_TAKES)
+            public["candidates"] = [{**{k: v for k, v in take.items() if k != "published"},
+                "saved": bool(take.get("published", {}).get(row.get("finishing_id") or "default"))}
+                for take in row["candidates"]]
+            batches.append(public)
+        return web.json_response({"batches": batches}, headers={"Cache-Control": "no-store"})
 
     async def choose(request):
         try:
@@ -541,7 +591,8 @@ def register_routes():
             ordinal = body.get("ordinal")
             if type(ordinal) is not int:
                 raise ValueError("Choose a take number.")
-            await asyncio.to_thread(approve, store, str(body.get("id", "")), ordinal)
+            await asyncio.to_thread(approve, store, str(body.get("id", "")), ordinal,
+                                   body.get("ordinals"), body.get("created_at"), body.get("selection_version"))
             return web.json_response({"ok": True})
         except (ValueError, KeyError, FileNotFoundError) as exc:
             return web.json_response({"error": str(exc)}, status=400)
@@ -557,6 +608,18 @@ def register_routes():
             return web.json_response(data["workflow"], headers={
                 "Content-Disposition": 'attachment; filename="SelfLift-hunt-recovery.json"'})
         except (ValueError, FileNotFoundError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+    async def mark(request):
+        try:
+            body = await request.json()
+            if "created_at" not in body or type(body.get("selection_version")) is not int:
+                raise ValueError("Refresh the saved hunt before marking takes.")
+            await asyncio.to_thread(mark_takes, HuntStore(folder_paths.get_output_directory()),
+                                   str(body.get("id", "")), body.get("main"), body.get("ordinals"),
+                                   body["created_at"], body["selection_version"])
+            return web.json_response({"ok": True})
+        except (ValueError, KeyError, FileNotFoundError) as exc:
             return web.json_response({"error": str(exc)}, status=400)
 
     async def upscale_preview(request):
@@ -583,6 +646,7 @@ def register_routes():
             return web.json_response({"error": str(exc)}, status=400)
     routes.get("/h3/selflift/hunts")(listing)
     routes.post("/h3/selflift/choose")(choose)
+    routes.post("/h3/selflift/selection")(mark)
     routes.post("/h3/selflift/upscale-preview")(upscale_preview)
     routes.get("/h3/selflift/workflow")(workflow)
     routes.post("/h3/selflift/clean")(clean)

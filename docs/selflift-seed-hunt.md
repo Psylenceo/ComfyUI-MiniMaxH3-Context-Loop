@@ -16,16 +16,45 @@ workflows and the ordinary Review Gate are unchanged.
 4. Browse the low-pass videos with the Review Gate-style arrows or dots.
    Optionally click **Preview upscale** to inspect the lifted latent using the
    Tiny VAE before spending high-resolution denoising steps. Then
-   click **Use take — finish upscale**. The single player fills the node; drag
+   click **Use take — finish upscale** for one take, or **Mark for upscale** on
+   several takes, choose **Make main**, then **Finish N marked**. The main is
+   always included. Browsing and marking do not release the gate.
+   The single player fills the node; drag
    its lower handle to resize it, or double-click the handle to restore auto-fit.
-   Only the approved candidate gets the remaining high-resolution steps.
+   Only approved takes get the remaining high-resolution steps, one at a time.
    These are silent, approximate motion/composition previews, not final-detail
    or audio-quality previews. Flat 2D TAE frames repeat at H3's token timing;
    playback duration is correct, but motion has fewer distinct frames.
 5. Wire `selected_state` to downstream Trim, Segment Save, final Review Gate
    and Loop End. This records the chosen seed and carries it to later scenes.
    The example already does this. Keep the final Review Gate's candidate count
-   at **1**; it reviews the finished result, not another set of expensive hunts.
+   at **1** for single-take hunts. A multi-take selection supplies its own
+   finished candidate set and overrides that count; it never starts extra hunts.
+
+## Finish several takes with one main
+
+Marking the first take also makes it main. Mark additional takes, or use
+**Make main** on another completed preview; the previous main stays marked
+until you unmark it. The main cannot be unmarked without choosing another main.
+Mark up to 20 takes per finished review (you can still hunt up to 100 low passes).
+Marks and the main choice are stored on the server and shared across tabs.
+
+**Finish N marked** commits the selection. Alternates are upscaled, fully
+decoded and saved first; the main is finished last. Each uses the same original
+scene context, never the preceding alternate. Alternates are saved revisions,
+but do not replace the branch's active scene or advance the loop.
+
+The final Review Gate shows all finished takes, initially displaying the main
+and keeping all marked takes. You can change which take continues the chain or
+unkeep alternatives there using the existing review controls. If final review
+is disabled, the main continues and the other finished revisions remain saved.
+No new nodes or additional high-resolution latent batch in memory are needed.
+
+After interruption, queue the matching scene/settings in **resume** mode:
+saved alternates are skipped and completed high latents are reused. A failed
+high pass restarts from its saved low pass. Auto-remove waits until **every**
+marked clip/checkpoint, including the main, has been committed. The selection
+is locked while finishing; browsing remains available.
 
 ## Preview the latent upscale before approval
 
@@ -121,7 +150,8 @@ not delete or automatically regenerate clips that were already saved.
 **Review gate** defaults to **on**, including in existing workflows. Turn it
 **off** to run automatically without stopping to choose a candidate:
 
-- If this matching batch already has a chosen take, resume/upscale that take.
+- If this matching batch already has approved takes, resume that selection,
+  including all marked takes and its main.
 - Otherwise, generate or reuse just **take 1**, using the input seed. Candidate
   count is ignored; the node does not generate a batch that nobody will review.
 - Tiny-VAE decoding is skipped, so the tiny model and KJNodes decoder are not
@@ -231,8 +261,7 @@ stop or requeue: the candidate currently generating finishes its low pass and
 preview, both are saved, then all remaining candidates are skipped and your
 chosen take is upscaled. If no candidate is in progress, it proceeds directly.
 The panel shows the pending choice while the current candidate finishes.
-You can change the choice until its high-resolution pass starts; selection is
-locked during that pass.
+Once approved, the panel locks that selection for this execution.
 
 The early choice is saved immediately. If the current candidate fails or the
 server restarts before the upscale, queue the same workflow/settings again:
@@ -294,12 +323,14 @@ does not delete saved takes or flush ComfyUI's model/output caches.
   off to select and upscale another version from the same hunt later.
 - Turn it **on** (Clean after scene save) to remove that hunt's temporary
   bundles, tiny previews and recovery snapshot after **Segment Save** commits
-  the chosen clip and its normal checkpoint. Keep `selected_state` connected
+  every approved clip and its normal checkpoint, with the main committed last.
+  Keep `selected_state` connected
   to Segment Save, as in the example. Choosing a take or finishing its high
   pass alone does not delete anything: a decode/save OOM still has recovery.
 - **Clean saved takes**, beside Refresh, permanently removes only the batch
   selected in the dropdown after confirmation. It is disabled while that hunt
-  is running; stop it first if you want to discard an unfinished batch.
+  is running. A multi-take selection awaiting downstream scene saves is also
+  protected; resume the matching scene to finish those saves before cleanup.
 
 Both paths keep normal scene videos, checkpoints, project assets and other
 hunts. Cleanup cannot be undone: that batch can no longer resume or provide

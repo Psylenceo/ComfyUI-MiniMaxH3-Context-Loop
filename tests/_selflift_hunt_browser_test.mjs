@@ -124,6 +124,10 @@ async function browserChecks() {
         const previewBounds = previewButton.getBoundingClientRect(), approvalBounds = approvalButton.getBoundingClientRect();
         check(Math.abs(previewBounds.top - approvalBounds.top) < 1 && approvalBounds.left - previewBounds.right <= 7,
             "Preview and approval buttons stay adjacent on one row at 620px");
+        const markBounds = root.querySelector('.h3sh-mark').getBoundingClientRect();
+        const mainBounds = root.querySelector('.h3sh-main').getBoundingClientRect();
+        check(Math.abs(markBounds.top - mainBounds.top) < 1 && markBounds.bottom < previewBounds.top,
+            "Mark and main controls stay paired directly above preview and finish");
         batch.candidates = takes(12); node._h3SelfLiftHunt.render();
         check(root.querySelectorAll("video").length === 1, "Twelve takes use one focused player");
         check(root.querySelectorAll(".h3sh-dot").length === 12, "Every take has a navigation dot");
@@ -137,7 +141,7 @@ async function browserChecks() {
             "New candidates leave the viewed take alone");
         const selected = root.querySelector('.h3sh-approve');
         batch.phase = "high"; batch.selected = 2; node._h3SelfLiftHunt.render();
-        check(selected.disabled && root.querySelector('.h3sh-chosen').textContent === "Chosen for upscale",
+        check(selected.disabled && root.querySelector('.h3sh-chosen').textContent === "Main take · included in upscale",
             "Chosen take and high-pass lock are visible");
         root.querySelector('.h3sh-nav').dispatchEvent(new KeyboardEvent("keydown", {key:"ArrowRight", bubbles:true}));
         check(video.src.includes("take_3.mp4") && batch.selected === 2,

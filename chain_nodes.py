@@ -19397,6 +19397,10 @@ class MiniMaxH3ChainSegmentSave:
     def save(self, state, images, sampled_latent, audio=None,
              images_with_overlap=None, denoised_latent=None,
              prompt=None, extra_pnginfo=None, dynprompt=None, unique_id=None):
+        from .selflift_selection import BATCH_STATE, validate_save
+        validate_save(state, sampled_latent, _output_root())
+        finishing = state.get(BATCH_STATE) or {}
+        selflift_secondary = bool(finishing) and finishing["ordinal"] != finishing["main"]
         if _st_save is None:
             raise RuntimeError("safetensors is required for H3 chain checkpoints.")
         plan = state["plan"]
@@ -20045,7 +20049,7 @@ class MiniMaxH3ChainSegmentSave:
                     if forked_from:
                         segment["forked_from_branch_id"] = forked_from
             segment["branch_id"] = branch_id
-            if previous_revision is not None and alternate_take is None:
+            if previous_revision is not None and alternate_take is None and not selflift_secondary:
                 segment["supersedes"] = previous_revision
             metadata = {
                 "format": "h3_chain_segment_v3",
@@ -20074,7 +20078,7 @@ class MiniMaxH3ChainSegmentSave:
                 _require_plan_write(plan, "publish a scene checkpoint")
                 _require_chapter_resolution_locks(plan)
                 _atomic_json(published_metadata, metadata)
-                if alternate_take is None:
+                if alternate_take is None and not selflift_secondary:
                     _atomic_json(paths["metadata"], metadata)
                     # The canonical pointer is the durable commit point. From
                     # here on, cleanup must retain the new immutable artifacts
@@ -20113,6 +20117,8 @@ class MiniMaxH3ChainSegmentSave:
                             "H3 Chain committed clip %d but could not refresh "
                             "its legacy root recovery files: %s", index, exc)
                 else:
+                    # Marked SelfLift alternatives remain immutable saved
+                    # revisions without changing resume/final-cut pointers.
                     committed = True
         finally:
             _safe_unlink(checkpoint_tmp)
@@ -20130,8 +20136,10 @@ class MiniMaxH3ChainSegmentSave:
 
         cache_cleanup = confirm_saved_use(
             dynprompt, unique_id, published_metadata, _output_root(), _LOG)
+        from .selflift_selection import after_save, NEXT_TAKE
+        segment = after_save(state, segment, _output_root())
         hunt_cleanup = None
-        if state.get("_h3_selflift_hunt_cleanup"):
+        if state.get("_h3_selflift_hunt_cleanup") and not segment.get(NEXT_TAKE):
             from .selflift_hunt import cleanup_after_segment_save
             hunt_cleanup = cleanup_after_segment_save(state, _output_root(), _LOG)
         retained = (
@@ -20143,8 +20151,8 @@ class MiniMaxH3ChainSegmentSave:
         blend_status = (" + %d-frame blend artifact %s" %
                         (blend_frames, published_blend)
                         if published_blend is not None else "")
-        save_kind = "saved editorial alternate" if alternate_take is not None \
-            else "saved clip"
+        save_kind = ("saved SelfLift alternate" if selflift_secondary else
+                     "saved editorial alternate" if alternate_take is not None else "saved clip")
         status = ("%s %d/%d revision %s: %s + checkpoint %s%s%s%s" %
                   (save_kind, index, len(plan["shots"]), transaction,
                    published_segment, published_checkpoint, audio_status,
@@ -21033,6 +21041,10 @@ class MiniMaxH3ChainReview:
         if int(segment.get("index", -1)) != index:
             raise ValueError(
                 "H3 Chain Review received the wrong segment for clip %d." % index)
+        from .selflift_selection import NEXT_TAKE, FINISHED_TAKES
+        if segment.get(NEXT_TAKE):
+            status = "saved SelfLift alternate; finishing the next marked take"
+            return {"ui": {"text": [status]}, "result": (segment, status)}
         defer_completed_batch = _deferred_review_enabled(pending_review)
         if not enabled and not defer_completed_batch:
             status = "review bypassed for clip %d" % index
@@ -21059,6 +21071,18 @@ class MiniMaxH3ChainReview:
         previous_candidates = _review_batch_candidates(
             state, index, candidate_target)
         batch_token = _review_batch_token(state, index, candidate_target)
+        finished_takes = segment.get(FINISHED_TAKES)
+        if finished_takes:
+            # SelfLift already finished exactly the marked set. Do not start
+            # another seed hunt via Review Gate's ordinary candidate count.
+            if (finished_takes[-1].get("revision") != segment.get("revision")
+                    or any(take.get("index") != index for take in finished_takes)):
+                raise ValueError("SelfLift finished takes do not match the main scene checkpoint.")
+            candidate_target = _review_candidate_target(len(finished_takes))
+            previous_candidates = [
+                _review_candidate_record(take, *_review_video(plan, take, None))
+                for take in finished_takes[:-1]]
+            batch_token = ""
         candidate_index = len(previous_candidates) + 1
         if candidate_index > candidate_target:
             previous_candidates = []
@@ -21084,6 +21108,8 @@ class MiniMaxH3ChainReview:
         candidates = previous_candidates + [current_candidate]
         kept_revisions = _review_batch_kept_revisions(
             state, index, candidate_target, previous_candidates)
+        if finished_takes:
+            kept_revisions = [take["revision"] for take in finished_takes]
 
         queued_decision = None
         batch_entry = (_ACTIVE_CANDIDATE_BATCHES.get(batch_token)
@@ -22389,6 +22415,13 @@ class MiniMaxH3ChainLoopEnd:
         if int(segment.get("index", -1)) != index:
             raise ValueError("H3 Chain End received the wrong segment for clip %d."
                              % index)
+        from .selflift_selection import BATCH_STATE, NEXT_TAKE, continuation_state
+        if segment.get(NEXT_TAKE):
+            retry_state = continuation_state(state, segment[NEXT_TAKE])
+            expansion = self._recurse(flow, retry_state, dynprompt, unique_id)
+            del images, sampled_latent, segment, state
+            _release_loop_boundary_resources(between_scene_cleanup, index)
+            return expansion
         review = segment.get("_h3_review_decision")
         if isinstance(review, dict) and review.get("action") == "retry":
             revised_plan = _plan_with_review_revision(
@@ -22399,6 +22432,7 @@ class MiniMaxH3ChainLoopEnd:
                 review.get("basic_prompt"))
             retry_state = dict(state)
             retry_state["plan"] = revised_plan
+            retry_state.pop(BATCH_STATE, None)
             candidate_batch = review.get("candidate_batch")
             if isinstance(candidate_batch, dict):
                 retry_state["candidate_batch"] = candidate_batch

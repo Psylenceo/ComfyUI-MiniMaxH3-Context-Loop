@@ -121,6 +121,56 @@ class CleanupTests(unittest.TestCase):
         self.assertNotIn(record["id"], hunt._CLEANING)
         self.assertGreater(hunt.clean_saved_hunt(self.store, record["id"])["files"], 0)
 
+    def test_mark_routes_persist_drafts_fence_stale_tabs_and_hide_published_metadata(self):
+        record, folder, preview = self.batch()
+        self.store.update(record["id"], lambda r: r.update(candidates=[
+            {"ordinal": n, "seed": str(n), "checkpoint": "take_%04d.safetensors" % n,
+             "preview": preview.relative_to(self.root).as_posix(),
+             "published": {"default": {"scene_prompt": "private large metadata"}}}
+            for n in (1, 2)]))
+        handlers = {}
+        class Routes:
+            def get(self, path):
+                return lambda handler: handlers.setdefault(path, handler)
+            post = get
+        server = types.SimpleNamespace(PromptServer=types.SimpleNamespace(instance=types.SimpleNamespace(routes=Routes())))
+        class Request:
+            def __init__(self, body): self.body = body
+            async def json(self): return self.body
+        async def run():
+            with patch.dict(sys.modules, {"server": server}), \
+                    patch.object(folder_paths, "get_output_directory", return_value=str(self.root)), \
+                    patch.object(store_module, "load_bundle", side_effect=AssertionError("No tensor reads in routes")):
+                hunt.register_routes()
+                mark = handlers["/h3/selflift/selection"]
+                choose = handlers["/h3/selflift/choose"]
+                body = {"id": record["id"], "created_at": record["created_at"],
+                        "selection_version": 0, "main": 2, "ordinals": [1]}
+                self.assertEqual((await mark(Request({"id": record["id"]}))).status, 400)
+                self.assertEqual((await mark(Request(body))).status, 200)
+                saved = HuntStore(self.root).read(record["id"])
+                self.assertEqual(saved["marked"], [1, 2])
+                self.assertEqual(saved["main"], 2)
+                self.assertIsNone(saved["selected"])
+                self.assertEqual((await mark(Request(body))).status, 400, "Stale tab must refresh")
+                selection = {**body, "ordinal": 2, "ordinals": [1, 2]}
+                self.assertEqual((await choose(Request(selection))).status, 400)
+                selection["selection_version"] = 1
+                (folder / "take_0002.safetensors").unlink()
+                self.assertEqual((await choose(Request(selection))).status, 400, "Missing low must fail before approval")
+                self.assertIsNone(self.store.read(record["id"])["selected"])
+                (folder / "take_0002.safetensors").write_bytes(b"restored fixture")
+                self.assertEqual((await choose(Request(selection))).status, 200)
+                self.assertEqual(self.store.read(record["id"])["selected_ordinals"], [1, 2])
+                response = await handlers["/h3/selflift/hunts"](Request({}))
+                public = json.loads(response.body)["batches"][0]
+                self.assertEqual(public["marked"], [1, 2])
+                self.assertEqual(public["main"], 2)
+                self.assertEqual(public["max_marked"], 20)
+                self.assertNotIn("published", public["candidates"][0])
+                self.assertTrue(public["candidates"][0]["saved"])
+        asyncio.run(run())
+
     def test_clean_route_requires_confirmation_and_matching_batch(self):
         record, folder, _ = self.batch()
         handlers = {}
