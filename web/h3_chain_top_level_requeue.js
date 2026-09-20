@@ -1,4 +1,5 @@
 import {app} from "/scripts/app.js";
+import {appendedReviewPrompts} from "./h3_chain_review_append.mjs?v=1";
 import {api} from "/scripts/api.js";
 import {activeSceneFromOutput} from "./h3_chain_cancel_reroll_core.mjs?v=0.6.11";
 import {
@@ -281,7 +282,9 @@ export function onExecutionSuccess(detail) {
         // fail after Loop End. Never reset a different workflow or branch.
         try {
             const {startNode} = requireVisibleWorkflow(record);
-            if (startNode === record.startNode) requeueSelections.restore(startNode, record);
+            if (startNode === record.startNode && !appendedReviewPrompts.has(promptId)) {
+                requeueSelections.restore(startNode, record);
+            }
         } catch (_) { /* The running workflow is no longer the visible one. */ }
         requeueSelections.discard(record.startNode);
         return;

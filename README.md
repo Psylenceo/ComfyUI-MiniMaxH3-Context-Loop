@@ -190,6 +190,12 @@ upscale packs and example assets are listed in the [workflow catalog](example_wo
 4. At **Review Gate**, approve, retry, reroll, or approve and stop. After the
    last approval, **Assemble** writes the final MP4.
 
+To extend a running Plan, append scenes before approving its last scene. With
+Loop Start's `scene_range` left blank, **Approve & continue** finishes the current
+run, then queues the updated workflow at the first appended scene using the
+saved checkpoint. Keep that workflow and branch open until it queues. Explicit
+scene ranges and **Approve & stop** do not automatically extend the run.
+
 For Studio workflows, set the run name in **Project Asset Carousel** instead.
 See [Getting started](docs/GETTING_STARTED.md) for setup and recovery steps.
 
