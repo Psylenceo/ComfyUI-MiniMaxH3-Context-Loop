@@ -4,7 +4,7 @@ import {api} from "/scripts/api.js";
 import {workingBranchId} from "./h3_working_branches.mjs?v=0.7.20";
 import {
     projectMutationOptions, subscribeProjectOwnership, isProjectReadOnlyError,
-} from "./h3_project_ownership.mjs?v=0.7.4";
+} from "./h3_project_ownership.mjs?v=0.7.5";
 import {
     MAX_SHOTS,
     makeShot,
@@ -3105,7 +3105,7 @@ function mount(node) {
         if (!run || !draftRun || draftRun === run) await flushHistoryDraft();
     };
     function onProjectOwnershipChanged(payload) {
-        if (state.disposed || payload?.owned_by_requester !== true) return;
+        if (state.disposed || !(payload?.owned_by_requester === true || payload?.locking_enabled === false)) return;
         const currentRun = planRunName();
         const history = state.history;
         const prefix = `${currentRun}\u0000${planBranchId()}\u0000`;

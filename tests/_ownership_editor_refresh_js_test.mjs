@@ -50,7 +50,7 @@ for (const filename of ["h3_chain_scene_prompt_editor.js", "h3_chain_rich_scene_
     const unsubscribe = ownerContext.subscribeProjectOwnership({graph}, context.onProjectOwnershipChanged);
     fixtures.push({context, requests, unsubscribe, setRun:value => { run = value; }});
     assert.match(text, /unsubscribeOwnership\(\)/, "listeners are removed with the node");
-    assert.match(text, /h3_project_ownership\.mjs\?v=0\.7\.4/);
+    assert.match(text, /h3_project_ownership\.mjs\?v=0\.7\.5/);
 }
 let foreignEvents = 0;
 ownerContext.subscribeProjectOwnership({graph:otherGraph}, () => foreignEvents++);
@@ -69,6 +69,18 @@ for (const {context, requests} of fixtures) {
     assert.match(context.state.status.textContent, /not retried/);
 }
 assert.equal(foreignEvents, 0, "ownership updates are scoped to the owning workflow graph");
+// Disabling the server policy also clears cached ownership denials, without
+// retrying writes or replacing unsaved editor contents.
+for (const {context} of fixtures) context.state.history.error = denied.message;
+listeners.get("minimax_h3_project_ownership_settings")({detail:{enabled:false, epoch:1}});
+for (let i = 0; i < 12; i++) await Promise.resolve();
+for (const {context, requests} of fixtures) {
+    assert.equal(context.state.history.error, "");
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1].body, null);
+    assert.equal(context.state.history.textarea.value, "Unsubmitted prompt");
+    requests.pop(); // Keep subsequent existing regression counts unchanged.
+}
 for (const {context} of fixtures) context.state.history.error = "Disk full";
 await controller.request("heartbeat");
 for (const {context, requests} of fixtures) {

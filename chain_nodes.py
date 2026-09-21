@@ -188,6 +188,8 @@ from .project_ownership import (
     claim_project_ownership,
     heartbeat_project_ownership,
     ownership_status,
+    project_ownership_settings,
+    set_project_ownership_enabled,
     project_write_guard,
     release_project_ownership,
     require_project_ownership,
@@ -30723,12 +30725,12 @@ def _project_write_rejection(request: Any, run_name: Any,
     return None
 
 
-def _publish_project_ownership(payload: dict[str, Any]) -> None:
+def _publish_project_ownership(
+        payload: dict[str, Any], event: str = "minimax_h3_project_ownership") -> None:
     if PromptServer is None or getattr(PromptServer, "instance", None) is None:
         return
     try:
-        PromptServer.instance.send_sync(
-            "minimax_h3_project_ownership", payload)
+        PromptServer.instance.send_sync(event, payload)
     except Exception as exc:
         _LOG.debug("Could not publish H3 project ownership: %s", exc)
 
@@ -30763,6 +30765,22 @@ def _fence_inflight_project_work(run_name: Any) -> None:
             loop.call_soon_threadsafe(reject)
         else:
             reject()
+
+
+async def _project_ownership_settings(request):
+    try:
+        if request.method == "GET":
+            payload = await asyncio.to_thread(project_ownership_settings, _output_root())
+        else:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("Workflow ownership settings require a JSON object.")
+            payload = await asyncio.to_thread(
+                set_project_ownership_enabled, _output_root(), body.get("enabled"))
+            _publish_project_ownership(payload, "minimax_h3_project_ownership_settings")
+        return web.json_response(payload, headers={"Cache-Control": "no-store"})
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        return web.json_response({"error": str(exc)}, status=400)
 
 
 async def _project_ownership_command(request):
@@ -31258,6 +31276,10 @@ if (PromptServer is not None and web is not None and
         "/minimax_h3_context_loop/working-branches")(_working_branch_command)
     PromptServer.instance.routes.post(
         "/minimax_h3_context_loop/working-branches")(_working_branch_command)
+    PromptServer.instance.routes.get(
+        "/minimax_h3_context_loop/project-ownership/settings")(_project_ownership_settings)
+    PromptServer.instance.routes.post(
+        "/minimax_h3_context_loop/project-ownership/settings")(_project_ownership_settings)
     PromptServer.instance.routes.post(
         "/minimax_h3_context_loop/project-ownership")(
             _project_ownership_command)

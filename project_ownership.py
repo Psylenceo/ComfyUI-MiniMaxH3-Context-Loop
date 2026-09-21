@@ -23,6 +23,7 @@ from typing import Any
 
 PROJECT_OWNERSHIP_FORMAT = "h3_project_ownership_v1"
 PROJECT_OWNERSHIP_LEASE_SECONDS = 90.0
+OWNERSHIP_SETTINGS_FORMAT = "h3_project_ownership_settings_v1"
 _OWNER_ID_RE = re.compile(r"[A-Za-z0-9._:-]{16,192}")
 
 
@@ -186,6 +187,69 @@ def _empty_record(run_name: str) -> dict[str, Any]:
     }
 
 
+def _settings_path(output_root: str) -> str:
+    # A leading dot cannot be a valid run name; never alias a run's fence.
+    return os.path.join(os.path.dirname(ownership_path(output_root, "settings")), ".settings.json")
+
+
+def _read_settings(path: str) -> dict[str, Any]:
+    if not os.path.exists(path):
+        return {"format": OWNERSHIP_SETTINGS_FORMAT, "enabled": True, "epoch": 0}
+    with open(path, encoding="utf-8") as handle:
+        value = json.load(handle)
+    if (not isinstance(value, dict) or value.get("format") != OWNERSHIP_SETTINGS_FORMAT
+            or type(value.get("enabled")) is not bool or type(value.get("epoch")) is not int
+            or value["epoch"] < 0):
+        raise ValueError("H3 workflow ownership settings are invalid; refusing to bypass locking.")
+    return {key: value[key] for key in ("format", "enabled", "epoch")}
+
+
+def project_ownership_settings(output_root: str) -> dict[str, Any]:
+    path = _settings_path(output_root)
+    with _lock_for(path):
+        return _read_settings(path)
+
+
+def set_project_ownership_enabled(output_root: str, enabled: bool) -> dict[str, Any]:
+    if type(enabled) is not bool:
+        raise ValueError("Workflow ownership enabled must be a boolean.")
+    path = _settings_path(output_root)
+    with _lock_for(path):
+        settings = _read_settings(path)
+        if settings["enabled"] != enabled:
+            settings = dict(settings, enabled=enabled, epoch=settings["epoch"] + 1)
+            _atomic_json(path, settings)
+        return settings
+
+
+@contextmanager
+def _ownership_guard(output_root: str, run: str):
+    # Mode changes cannot split a durable commit. Keep the per-run mutex even
+    # while fencing is disabled: this preference is not a transaction bypass.
+    policy_path = _settings_path(output_root)
+    path = ownership_path(output_root, run)
+    with _lock_for(policy_path), _lock_for(path):
+        yield path, _read_settings(policy_path)
+
+
+def _policy_record(path: str, run: str, policy: dict[str, Any]):
+    record = _read(path, run)
+    if record is not None and record.get("policy_epoch", 0) != policy["epoch"]:
+        # Re-enabling never revives an old owner/queued proof. Do not rewrite
+        # every project's fence: invalidate logically, then persist on claim.
+        record = dict(_empty_record(run), epoch=record["epoch"], policy_epoch=policy["epoch"])
+    return record
+
+
+def _policy_public(record, policy, owner_id=""):
+    return {**_public(record, owner_id), "locking_enabled": policy["enabled"],
+            "policy_epoch": policy["epoch"]}
+
+
+def _unlocked_status(run, policy):
+    return {**_policy_public(_empty_record(run), policy), "enabled": False}
+
+
 def _read(path: str, run_name: str) -> dict[str, Any] | None:
     if not os.path.isfile(path):
         return None
@@ -232,16 +296,17 @@ def _public(record: dict[str, Any], owner_id: Any = "") -> dict[str, Any]:
 def ownership_status(output_root: str, run_name: Any,
                      owner_id: Any = "") -> dict[str, Any]:
     run = _run_name(run_name)
-    path = ownership_path(output_root, run)
-    with _lock_for(path):
-        record = _read(path, run)
+    with _ownership_guard(output_root, run) as (path, policy):
+        if not policy["enabled"]:
+            return _unlocked_status(run, policy)
+        record = _policy_record(path, run, policy)
         if record is None:
             return {
-                **_public(_empty_record(run), owner_id),
+                **_policy_public(_empty_record(run), policy, owner_id),
                 "enabled": False,
                 "available": True,
             }
-        return _public(record, owner_id)
+        return _policy_public(record, policy, owner_id)
 
 
 def claim_project_ownership(
@@ -254,9 +319,11 @@ def claim_project_ownership(
     digest = _owner_digest(owner)
     label = str(owner_label or "Workflow")[:120]
     lease = max(30.0, min(600.0, float(lease_seconds)))
-    path = ownership_path(output_root, run)
-    with _lock_for(path):
-        record = _read(path, run) or _empty_record(run)
+    with _ownership_guard(output_root, run) as (path, policy):
+        if not policy["enabled"]:
+            return _unlocked_status(run, policy)
+        record = _policy_record(path, run, policy) or _empty_record(run)
+        record["policy_epoch"] = policy["epoch"]
         now = time.time()
         current = str(record.get("owner_digest") or "")
         if current == digest:
@@ -265,13 +332,13 @@ def claim_project_ownership(
             record["lease_expires_at"] = now + lease
             record["updated_at"] = _timestamp()
             _atomic_json(path, record)
-            return _public(record, owner)
+            return _policy_public(record, policy, owner)
         # Expiry is only a liveness hint. An abandoned owner must still be
         # displaced explicitly with Force ownership so merely opening a stale
         # workflow can never seize a project after a sleeping tab misses its
         # heartbeat.
         if current and not force:
-            return _public(record, owner)
+            return _policy_public(record, policy, owner)
         record.update({
             "enabled": True,
             "epoch": int(record.get("epoch", 0)) + 1,
@@ -283,7 +350,7 @@ def claim_project_ownership(
             "updated_at": _timestamp(),
         })
         _atomic_json(path, record)
-        return _public(record, owner)
+        return _policy_public(record, policy, owner)
 
 
 def heartbeat_project_ownership(
@@ -297,22 +364,23 @@ def heartbeat_project_ownership(
     digest = _owner_digest(owner)
     label = str(owner_label or "Workflow")[:120]
     lease = max(30.0, min(600.0, float(lease_seconds)))
-    path = ownership_path(output_root, run)
-    with _lock_for(path):
-        record = _read(path, run)
+    with _ownership_guard(output_root, run) as (path, policy):
+        if not policy["enabled"]:
+            return _unlocked_status(run, policy)
+        record = _policy_record(path, run, policy)
         if record is None:
             return {
-                **_public(_empty_record(run), owner),
+                **_policy_public(_empty_record(run), policy, owner),
                 "enabled": False,
                 "available": True,
             }
         try:
             supplied_epoch = int(epoch)
         except (TypeError, ValueError):
-            return _public(record, owner)
+            return _policy_public(record, policy, owner)
         if (digest != str(record.get("owner_digest") or "") or
                 supplied_epoch != int(record.get("epoch", 0))):
-            return _public(record, owner)
+            return _policy_public(record, policy, owner)
         record.update({
             "owner_label": label,
             "heartbeat_at": _timestamp(),
@@ -320,7 +388,7 @@ def heartbeat_project_ownership(
             "updated_at": _timestamp(),
         })
         _atomic_json(path, record)
-        return _public(record, owner)
+        return _policy_public(record, policy, owner)
 
 
 def release_project_ownership(
@@ -328,9 +396,10 @@ def release_project_ownership(
 ) -> dict[str, Any]:
     run = _run_name(run_name)
     owner = _owner_id(owner_id)
-    path = ownership_path(output_root, run)
-    with _lock_for(path):
-        record = _read(path, run)
+    with _ownership_guard(output_root, run) as (path, policy):
+        if not policy["enabled"]:
+            return _unlocked_status(run, policy)
+        record = _policy_record(path, run, policy)
         if record is None:
             return ownership_status(output_root, run, owner)
         if (_owner_digest(owner) != str(record.get("owner_digest") or "")
@@ -347,7 +416,7 @@ def release_project_ownership(
             "updated_at": _timestamp(),
         })
         _atomic_json(path, record)
-        return _public(record, owner)
+        return _policy_public(record, policy, owner)
 
 
 def _validate_project_ownership(
@@ -396,10 +465,9 @@ def project_write_guard(
     around its final pointer/catalog mutation.
     """
     run = _run_name(run_name)
-    path = ownership_path(output_root, run)
-    with _lock_for(path):
-        yield _validate_project_ownership(
-            run, _read(path, run), proof, operation)
+    with _ownership_guard(output_root, run) as (path, policy):
+        yield (_validate_project_ownership(run, _policy_record(path, run, policy), proof, operation)
+               if policy["enabled"] else None)
 
 
 def require_project_ownership(

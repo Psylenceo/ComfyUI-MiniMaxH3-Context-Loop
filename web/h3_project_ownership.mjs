@@ -2,11 +2,64 @@ import {app} from "/scripts/app.js";
 import {api} from "/scripts/api.js";
 
 const ROUTE = "/minimax_h3_context_loop/project-ownership";
+const SETTINGS_ROUTE = `${ROUTE}/settings`;
 const HEARTBEAT_MS = 25000;
 const controllers = new Set();
 const subscribers = new Set();
 const graphIds = new WeakMap();
 let graphSerial = 0;
+let policy = {enabled:true, epoch:0};
+const policySubscribers = new Set();
+
+export function subscribeOwnershipSettings(callback) {
+    policySubscribers.add(callback);
+    return () => policySubscribers.delete(callback);
+}
+
+function applyOwnershipSettings(payload, source = null) {
+    if (typeof payload?.enabled !== "boolean" || !Number.isInteger(payload.epoch)
+            || payload.epoch < policy.epoch) return;
+    const changed = payload.epoch !== policy.epoch || payload.enabled !== policy.enabled;
+    policy = {enabled:payload.enabled, epoch:payload.epoch};
+    for (const callback of policySubscribers) callback(policy);
+    if (!changed) return;
+    for (const controller of controllers) {
+        if (controller === source || controller.disposed) continue;
+        controller.requestSerial++;
+        controller.status = null;
+        controller.owned = false;
+        controller.epoch = null;
+        controller.schedule();
+        if (!controller.runName) continue;
+        if (!policy.enabled) {
+            controller.accept({run_name:controller.runName, locking_enabled:false,
+                policy_epoch:policy.epoch, owned_by_requester:false, available:true, epoch:0});
+        } else {
+            controller.notify(null);
+            // A new policy epoch requires a fresh claim, never an old proof.
+            controller.request("claim").catch(() => {});
+        }
+    }
+}
+
+async function settingsRequest(enabled) {
+    const response = await api.fetchApi(SETTINGS_ROUTE, enabled === undefined
+        ? {cache:"no-store"}
+        : {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({enabled})});
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Ownership settings: HTTP ${response.status}`);
+    if (typeof payload.enabled !== "boolean" || !Number.isInteger(payload.epoch) || payload.epoch < 0) {
+        throw new Error("The server did not return valid workflow ownership settings. Update/restart ComfyUI.");
+    }
+    applyOwnershipSettings(payload);
+    return policy;
+}
+
+export function loadOwnershipSettings() { return settingsRequest(); }
+export function setOwnershipEnabled(enabled) {
+    if (typeof enabled !== "boolean") throw new Error("Workflow ownership enabled must be a boolean.");
+    return settingsRequest(enabled);
+}
 
 function rootGraph(node) {
     return node?.graph?.rootGraph ?? node?.graph ?? app.graph ?? null;
@@ -113,27 +166,39 @@ export function registerProjectOwnership(node, onChange = null) {
         epoch:null,
         timer:null,
         disposed:false,
+        requestSerial:0,
+        notify(payload) {
+            onChange?.(payload);
+            notifyOwnershipSubscribers(this, payload);
+        },
+        accept(payload) {
+            this.status = payload;
+            this.owned = payload.owned_by_requester === true && payload.locking_enabled !== false;
+            this.epoch = Number.isInteger(Number(payload.epoch)) ? Number(payload.epoch) : null;
+            this.schedule();
+            this.notify(payload);
+        },
         async request(action = "status") {
             if (this.disposed || !this.runName) return null;
             const requestedRun = this.runName;
+            const serial = ++this.requestSerial;
             const payload = await command({
                 action, run_name:requestedRun, owner_id:this.ownerId,
                 owner_label:this.ownerLabel, epoch:this.epoch,
             });
-            if (this.disposed || this.runName !== requestedRun) return payload;
-            this.status = payload;
-            this.owned = payload.owned_by_requester === true;
-            this.epoch = Number.isInteger(Number(payload.epoch))
-                ? Number(payload.epoch) : null;
-            this.schedule();
-            onChange?.(payload);
-            notifyOwnershipSubscribers(this, payload);
+            if (this.disposed || this.runName !== requestedRun || serial !== this.requestSerial
+                    || (Number.isInteger(payload.policy_epoch) && payload.policy_epoch < policy.epoch)) return payload;
+            if (typeof payload.locking_enabled === "boolean" && Number.isInteger(payload.policy_epoch)) {
+                applyOwnershipSettings({enabled:payload.locking_enabled, epoch:payload.policy_epoch}, this);
+            }
+            this.accept(payload);
             return payload;
         },
         async select(runName) {
             const next = String(runName || "").trim();
             if (next === this.runName && this.status) return this.status;
             this.runName = next;
+            this.requestSerial++;
             this.status = null;
             this.owned = false;
             this.epoch = null;
@@ -145,12 +210,7 @@ export function registerProjectOwnership(node, onChange = null) {
             return await this.request("claim");
         },
         async force() { return await this.request("force"); },
-        async release() {
-            const payload = await this.request("release");
-            this.owned = false;
-            this.schedule();
-            return payload;
-        },
+        async release() { return await this.request("release"); },
         schedule() {
             if (this.timer) clearTimeout(this.timer);
             this.timer = null;
@@ -185,7 +245,9 @@ export function registerProjectOwnership(node, onChange = null) {
 export async function projectMutationOptions(node, runName, options = {}) {
     const controller = controllerFor(node, runName);
     if (!controller) return options;
+    if (controller.status?.locking_enabled === false) return options;
     if (!controller.owned) await controller.request("claim");
+    if (controller.status?.locking_enabled === false) return options;
     if (!controller.owned) {
         const owner = controller.status?.owner_label || "another workflow";
         throw new Error(
@@ -202,7 +264,9 @@ export async function projectMutationOptions(node, runName, options = {}) {
 export async function queuedProjectOwnership(node, runName) {
     const controller = controllerFor(node, runName);
     if (!controller) return "";
+    if (controller.status?.locking_enabled === false) return "";
     if (!controller.owned) await controller.request("claim");
+    if (controller.status?.locking_enabled === false) return "";
     if (!controller.owned) {
         const owner = controller.status?.owner_label || "another workflow";
         throw new Error(
@@ -220,4 +284,8 @@ api.addEventListener?.("minimax_h3_project_ownership", (event) => {
             controller.request("status").catch(() => {});
         }
     }
+});
+
+api.addEventListener?.("minimax_h3_project_ownership_settings", (event) => {
+    applyOwnershipSettings(event?.detail);
 });

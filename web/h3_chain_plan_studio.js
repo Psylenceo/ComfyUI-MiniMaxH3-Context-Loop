@@ -132,7 +132,7 @@ import {
 import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.26";
 import {
     projectMutationOptions, subscribeProjectOwnership, isProjectReadOnlyError,
-} from "./h3_project_ownership.mjs?v=0.7.4";
+} from "./h3_project_ownership.mjs?v=0.7.5";
 
 const {
     connectedPromptEditors,
@@ -7278,7 +7278,7 @@ function mount(node) {
     document.addEventListener("h3-lora-routes-changed", onLoRARoutesChanged);
     node._h3FlushProjectWrites = flushProjectWrites;
     function onProjectOwnershipChanged(payload) {
-        if (state.disposed || payload?.owned_by_requester !== true) return;
+        if (state.disposed || !(payload?.owned_by_requester === true || payload?.locking_enabled === false)) return;
         const currentRun = runName();
         const history = state.history;
         const prefix = `${currentRun}\u0000${currentBranch()}\u0000`;

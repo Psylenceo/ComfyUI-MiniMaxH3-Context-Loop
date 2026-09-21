@@ -74,6 +74,20 @@ reference clip a scene sees:
 
 ## Workflow ownership
 
+Ownership locking is **on by default**. To turn it off, open ComfyUI
+**Settings → MiniMax H3 Context Loop → Project safety → Workflow ownership
+locking (server-wide)**. This applies to every Run and browser tab using the
+server's output directory, not just the current workflow. While off, any
+workflow can edit the same Run, so conflicting edits can overwrite each other.
+File transaction locks and checkpoint/deletion dependency protections remain
+active. This setting does not make a protected checkpoint safe to delete.
+
+Change the setting while generation is idle. Re-enabling locking requires
+fresh ownership claims; old queued jobs may need to be requeued. Open Carousels
+automatically try to claim their Run again. The preference is stored in
+`output/h3_chains/.project_ownership/.settings.json`; changing it does not delete
+existing ownership records or project files.
+
 Opening a Run in Project Asset Carousel claims its write ownership for the
 current workflow. The owner row reports one of three states:
 

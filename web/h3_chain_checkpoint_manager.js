@@ -42,7 +42,7 @@ import {
     refreshRestoredPlanEditors,
     restoreConnectedPolicyInputs,
 } from "./h3_plan_restore_core.mjs?v=0.7.9";
-import {projectMutationOptions} from "./h3_project_ownership.mjs?v=0.7.4";
+import {projectMutationOptions} from "./h3_project_ownership.mjs?v=0.7.5";
 
 const NODE_NAME = "MiniMaxH3ChainCheckpointManager";
 const PLAN_NAME = "MiniMaxH3ChainPlan";

@@ -18,7 +18,7 @@ import {
 import {
     projectMutationOptions,
     registerProjectOwnership,
-} from "./h3_project_ownership.mjs?v=0.7.4";
+} from "./h3_project_ownership.mjs?v=0.7.5";
 import {
     lineageChildren,
     lineageFlatten,
@@ -583,7 +583,12 @@ function mount(node) {
             releaseOwnership.hidden = true;
             return;
         }
-        if (payload.owned_by_requester) {
+        if (payload.locking_enabled === false) {
+            ownershipStatus.textContent = "Workflow ownership locking off · any workflow can write";
+            ownershipStatus.style.color = "var(--h3pa-warning)";
+            forceOwnership.hidden = true;
+            releaseOwnership.hidden = true;
+        } else if (payload.owned_by_requester) {
             ownershipStatus.textContent = "Owner: this workflow · project writes enabled";
             ownershipStatus.style.color = "var(--h3pa-success)";
             forceOwnership.hidden = true;
