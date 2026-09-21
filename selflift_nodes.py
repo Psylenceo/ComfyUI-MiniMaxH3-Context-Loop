@@ -5,6 +5,7 @@ import logging
 
 from .selflift_upscalers import BILINEAR, TRIDAE, TRIDAE_CHECKPOINT, validate_upscaler_grid
 from .selflift_settings import canonical_settings, lift_settings
+from .selflift_tiling import TILING_TYPE, MiniMaxH3SelfLiftTiling, tiling_settings
 
 _LOG = logging.getLogger(__name__)
 PLAN_TYPE = "H3_CHAIN_PLAN"
@@ -136,6 +137,9 @@ class MiniMaxH3ChainSelfLiftSampler:
             "tooltip": "Optional compatible H3 diffusion checkpoint for the final full-resolution steps. "
                        "Unconnected: reuse model. Same sampler, sigmas, CFG, VAE and conditioning; "
                        "connect desired LoRAs to this model separately. Ignored when SelfLift is off.",
+        }), "highres_tiling": (TILING_TYPE, {
+            "tooltip": "Optional SelfLift Tiling settings for the final high-resolution denoising steps only. "
+                       "Off/unconnected preserves full-frame sampling. Not TST or latent-upscaler tiling.",
         })}}
 
     RETURN_TYPES = ("LATENT", "STRING")
@@ -145,10 +149,10 @@ class MiniMaxH3ChainSelfLiftSampler:
     DESCRIPTION = ("Dedicated experimental Chain sampler, controlled by SelfLift Project. "
                    "Supports native AV masks, source-audio locks, tagged references and guides. "
                    "SelfLift ON supports Euler or experimental RES4LYF Radau IA 2s (eta=0), "
-                   "with an H3 learned or bilinear latent upscaler; no TST or spatial tiling.")
+                   "with an H3 learned or bilinear latent upscaler and optional high-stage spatial tiling; no TST.")
 
     def sample(self, state, model, positive, vae, latent, sampler, sigmas, seed, cfg=1.0, negative=None,
-               model_hires=None):
+               model_hires=None, highres_tiling=None):
         import comfy.sample
         import comfy.samplers
         import comfy.utils
@@ -192,6 +196,7 @@ class MiniMaxH3ChainSelfLiftSampler:
         from .masking_support import require_h3_mask_support
 
         _validate_hires_model(model, model_hires, sampler)
+        tiling = tiling_settings(highres_tiling)
         if latent.get("noise_mask") is not None:
             require_h3_mask_support()
         prepared = prepare_previous_context(latent, settings)
@@ -206,13 +211,15 @@ class MiniMaxH3ChainSelfLiftSampler:
             staged_model, positive, negative, vae, prepared, sampler, sigmas,
             int(seed), float(cfg), total_steps - high_steps, controls["lowres_scale"],
             controls["rho"], controls["w_min"], controls["w_max"], "nearest",
-            latent_lifter=lifter, model_hires=staged_hires,
+            latent_lifter=lifter, model_hires=staged_hires, highres_tiling=tiling,
             cleanup_between_stages=cleanup)
         output[SIGNATURE] = settings_signature(settings)
         status = "SelfLift: %d low-resolution + %d full-resolution steps; native AV masks" % (
             total_steps - high_steps, high_steps)
         if model_hires is not None:
             status += "; separate finishing checkpoint"
+        if tiling:
+            status += "; tiled high-resolution denoising"
         from .selflift_runtime.radau import is_radau
         if is_radau(sampler):
             status += "; experimental Radau IA 2s (+1 low-resolution boundary evaluation)"
@@ -225,11 +232,13 @@ from .selflift_hunt import MiniMaxH3SelfLiftSeedHunt, register_routes
 register_routes()
 
 NODE_CLASS_MAPPINGS = {
+    "MiniMaxH3SelfLiftTiling": MiniMaxH3SelfLiftTiling,
     "MiniMaxH3SelfLiftProject": MiniMaxH3SelfLiftProject,
     "MiniMaxH3ChainSelfLiftSampler": MiniMaxH3ChainSelfLiftSampler,
     "MiniMaxH3SelfLiftSeedHunt": MiniMaxH3SelfLiftSeedHunt,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "MiniMaxH3SelfLiftTiling": "MiniMax H3 SelfLift Tiling — Experimental",
     "MiniMaxH3SelfLiftProject": "MiniMax H3 SelfLift Project — Experimental",
     "MiniMaxH3ChainSelfLiftSampler": "MiniMax H3 Chain SelfLift Sampler — Experimental",
     "MiniMaxH3SelfLiftSeedHunt": "MiniMax H3 SelfLift Seed Hunt — Experimental",

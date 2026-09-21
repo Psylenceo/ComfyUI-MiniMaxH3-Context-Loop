@@ -249,7 +249,7 @@ class MiniMaxH3SelfLiftSeedHunt:
                      cfg=1.0, negative=None, candidate_count=4, batch_name="hunt_1",
                      tiny_vae="taeh3.safetensors", prompt=None, extra_pnginfo=None,
                      unique_id=None, dynprompt=None, auto_remove_saved_takes=False, review_enabled=True,
-                     model_hires=None, run_mode="resume"):
+                     model_hires=None, run_mode="resume", highres_tiling=None):
         import folder_paths
         import torch
         import comfy.nested_tensor
@@ -287,6 +287,14 @@ class MiniMaxH3SelfLiftSeedHunt:
         from .selflift_runtime.nodes import progressive_sample, _validate_sampling, _validate_hires_model
         sampler_contract = _validate_sampling(model.get_model_object("model_sampling"), sampler)
         _validate_hires_model(model, model_hires, sampler)
+        from .selflift_tiling import tiling_settings
+        tiling = tiling_settings(highres_tiling)
+        if tiling:
+            from .selflift_runtime.h3_tiling import validate_target
+            samples = latent["samples"]
+            streams = samples if isinstance(samples, (list, tuple)) else samples.unbind()
+            validate_target(model_hires if model_hires is not None else model,
+                            [tuple(s.shape) for s in streams], positive, negative)
         finishing_recipe = None
         if model_hires is not None:
             finishing_recipe = source_recipe(prompt, unique_id, dynprompt,
@@ -296,6 +304,8 @@ class MiniMaxH3SelfLiftSeedHunt:
         # Keep existing low batches/finished files byte-for-byte compatible.
         # Only explicit finishing setups get their own high-result namespace.
         finishing_id = digest({"version": 1, "recipe": finishing_recipe}) if finishing_recipe else None
+        if tiling:
+            finishing_id = digest({"version": 1, "recipe": finishing_recipe, "tiling": tiling})
         store = HuntStore(folder_paths.get_output_directory())
         scene = int(state["index"])
         shot = plan["shots"][scene - 1]
@@ -359,10 +369,11 @@ class MiniMaxH3SelfLiftSeedHunt:
             # when the source and chosen low pass came from an earlier queue.
             await _work(atomic_json, folder / "recovery.json", {"plan": plan, "contract": contract,
                 "finishing_recipe": finishing_recipe, "finishing_id": finishing_id,
+                "highres_tiling": tiling,
                 "prompt": recovery_prompt(prompt), "workflow": (extra_pnginfo or {}).get("workflow")})
             # A stale request left by interruption is not an approval, nor a
             # reason to repeat GPU work automatically on the next queue.
-            await _work(update, finishing_id=finishing_id, upscale_request=None)
+            await _work(update, finishing_id=finishing_id, highres_tiling=tiling, upscale_request=None)
             source_path = folder / "source.safetensors"
             if not source_path.is_file():
                 prepared = dict(latent)
@@ -392,6 +403,8 @@ class MiniMaxH3SelfLiftSeedHunt:
                         source["latent"], sampler, sigmas, take_seed, float(cfg), total-high,
                         controls["lowres_scale"], controls["rho"], controls["w_min"], controls["w_max"],
                         "nearest", latent_lifter=lift, model_hires=staged_hires,
+                        highres_tiling=(tiling if not options.get("stop_after_low")
+                                        and not options.get("stop_after_lift") else None),
                         cleanup_between_stages=cleanup, **options)
 
             async def preview_requested():
@@ -535,6 +548,8 @@ class MiniMaxH3SelfLiftSeedHunt:
                 status += "; %d marked takes; main take %d (finished last)" % (len(order), record["selected"])
             if model_hires is not None:
                 status += "; separate finishing checkpoint"
+            if tiling:
+                status += "; tiled high-resolution denoising"
             if not review_enabled:
                 status += "; review gate off"
             if sampler_contract is not None:

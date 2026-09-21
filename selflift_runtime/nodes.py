@@ -438,8 +438,8 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
     if not 0.0 <= w_min <= w_max <= 1.0:
         raise ValueError("SelfLift: weights must satisfy 0 <= w_min <= w_max <= 1")
     noise_masks = _validate_latent_input(latent_image)
-    if highres_tiling:
-        raise ValueError("H3 Chain SelfLift does not enable spatial tiling")
+    from ..selflift_tiling import tiling_settings
+    tiling = tiling_settings(highres_tiling)
 
     model_sampling = model.get_model_object("model_sampling")
     sampler_contract = _validate_sampling(model_sampling, sampler)
@@ -453,6 +453,10 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
         latent_image.get("downscale_ratio_temporal", None)))
     hires_base = model_hires if model_hires is not None else model
     high_model = hires_base
+    target_shapes = [tuple(s.shape) for s in streams]
+    if tiling and not (stop_after_low or stop_after_lift):
+        from .h3_tiling import validate_target
+        validate_target(high_model, target_shapes, positive, negative)
     video = streams[0].ndim == 5
     if video:
         b, c, t, H, W = streams[0].shape
@@ -857,8 +861,9 @@ def progressive_sample(model, positive, negative, vae, latent_image, sampler, si
         high_drift_state.configure_selflift_stage(
             (b, c, t, H, W), m_full, auxiliary_masks[0], hard_lock=False
         )
-    if highres_tiling:
-        logging.debug("[H3 Chain SelfLift two-stage] automatic high-resolution tiling enabled")
+    if tiling:
+        from .h3_tiling import tiled_model
+        high_model = tiled_model(high_model, target_shapes, tiling)
     out = comfy.samplers.sample(high_model, resume_noise, positive, negative, cfg, high_model.load_device,
                                 radau.stage_sampler(sampler) if radau_mode else sampler,
                                 sigmas[transition_step:], high_model.model_options,

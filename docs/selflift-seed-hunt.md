@@ -254,6 +254,39 @@ direct Python calls without that prompt recipe fail rather than reuse an
 unidentified finishing checkpoint. Models replaced in-place under the same name
 still require a fresh batch name.
 
+## Optional high-resolution denoising tiles
+
+Add **MiniMax H3 SelfLift Tiling — Experimental**, connect its `tiling` output
+to **`highres_tiling`** on either SelfLift Seed Hunt or Chain SelfLift Sampler,
+and turn **enabled** on. Off or unconnected preserves the existing full-frame
+path and cache identity. SelfLift Project itself must also be enabled.
+
+- **tiles**: 2–8 strips along one spatial axis; small grids use fewer tiles.
+- **overlap**: context margin on each side, in latent pixels (normally 16 output
+  pixels per latent pixel). Default 8; even values 0–64. Margins are clamped on
+  small tiles and adjacent predictions are linearly blended.
+- **axis**: longest dimension automatically, or explicitly width / height.
+
+Only the final **high-resolution denoising steps** are tiled. The low seed hunt,
+learned latent lift, tiny-VAE **Preview upscale**, and normal VAE decoding are
+unchanged. This does **not** add TST. Every tile keeps the full timeline; audio
+and independent reference grids stay whole. Native video masks are cropped to
+each tile while the outer sampler retains continuation and audio-lock ownership.
+Keyframes are cropped with the video, retaining their original full-frame
+positional coordinates. ControlNet and regional conditioning are rejected.
+
+This is a memory/quality tradeoff, not an artifact fix: tiles have no cross-tile
+attention, and the first tile supplies the audio prediction. Seams, motion or
+audio quality can change. CPU FP32 accumulation reduces GPU workspace but adds
+transfers; more tiles are not necessarily faster. Full-size sampler buffers and
+the separate latent lift still need memory.
+
+Changing tiling settings reuses saved low candidates but creates a distinct
+finished-result cache, like changing `model_hires`. Turning tiling off restores
+the untiled cache. Keep **Auto-remove saved takes off** when comparing. Resume
+an in-progress multi-take finishing batch with its matching saved settings.
+Existing workflows need no new connection and are not rewritten automatically.
+
 ## Choosing before the batch finishes
 
 As soon as a completed preview appears, click **Use take N now**. No need to

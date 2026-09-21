@@ -12,7 +12,7 @@ Distributed under this repository's GPL-3.0 license, with attribution to the
 original authors. The model checkpoint is a separate asset, not bundled here.
 
 Local changes: private/lazy loading, no public upstream node registrations,
-no TST or spatial tiling, Chain-owned stage-aware Drift-Control integration,
+no TST, opt-in high-stage spatial tiling, Chain-owned stage-aware Drift-Control integration,
 native AV/painted-context carry, checkpoint persistence, avoiding a second
 blend of native fractional masks, masked pixel-anchor edge-case repair, and
 a dedicated project-switch workflow. The private Radau IA 2s adapter calls
@@ -20,6 +20,18 @@ the user's connected RES4LYF sampler without patching it. It captures the
 completed low-resolution state, evaluates a fresh boundary prediction, and
 uses a separately versioned durable handoff; Euler retains its original path.
 Neither ComfyUI core nor installed upstream node packs are modified.
+
+## High-resolution denoiser tiling
+
+`h3_tiling.py` adapts the spatial partitioning, packed-layout coordinate mapping,
+CPU blending and per-model memory-planning wrappers from facok/comfyui-SelfLift's
+`h3_tiling.py` (inspected 2026-09-20):
+https://github.com/facok/comfyui-SelfLift/blob/master/h3_tiling.py
+
+Local changes: explicit opt-in settings with fixed tile count/direction,
+native continuation/painted-mask cropping, mixed keyframe/reference handling,
+zero-overlap guards, cancellation checks, and high-stage-only integration with
+durable hunt finishing identities. TST is not included.
 
 ## Tr1dae clean-latent upscaler
 
