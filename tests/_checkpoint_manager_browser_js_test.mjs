@@ -7,7 +7,7 @@ import {pathToFileURL} from "node:url";
 import {spawnSync} from "node:child_process";
 
 const read = name => readFileSync(new URL("../web/" + name, import.meta.url), "utf8");
-const modules = ["h3_dom_wheel.mjs", "h3_chain_plan_core.mjs", "h3_checkpoint_manager_core.mjs", "h3_working_branches.mjs", "h3_checkpoint_graph.mjs", "h3_storage_inspector.mjs", "h3_checkpoint_multiselect.mjs"]
+const modules = ["h3_dom_wheel.mjs", "h3_chain_plan_core.mjs", "h3_context_take_core.mjs", "h3_checkpoint_manager_core.mjs", "h3_working_branches.mjs", "h3_checkpoint_graph.mjs", "h3_storage_inspector.mjs", "h3_checkpoint_multiselect.mjs"]
     .map(name => read(name).replace(/^import\s[\s\S]*?from\s+"[^"]+";\n/gm, "")
         .replace(/^export /gm, "")).join("\n");
 const extension = read("h3_chain_checkpoint_manager.js")
@@ -59,7 +59,9 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         payload.revisions = [...seven, alternate];
         const named = "a".repeat(32);
         const studio = {type:"MiniMaxH3ChainPlanStudio",inputs:[],widgets:[{name:"run_name",value:"demo"},
-            {name:"plan_json",value:'{"shots":[{"id":"one"}]}'},{name:"working_branch_id",value:named}]};
+            {name:"plan_json",value:JSON.stringify({shots:Array.from({length:8}, (_,i)=>({id:`scene_${i+1}`,seed:String(i+1)}))})},{name:"working_branch_id",value:named}]};
+        let contextRefreshes = 0;
+        const refreshRestoredPlanEditors = () => { contextRefreshes++; };
         const app = {registerExtension(){},graph:{setDirtyCanvas(){}}};
         let storageRequests = 0;
         const bulkRequests = [];
@@ -183,6 +185,17 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         const initialScroll = initialViewport.scrollLeft;
         check(initialScroll > 0, "Saved path overflows horizontally before selecting its last clip");
         card.click(); await new Promise(resolve=>setTimeout(resolve,100));
+        const contextButton = [...root.querySelectorAll("button")].find(item=>item.textContent === "Use as context for Scene 8");
+        check(contextButton && !contextButton.disabled, "Saved take can be selected as context with standalone Studio");
+        const originalPlan = parsePlanJson(studio.widgets.find(item=>item.name === "plan_json").value);
+        const originalOutput = node.widgets[0].value;
+        contextButton.click();
+        const pinnedPlan = JSON.parse(studio.widgets.find(item=>item.name === "plan_json").value);
+        check(pinnedPlan.shots[7].context_take?.revision === "7".repeat(32), "Action pins the exact selected revision on the following scene");
+        check(JSON.stringify(pinnedPlan.shots.slice(0,7)) === JSON.stringify(originalPlan.shots.slice(0,7)), "Context action does not edit earlier scenes");
+        check(node.widgets[0].value === originalOutput && contextRefreshes === 1, "Context action leaves output selection alone and refreshes Plan editors");
+        [...root.querySelectorAll("button")].find(item=>item.textContent === "Use assigned take").click();
+        check(studio.widgets.find(item=>item.name === "plan_json").value.indexOf('context_take') < 0, "Reset removes the context override");
         check(root.querySelector(".h3cm-fork-scroll").scrollLeft === initialScroll,
             "Selecting a clip preserves horizontal scroll without chapter metadata");
         const action = [...root.querySelectorAll("button")].find(item=>item.textContent === "Assign path to Original");

@@ -613,8 +613,16 @@ class CheckpointGraphManager:
             str(record.get("continuation_mode") or ""), visual_frames,
             audio_frames, generated,
             str(segment.get("source_audio_target") or "").lower())
-        if generated == "on" and audio_frames and parent_key in records:
-            if parent_key not in found:
+        if generated == "on" and audio_frames:
+            if segment.get("audio_context_source_revision"):
+                add(segment.get("audio_context_source_scene", scene - 1),
+                    segment["audio_context_source_revision"],
+                    segment.get("audio_context_source_checkpoint_sha256"))
+                if segment.get("audio_context_lead_source_revision"):
+                    add(segment.get("audio_context_lead_source_scene"),
+                        segment["audio_context_lead_source_revision"],
+                        segment.get("audio_context_lead_checkpoint_sha256"))
+            elif parent_key in records and parent_key not in found:
                 found.append(parent_key)
         return found
 
@@ -916,7 +924,10 @@ class CheckpointGraphManager:
 
         def require_source(scene_value, revision_value, hash_value):
             source_scene = int(scene_value)
-            source = lineage.get(source_scene)
+            pin = segment.get("context_take")
+            pinned = isinstance(pin, dict) and pin.get("revision") == revision_value
+            source = (records.get((source_scene, str(revision_value)))
+                      if pinned else lineage.get(source_scene))
             if source is None or not source["ready"]:
                 raise ValueError("Context source scene %d is not available on the target path." % source_scene)
             revision = str(revision_value or "").lower()

@@ -242,6 +242,11 @@ export function applyCheckpointRevisionSet(plan, revisions, {
         shot.seed = reviewSeed(revision.seed);
         shot.length = length;
         shot.steps = steps;
+        if (revision.context_take) {
+            shot.context_take = structuredClone(revision.context_take);
+        } else {
+            delete shot.context_take;
+        }
         if (Object.hasOwn(revision, "context_length")) {
             shot.context_length = Number(revision.context_length);
             sceneContextLength(shot);

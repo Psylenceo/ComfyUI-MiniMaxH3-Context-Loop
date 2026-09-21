@@ -224,6 +224,23 @@ Clicking an individual clip only previews it; it does not shorten the output
 or switch its branch. Use the downstream upscale/export range controls to
 choose which scenes to process.
 
+### Use a different take as context
+
+Select a saved take on the **Original** tab, then click **Use as context for
+Scene N+1**. That next scene must already exist in the connected Plan. The
+exact saved revision supplies its video/audio context without changing the
+final cut, working-branch assignments, source scene settings, or seeds.
+You decide whether the continuity makes sense; selecting it does not regenerate
+anything automatically. Existing context lengths/mode remain in effect (zero
+context stays off); custom source windows, compositions and masks are reset.
+
+Plan Studio → **Context** shows the pinned take and previews its media.
+**Use assigned take** clears the override. Save the workflow to keep the choice;
+it also travels with Plan/branch recovery and newly saved generation metadata.
+A missing/corrupt pinned checkpoint fails rather than silently choosing another
+take. Saved scenes generated from it retain their real checkpoint dependency,
+even when another take remains in the final cut.
+
 For an experiment, click **Use branch locally**. This saves the entire browsed
 branch (the row containing the previewed clip), not just its prefix through
 that clip. It pins the exact lineage on `selected_manifest` in this workflow

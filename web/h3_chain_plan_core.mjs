@@ -476,6 +476,9 @@ export function renamePlanShot(plan, index, requestedId) {
     // deliberately remain scene indexes and must not be rewritten as IDs.
     if (!/^\d+$/.test(previousId)) {
         for (const candidate of shots) {
+            if (String(candidate?.context_take?.source ?? "").trim() === previousId) {
+                candidate.context_take.source = nextId;
+            }
             for (const field of [
                 "visual_context_source", "visual_context_lead_source",
                 "audio_context_source", "audio_context_lead_source",
@@ -669,11 +672,24 @@ export function duplicateShot(shots, index) {
                 holder[key] = /^\d+$/.test(String(id).trim()) ? next + 1 : id;
             }
         }
+        if (shot.context_take && oldIndex > 0) {
+            // Preserve the old implicit predecessor too when a copy is inserted.
+            const previous = oldIndex - 1;
+            const shiftedPrevious = previous + (previous > index ? 1 : 0);
+            if (!authored(shot.visual_context_source) && !shot.visual_context_blocks) {
+                shot.visual_context_source = oldIndex;
+            }
+            if (!sceneAudioContextUnlocked(shot) && shiftedPrevious !== newIndex - 1) {
+                shot.audio_context_unlocked = true;
+                shot.audio_context_source = oldIndex;
+            }
+            source(shot.context_take, "source");
+        }
         for (const kind of ["visual", "audio"]) {
             // A plain predecessor tail follows the newly inserted scene.
             // Explicit windows, composed context and deliberately older
             // sources retain their original clip identities and frame ranges.
-            const linear = !authored(shot[`${kind}_context_start_frame`])
+            const linear = !shot.context_take && !authored(shot[`${kind}_context_start_frame`])
                 && !authored(shot[`${kind}_context_lead_source`])
                 && !Object.hasOwn(shot, `${kind}_context_blocks`);
             source(shot, `${kind}_context_source`, linear);
@@ -682,7 +698,7 @@ export function duplicateShot(shots, index) {
         if (Array.isArray(shot.visual_context_blocks)) {
             for (const block of shot.visual_context_blocks) {
                 if (!block || typeof block !== "object" || Array.isArray(block)) continue;
-                source(block, "source", shot.visual_context_blocks.length === 1
+                source(block, "source", !shot.context_take && shot.visual_context_blocks.length === 1
                     && !authored(block.start_frame));
             }
         }

@@ -4723,6 +4723,38 @@ function mount(node) {
         };
     }
 
+    const contextTakePreviews = new Map();
+    function contextTakePreviewKey() {
+        const pin = state.plan.shots[state.active]?.context_take;
+        if (!pin) return null;
+        const raw = String(pin.source ?? "").trim();
+        const index = /^\d+$/.test(raw) ? Number(raw) - 1 : state.plan.shots.findIndex(
+            (shot, offset) => safeShotId(shot.id, `clip_${String(offset + 1).padStart(4, "0")}`) === raw);
+        return {index, revision:pin.revision, run:runName(),
+            key:JSON.stringify([runName(), index, pin.revision])};
+    }
+
+    function contextPlayerCheckpoint(index) {
+        const selected = contextTakePreviewKey();
+        if (!selected || selected.index !== index) return playerCheckpoint(index);
+        const cached = contextTakePreviews.get(selected.key);
+        if (cached) return cached.media ?? null;
+        contextTakePreviews.set(selected.key, {loading:true});
+        const query = new URLSearchParams({run_name:selected.run,
+            context_scene:String(index + 1), context_revision:selected.revision});
+        api.fetchApi(`/minimax_h3_context_loop/checkpoints?${query}`, {cache:"no-store"})
+            .then(async response => {
+                const payload = await response.json();
+                if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+                contextTakePreviews.set(selected.key, {media:payload.context_take});
+            }).catch(error => contextTakePreviews.set(selected.key, {error:error.message}))
+            .finally(() => {
+                if (!state.disposed && state.view === "context"
+                        && contextTakePreviewKey()?.key === selected.key) renderPanel();
+            });
+        return null;
+    }
+
     function renderAudioContextPanel(panel, result, row, shot) {
         if (!row.preservesGeneratedAudioPrefix || !Number(row.audioContextLength)) {
             panel.append(element(
@@ -4908,7 +4940,7 @@ function mount(node) {
                     validStarts, Number(shot[block.field]),
                 );
             }
-            const media = playerCheckpoint(block.sourceIndex);
+            const media = contextPlayerCheckpoint(block.sourceIndex);
             let audio = null;
             const audioPath = media?.audio ?? media?.video;
             if (audioPath) {
@@ -5066,6 +5098,24 @@ function mount(node) {
                 "Scene 1 has no saved predecessor. Existing Video Context remains configured by its dedicated workflow input.",
             ));
             return panel;
+        }
+        if (shot.context_take) {
+            const selected = contextTakePreviewKey();
+            const cached = contextTakePreviews.get(selected.key);
+            const notice = element("div", "h3studio-context-empty",
+                `Context take: Scene ${selected.index + 1} · ${String(shot.context_take.revision).slice(0, 8)}. Final cut unchanged.`);
+            notice.append(button("Use assigned take", "Clear the saved context take selection", () => {
+                delete shot.context_take;
+                writePlan(); renderShell();
+            }));
+            if (cached?.error) {
+                notice.append(element("div", "h3studio-error", cached.error));
+                notice.append(button("Retry preview", "Reload the exact saved context take preview", () => {
+                    contextTakePreviews.delete(selected.key);
+                    renderShell();
+                }));
+            }
+            panel.append(notice);
         }
         let audioUnlocked = false;
         try { audioUnlocked = sceneAudioContextUnlocked(shot); }
@@ -5445,7 +5495,7 @@ function mount(node) {
                     validStarts, Number.isInteger(raw) ? raw : defaultStart,
                 );
             }
-            const media = playerCheckpoint(block.sourceIndex);
+            const media = contextPlayerCheckpoint(block.sourceIndex);
             let video = null;
             if (media?.video) {
                 video = element("video", "h3studio-context-video");
@@ -5473,7 +5523,9 @@ function mount(node) {
             } else {
                 card.append(element(
                     "div", "h3studio-context-empty",
-                    `Scene ${sourceRow.index} has no active saved video yet. The frame window can still be planned now.`,
+                    contextTakePreviewKey()?.index === block.sourceIndex
+                        ? "The selected context take preview is loading or unavailable; the assigned take is not substituted."
+                        : `Scene ${sourceRow.index} has no active saved video yet. The frame window can still be planned now.`,
                 ));
             }
             const rangeWrap = element("div", "h3studio-context-range");

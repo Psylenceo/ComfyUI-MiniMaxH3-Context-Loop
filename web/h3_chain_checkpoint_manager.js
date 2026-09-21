@@ -1,4 +1,5 @@
 import {app} from "/scripts/app.js";
+import {applyContextTake} from "./h3_context_take_core.mjs?v=0.7.1";
 import {bindNodeWheel} from "./h3_dom_wheel.mjs?v=0.7.1";
 import {api} from "/scripts/api.js";
 import {mountStorageInspector} from "./h3_storage_inspector.mjs?v=0.7.1";
@@ -695,6 +696,13 @@ function mount(node) {
     const load = button("Load path + settings into Plan", "Assign this chapter lineage to the branch being browsed, load saved Plan settings, and arm the next Loop Start. Unlike assignment alone, this can switch the connected Plan's branch.", () => void loadSelected());
     const activate = button("Assign path", "Assign this chapter lineage to the named working branch; other working branches are unchanged", () => void activateSelected());
     const assignPlan = button("Assign to Plan Studio branch", "Assign this saved path to the connected Plan's branch, even when it is already active in the branch being browsed", () => void assignSelectedToPlan());
+    const contextPanel = element("section", "h3cm-assignment");
+    const contextStatus = element("div", "h3cm-assignment-context");
+    const contextActions = element("div", "h3cm-assignment-actions");
+    const useContext = button("Use as context", "Use this saved take's video/audio checkpoint for the next scene. Keep context length/mode; reset custom source windows. Final cut, active path and seeds stay unchanged.", () => setContextTake(false));
+    const clearContext = button("Use assigned take", "Clear the next scene's saved context take override; follow its assigned predecessor again", () => setContextTake(true));
+    contextActions.append(useContext, clearContext);
+    contextPanel.append(contextStatus, contextActions);
     const remove = button("Delete selected revision", "Delete an inactive leaf or roll back the active branch tip after confirmation", () => void deleteSelected(), "h3cm-delete-button");
     const removeObsolete = button("Delete obsolete path…", "Preview removing this unused take and redundant downstream links; reattached scenes and shared files are kept", () => void obsoletePathAction(), "h3cm-delete-button");
     const obsoletePanel = element("div", "h3cm-obsolete-preview");
@@ -709,7 +717,7 @@ function mount(node) {
     deletionActions.append(remove, removeObsolete);
     deletion.append(bulkTools, deletionActions, bulkPanel, obsoletePanel, deletionTitle, deletionDetails);
     root.append(head, runRow, storagePanel, workingRow, workingHelp, branchCleanupPanel, finalCutRow, outputRow, stageTabs, stageNote, chapterTabs, scenes,
-        assignmentPanel, status, main, deletion);
+        assignmentPanel, contextPanel, status, main, deletion);
 
     function setPreviewHeight(value, persist = false) {
         state.previewHeight = previewHeight(value);
@@ -1763,6 +1771,7 @@ function mount(node) {
     }
 
     function renderDeletion() {
+        renderContextTake();
         removeObsolete.hidden = state.stage !== "original" || state.selected?.take_kind === "editorial_alternate";
         removeObsolete.disabled = state.busy || Boolean(state.attribution) || !obsoletePathIdentity();
         if (obsoleteIdentity !== obsoletePathIdentity()) {
@@ -2219,6 +2228,66 @@ function mount(node) {
             );
         }
         return true;
+    }
+
+    function contextTakeTarget() {
+        const planNode = upstreamPlanNode(node) ?? upstreamPlanNode(node, true);
+        const marker = currentPlanMarker();
+        const target = widget(planNode, "plan_json");
+        if (!target || marker?.run !== state.runName || state.stage !== "original" || !state.selected) return null;
+        const plan = parsePlanJson(String(target.value ?? ""));
+        return {planNode, target, plan, scene:Number(state.selected.scene)};
+    }
+
+    function renderContextTake() {
+        useContext.disabled = clearContext.disabled = true;
+        contextPanel.hidden = state.stage !== "original";
+        try {
+            const target = contextTakeTarget();
+            if (!target) {
+                contextStatus.textContent = "Context take: connect this manager to the same project's Plan and select a saved take.";
+                return;
+            }
+            const {plan, scene} = target;
+            const shot = plan.shots[scene];
+            useContext.textContent = `Use as context for Scene ${scene + 1}`;
+            if (!shot) {
+                contextStatus.textContent = `Add Scene ${scene + 1} to the Plan to choose its context take. The final cut stays unchanged.`;
+                return;
+            }
+            const pin = shot.context_take;
+            contextStatus.textContent = `Scene ${scene + 1} context: ` + (pin
+                ? `saved take ${String(pin.revision).slice(0, 8)}` : "assigned take")
+                + ". Independent of the final cut; applies when this scene is next generated.";
+            useContext.disabled = state.busy || Boolean(state.attribution)
+                || !state.selected.ready || pin?.revision === state.selected.revision;
+            clearContext.disabled = state.busy || Boolean(state.attribution) || !pin;
+        } catch (error) { contextStatus.textContent = error.message; }
+    }
+
+    function setContextTake(clear) {
+        if (state.busy || state.attribution) return;
+        try {
+            const target = contextTakeTarget();
+            if (!target || (!clear && !state.selected.ready)) return;
+            const {planNode, plan, scene} = target;
+            const updated = applyContextTake(plan, scene, clear ? null : state.selected.revision);
+            const graph = planNode.graph ?? app.graph;
+            graph?.beforeChange?.();
+            try {
+                const value = planToJson(updated);
+                target.target.value = value;
+                target.target.callback?.(value);
+                refreshRestoredPlanEditors(planNode);
+            } finally { graph?.afterChange?.(); }
+            graph?.setDirtyCanvas?.(true, true);
+            renderContextTake();
+            status.className = "h3cm-status";
+            status.textContent = `Scene ${scene + 1} will use ${clear ? "the assigned take" : "take " + state.selected.revision.slice(0, 8)} as context. Final cut and branch assignments unchanged. Save the workflow to keep this choice.`;
+        } catch (error) {
+            status.className = "h3cm-status h3cm-error";
+            status.textContent = error.message;
+        }
     }
 
     function prepareResume(scene) {

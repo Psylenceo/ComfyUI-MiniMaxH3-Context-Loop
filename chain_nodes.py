@@ -5336,6 +5336,65 @@ VISUAL_CONTEXT_LEGACY_FIELDS = (
 )
 
 
+def _shot_context_take(plan, index):
+    from .context_take import context_take
+    if int(index) > len(plan["shots"]):
+        return None
+    pin = context_take(plan["shots"][int(index) - 1].get("context_take"))
+    if pin is None:
+        return None
+    source = _resolve_prior_scene_source(
+        plan, int(index), pin["source"], "context_take.source", False)
+    if source is None or int(index) <= 1:
+        raise ValueError("context_take must select a saved earlier scene.")
+    return {"source": source, "revision": pin["revision"]}
+
+
+def _context_take_metadata(plan, index, artifact_verification=None):
+    pin = _shot_context_take(plan, index)
+    if pin is None or pin["source"] not in _resume_context_predecessors(plan, index)["scenes"]:
+        return None
+    metadata, _ = _load_checkpoint_revision(
+        plan["run_name"], pin["source"], pin["revision"], verify_artifacts=False)
+    _verify_segment_artifacts(
+        metadata["segment"], pin["source"],
+        artifact_verification=artifact_verification,
+        hash_artifacts=frozenset({"checkpoint"}))
+    return metadata
+
+
+def _context_take_state(state):
+    """Substitute a take only in the context view, never the edit/history."""
+    plan, index = state["plan"], int(state["index"])
+    pin = _shot_context_take(plan, index)
+    if pin is None or pin["source"] not in _resume_context_predecessors(plan, index)["scenes"]:
+        return state
+    signature = (index, pin["source"], pin["revision"])
+    cached = state.get("_context_take_state")
+    if isinstance(cached, dict) and cached.get("_context_take_signature") == signature:
+        return cached
+    metadata = _context_take_metadata(plan, index)
+    source = _public_segment(metadata["segment"])
+    selected = {key: value for key, value in state.items()
+                if key not in ("_context_take_state", "_visual_context_state", "_audio_context_state")}
+    selected["segments"] = [source if int(item["index"]) == pin["source"] else item
+                            for item in state.get("segments", [])]
+    if not any(int(item["index"]) == pin["source"] for item in selected["segments"]):
+        raise ValueError("The context take's source scene is missing from saved history.")
+    if pin["source"] == index - 1:
+        if _st_load is None:
+            raise RuntimeError("safetensors is required to load a saved context take.")
+        tensors = _st_load(_absolute_output_path(source["checkpoint"]))
+        if not {"video", "audio", "context_frames"}.issubset(tensors):
+            raise ValueError("The saved context take has no complete AV context checkpoint.")
+        from .selflift_state import checkpoint_latent
+        selected["previous_latent"] = checkpoint_latent(tensors)
+        selected["previous_frames"] = tensors["context_frames"]
+    selected["_context_take_signature"] = signature
+    state["_context_take_state"] = selected
+    return selected
+
+
 def _shot_visual_context_blocks(
         plan: dict[str, Any], index: int,
         context_length: int) -> list[dict[str, Any]]:
@@ -6093,6 +6152,8 @@ def _legacy_history_contract(
         if "visual_context_blocks" in shot:
             contract["visual_context_blocks"] = [
                 dict(block) for block in shot["visual_context_blocks"]]
+        if "context_take" in shot:
+            contract["context_take"] = dict(shot["context_take"])
         if "audio_context_length" in shot:
             contract["audio_context_length"] = shot["audio_context_length"]
         if "context_spatial_proxy" in shot:
@@ -6361,6 +6422,8 @@ def _scene_dependency_record(
             "video_blend_frames": video_blend,
         },
     }
+    if "context_take" in shot:
+        scopes["incoming_boundary"]["context_take"] = dict(shot["context_take"])
     if index > 1 and context > 0 and "visual_context_blocks" in shot:
         dependency_blocks = []
         for block in _shot_visual_context_blocks(plan, index, context):
@@ -7773,12 +7836,24 @@ def _normalize_plan(
             raise ValueError(
                 "Shot 1 cannot define visual_context_start_frame; its "
                 "optional Existing Video Context is prepared separately.")
+        if item.get("context_take") is not None:
+            from .context_take import context_take
+            if index == 1:
+                raise ValueError("Shot 1 cannot select a saved context take.")
+            shot["context_take"] = context_take(item["context_take"])
         shots.append(shot)
         stitched_frames += delivered_frames
 
     provisional_plan = {"shots": shots}
     for target_index in range(2, len(shots) + 1):
         target = shots[target_index - 1]
+        pin = _shot_context_take(provisional_plan, target_index)
+        if pin is not None:
+            source_id = str(shots[pin["source"] - 1]["id"])
+            target["context_take"] = {
+                "source": pin["source"] if source_id.isdigit() else source_id,
+                "revision": pin["revision"],
+            }
         next_context_length = resolved_context_lengths[target_index - 1]
         if "visual_context_blocks" in target:
             try:
@@ -9388,11 +9463,31 @@ def _editorial_segment_raw_frames(
         "_editorial_raw_out_frames", segment.get("raw_frames", fallback)))
 
 
+def _pinned_context_source_scenes(segment):
+    """Exact external takes are not affected by edits to assigned scene clips."""
+    pin = segment.get("context_take")
+    if not isinstance(pin, dict) or not pin.get("revision"):
+        return set()
+    revision = pin["revision"]
+    sources = set()
+    for prefix in ("visual_context", "visual_context_lead",
+                   "audio_context", "audio_context_lead"):
+        if segment.get(prefix + "_source_revision") == revision:
+            sources.add(int(segment[prefix + "_source_scene"]))
+    for block in segment.get("visual_context_blocks", []):
+        if block.get("source_revision") == revision:
+            sources.add(int(block["source_scene"]))
+    return sources
+
+
 def _editorial_dependency_mismatches(
         segment: dict[str, Any], index: int,
         editorial_segments: dict[int, dict[str, Any]],
 ) -> list[str]:
     """Report saved continuations whose source endpoint changed afterward."""
+    pinned = _pinned_context_source_scenes(segment)
+    editorial_segments = {key: value for key, value in editorial_segments.items()
+                          if key not in pinned}
     reasons: list[str] = []
     predecessor = editorial_segments.get(int(index) - 1)
     resolved_visual = int(segment.get("resolved_context_length", 0))
@@ -9505,7 +9600,7 @@ def _editorial_dependency_sources(
             and ("resolved_audio_context_length" not in segment
                  or _saved_audio_dependency_length(segment) > 0)):
         sources.add(audio_lead_source_index)
-    return sources
+    return sources - _pinned_context_source_scenes(segment)
 
 
 def _editorial_stale_dependencies(
@@ -9816,6 +9911,8 @@ def _effective_editor_plan(plan: dict[str, Any]) -> dict[str, Any]:
                if "continuation_mode" in shot else {}),
              **({"context_length": shot["context_length"]}
                 if "context_length" in shot else {}),
+             **({"context_take": dict(shot["context_take"])}
+                if "context_take" in shot else {}),
              **({"visual_context_source": shot["visual_context_source"]}
                 if "visual_context_source" in shot else {}),
              **({"visual_context_start_frame": int(
@@ -10743,6 +10840,7 @@ def _public_segment(value: dict[str, Any]) -> dict[str, Any]:
         "prompt_prefix", "scene_prompt", "scene_prompt_template", "prompt",
         "prompt_hash", "prompt_template_hash", "prompt_choice_seed", "archives",
         "seed", "steps", "continuation_mode", "context_length",
+        "context_take",
         "audio_context_length", "context_spatial_proxy",
         "source_reference", "generated_continuity", "source_audio_target",
         "lip_sync_source", "lip_sync_source_asset",
@@ -10965,7 +11063,7 @@ def _audio_context_state(state: dict[str, Any]) -> dict[str, Any]:
 def _selected_context_state(
         state: dict[str, Any], vae: Any = None) -> dict[str, Any]:
     """Apply optional audio selection, then optional picture selection."""
-    selected = _audio_context_state(state)
+    selected = _audio_context_state(_context_take_state(state))
     plan = selected["plan"]
     index = int(selected["index"])
     shot = plan["shots"][index - 1]
@@ -11571,6 +11669,11 @@ def _load_resume_state(
     if start_clip <= len(plan["shots"]):
         _validate_scene_resolution_boundary(plan, start_clip)
     consumed_predecessors = set(context_sources["scenes"])
+    context_pin = _shot_context_take(plan, start_clip)
+    if context_pin is not None:
+        # The pinned immutable take, not the editable source shot's current
+        # prompt/seed, defines this context. Its artifacts are checked separately.
+        consumed_predecessors.discard(context_pin["source"])
     segments = []
     previous_meta = None
     if not bool(verify_history):
@@ -11651,7 +11754,7 @@ def _load_resume_state(
         raise RuntimeError("Internal resume error: predecessor metadata unavailable.")
     context_frames = None
     previous_latent = None
-    if consumed_predecessors:
+    if context_sources["scenes"]:
         _throw_if_review_interrupted()
         if _st_load is None:
             raise RuntimeError("safetensors is required to resume H3 chains.")
@@ -11680,6 +11783,7 @@ def _load_resume_state(
                 "tensor shape %s for a %d-frame delivered clip." %
                 (tuple(getattr(context_frames, "shape", ())),
                  previous_delivered))
+    _context_take_metadata(plan, start_clip, artifact_verification)
     return {
         "plan": plan,
         "index": start_clip,
@@ -15975,14 +16079,23 @@ def _preflight_resume(
     }
     context_sources = _resume_context_predecessors(plan, int(start))
     consumed_predecessors = set(context_sources["scenes"])
-    checkpoint_sources = _resume_checkpoint_sources(context_sources, start)
     if artifact_verification is None:
         artifact_verification = _ResumeArtifactVerification()
+    context_pin = _shot_context_take(plan, start)
+    if context_pin is not None:
+        consumed_predecessors.discard(context_pin["source"])
+        try:
+            _context_take_metadata(plan, start, artifact_verification)
+        except (OSError, TypeError, ValueError) as exc:
+            result["eligible"] = False
+            _preflight_issue(report, "errors", "context_take_unavailable", str(exc),
+                             "Restore the saved context take or choose another take.")
+    checkpoint_sources = _resume_checkpoint_sources(context_sources, start)
     result["artifact_verification"] = "context_checkpoints_only"
     result["checkpoint_sources"] = sorted(checkpoint_sources)
     result["context_sources"] = context_sources
     result["context_predecessor"] = (
-        max(consumed_predecessors) if consumed_predecessors else None)
+        max(context_sources["scenes"]) if context_sources["scenes"] else None)
     for index in range(1, int(start)):
         _throw_if_review_interrupted()
         checked_at = time.perf_counter()
@@ -19293,9 +19406,17 @@ class MiniMaxH3ChainSegmentSave:
         audio_source_index = (
             _shot_audio_context_source(plan, index)
             if audio_context_unlocked else None)
+        context_pin = _shot_context_take(plan, index)
+        if (context_pin is not None and not audio_context_unlocked
+                and context_pin["source"] == index - 1
+                and resolved_audio_context_length > 0):
+            audio_source_index = index - 1
         audio_source_segment = (
             visual_state.get("audio_context_source_segment")
             if audio_source_index is not None else None)
+        if audio_source_index is not None and audio_source_segment is None:
+            audio_source_segment = next((item for item in _context_take_state(state).get("segments", [])
+                                         if int(item["index"]) == audio_source_index), None)
         audio_lead_source_index = (
             _shot_audio_context_lead_source(plan, index)
             if audio_context_unlocked else None)
@@ -19576,6 +19697,8 @@ class MiniMaxH3ChainSegmentSave:
                     "continuation_mode",
                     plan["compatibility"].get("continuation_mode", "guide")),
                 "context_length": effective_context_length,
+                **({"context_take": dict(shot["context_take"])}
+                   if "context_take" in shot else {}),
                 "audio_context_length": effective_audio_context_length,
                 "source_reference": str(
                     _resolved_scene_audio_policy(plan, shot)[
@@ -19692,7 +19815,7 @@ class MiniMaxH3ChainSegmentSave:
             if (audio_source_index is not None
                     and isinstance(audio_source_segment, dict)):
                 segment.update({
-                    "audio_context_unlocked": True,
+                    "audio_context_unlocked": bool(audio_context_unlocked),
                     "audio_context_source_scene": audio_source_index,
                     "audio_context_source_id": str(
                         audio_source_segment.get("id") or
@@ -28042,6 +28165,8 @@ def _checkpoint_plan_revision(segment: dict[str, Any]) -> dict[str, Any]:
     }
     if "context_length" in segment:
         revision["context_length"] = int(segment["context_length"])
+    if "context_take" in segment:
+        revision["context_take"] = dict(segment["context_take"])
     if "audio_context_length" in segment:
         revision["audio_context_length"] = int(
             segment["audio_context_length"])
@@ -29024,11 +29149,33 @@ def _saved_checkpoint_listing(
     return payload
 
 
+def _context_take_preview(run_name, scene, revision):
+    """Read one immutable take without final-cut substitutions or media work."""
+    metadata, _ = _load_checkpoint_revision(
+        run_name, scene, revision, verify_artifacts=False)
+    segment = metadata["segment"]
+    path = _absolute_output_path(segment["segment"])
+    if not os.path.isfile(path):
+        raise FileNotFoundError("The selected context take's video is missing.")
+    return {"scene": int(scene), "revision": str(revision),
+            "video": _video_output_item(path),
+            "audio": _checkpoint_audio_sidecar(segment)}
+
+
 async def _list_saved_checkpoints(request):
     try:
         run_name = _strict_run_name(request.query.get("run_name", ""))
     except (TypeError, ValueError) as exc:
         return web.json_response({"error": str(exc)}, status=400)
+    if "context_revision" in request.query:
+        try:
+            preview = await asyncio.to_thread(
+                _context_take_preview, run_name,
+                request.query.get("context_scene", ""),
+                request.query["context_revision"])
+            return web.json_response({"context_take": preview})
+        except (OSError, TypeError, ValueError, KeyError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
     include_graph = str(request.query.get(
         "include_graph", "true")).strip().lower() not in (
             "0", "false", "no")
