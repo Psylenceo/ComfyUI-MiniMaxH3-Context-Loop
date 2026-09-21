@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """CPU regression: base Plan fingerprint resolves a semantic Ref2VA cache."""
+from source_audio_fixtures import with_source_audio
 import copy
 import json
 from pathlib import Path
@@ -152,7 +153,7 @@ def main():
                                    "length": 5, "steps": 2, "seed": "7"}]}),
             "semantic_saved", base, 32, 32, 1, "video", "head", "disabled",
             "generated_audio", 1, 5 / 24, 2, 7, 18, 0, "guide")[0]
-        plan = chain._plan_with_source_audio(chain._plan_with_external_context(plan, None), None)
+        plan = with_source_audio(chain, chain._plan_with_external_context(plan, None), None)
         save_cache(wrapped, scene=1, scene_count=1)
         save_state = chain._initial_state(plan, 1)
 

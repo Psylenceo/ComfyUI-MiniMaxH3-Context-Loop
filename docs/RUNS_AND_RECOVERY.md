@@ -568,11 +568,11 @@ output/h3_chains/<run_name>/upscaled/seedvr2/source/<cache_key>.mkv
 The cache key includes the immutable checkpoint lineage, VAE implementation,
 blend schedule, prelude, and selected audio policy. Disable `reuse_cache` to
 force a fresh VAE decode. `audio_source=plan` recovers the saved final-audio
-policy and source audio directly from the manifest. Both an explicit Source
-Timeline and a legacy AUDIO connected once at Loop Start are now materialized
-as path-backed run state. Only manifests created before that legacy promotion,
-and therefore lacking a recovery descriptor, need the optional `source_audio`
-socket.
+policy and source audio directly from the manifest's saved Source Timeline.
+Already-saved descriptors from the former Loop Start AUDIO route remain
+readable. The 0.4 `source_audio` fallback socket is removed in 0.7; an older
+manifest without a recovery descriptor needs source-track migration before
+source-audio export. No manual AUDIO connection is needed on this adapter.
 
 Use the audio-preserving **SeedVR2 Direct Video Upscaler** from
 [ethanfel/ComfyUI-SeedVR2_VideoUpscaler](https://github.com/ethanfel/ComfyUI-SeedVR2_VideoUpscaler).

@@ -180,7 +180,7 @@
       ],
       "size": [
         360,
-        236
+        216
       ],
       "flags": {},
       "order": 5,
@@ -190,11 +190,6 @@
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
           "link": 1
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         },
         {
           "name": "external_context",
@@ -248,7 +243,7 @@
       "type": "MiniMaxH3ChainCurrent",
       "pos": [
         4370,
-        748
+        728
       ],
       "size": [
         460,
@@ -262,11 +257,6 @@
           "name": "state",
           "type": "H3_CHAIN_STATE",
           "link": 3
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         }
       ],
       "outputs": [
@@ -395,11 +385,6 @@
           "name": "manifest",
           "type": "H3_CHAIN_MANIFEST",
           "link": 4
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         },
         {
           "name": "source_timeline",
@@ -721,7 +706,7 @@
       "type": "MiniMaxH3SigmaShift",
       "pos": [
         4370,
-        516
+        496
       ],
       "size": [
         360,
@@ -1157,11 +1142,6 @@
           "link": 44
         },
         {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
-        },
-        {
           "name": "source_timeline",
           "type": "H3_SOURCE_TIMELINE",
           "link": null
@@ -1254,11 +1234,6 @@
           "link": 46
         },
         {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
-        },
-        {
           "name": "external_context",
           "type": "H3_CHAIN_EXTERNAL_CONTEXT",
           "link": null
@@ -1323,11 +1298,6 @@
           "name": "audio",
           "type": "AUDIO",
           "link": 49
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         },
         {
           "name": "pending_review",
@@ -1461,11 +1431,6 @@
         {
           "name": "source_timeline",
           "type": "H3_SOURCE_TIMELINE",
-          "link": null
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
           "link": null
         },
         {
@@ -1971,7 +1936,7 @@
       29,
       0,
       6,
-      2,
+      1,
       "H3_CHAIN_EXTERNAL_CONTEXT"
     ],
     [
@@ -2403,7 +2368,7 @@
       31,
       1,
       25,
-      3,
+      2,
       "H3_TAGGED_REFERENCES"
     ],
     [
@@ -2411,7 +2376,7 @@
       31,
       0,
       25,
-      5,
+      4,
       "H3_PROJECT_ASSETS"
     ],
     [
@@ -2494,7 +2459,7 @@
         4330,
         90,
         540,
-        1098
+        1078
       ],
       "color": "#394c49",
       "font_size": 24,

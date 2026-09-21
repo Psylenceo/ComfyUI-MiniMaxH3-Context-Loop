@@ -4,6 +4,7 @@
 Set COMFYUI_PATH when ComfyUI is not adjacent to the checkout. No weights,
 external image upscalers, live projects or GPU sampling are used.
 """
+from source_audio_fixtures import with_source_audio
 import copy
 import gc
 import importlib.util
@@ -317,7 +318,7 @@ def assert_attributed_branch_upscales(chain, upscale):
             "attached_pixel", "attached-pixel-cache", 32, 32, 1,
             "video", "head", "disabled", "generated_audio", 1,
             5 / 24, 2, 7, 18, 0, "guide")[0]
-        plan = chain._plan_with_source_audio(chain._plan_with_external_context(plan, None), None)
+        plan = with_source_audio(chain, chain._plan_with_external_context(plan, None), None)
         latent = {"samples": [torch.full((1, 24, 2, 2, 2), 0.75),
                                torch.full((1, 32, 2, 9), 0.75)]}
         audio = {"waveform": torch.full((1, 2, round(5 / 24 * 8000)), 0.25),
@@ -362,8 +363,7 @@ def assert_attributed_branch_upscales(chain, upscale):
             result = upscale.MiniMaxH3ChainUpscaleLoopEnd().end(flow, state, target, saved)[0]
         upscale._validate_upscale_manifest(result)
         assert len(result["segments"]) == 2
-        assembled = chain.MiniMaxH3ChainAssemble().assemble(
-            result, "plan", "attached_final", 128, False, "")["result"][0]
+        assembled = chain.MiniMaxH3ChainAssemble().assemble(result, "plan", "attached_final", 128, overwrite_existing="")["result"][0]
         assert Path(assembled).is_file()
         assert all(p.read_bytes() == content for p, content in before.items()), \
             "upscaling must not rewrite either branch, its recovery snapshots or caches"
@@ -391,7 +391,7 @@ def main():
             "pixel_test", "pixel-test-cache", 32, 32, 1,
             "video", "head", "disabled", "generated_audio", 1,
             5 / 24, 2, 7, 18, 0, "guide")[0]
-        plan = chain._plan_with_source_audio(chain._plan_with_external_context(plan, None), None)
+        plan = with_source_audio(chain, chain._plan_with_external_context(plan, None), None)
         lineage = []
         source_segments = []
         for index in (1, 2):
@@ -621,8 +621,7 @@ def main():
         final = end.end(flow, resumed, frames, saved2)[0]
         assert final["completed_clip_count"] == 2
         assert final["total_delivered_frames"] == sum(s["delivered_frames"] for s in manifest["segments"])
-        assembled = chain.MiniMaxH3ChainAssemble().assemble(
-            final, "plan", "pixel_test_final", 128, False, "")
+        assembled = chain.MiniMaxH3ChainAssemble().assemble(final, "plan", "pixel_test_final", 128, overwrite_existing="")
         assert Path(chain._absolute_output_path(assembled["result"][0])).is_file()
         streams = json.loads(subprocess.check_output([
             "ffprobe", "-v", "error", "-show_streams", "-of", "json",
@@ -712,8 +711,7 @@ def main():
         # Pixel export geometry need not be a multiple of the H3 latent grid.
         arbitrary = [{**s, "width":1920, "height":1080} for s in chapter_final["segments"]]
         assert upscale._assembly_manifest(chapter_final, arbitrary)["chapter"]["resolution"] == {"width":1920,"height":1080}
-        assembled_chapter = chain.MiniMaxH3ChainAssemble().assemble(
-            chapter_final, "plan", "chapter_test_final", 128, False, "")
+        assembled_chapter = chain.MiniMaxH3ChainAssemble().assemble(chapter_final, "plan", "chapter_test_final", 128, overwrite_existing="")
         final_path = assembled_chapter["result"][0]
         assert "exports/videos/original__02_two/pass-pixel/" in final_path
         streams = json.loads(subprocess.check_output([

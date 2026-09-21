@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Deferred ALT selection through real CPU checkpoints, saves and resume."""
 
+from source_audio_fixtures import with_source_audio
 import copy
 import importlib
 import json
@@ -42,7 +43,7 @@ class AlternateUpscaleTests(unittest.TestCase):
                 {"id": "second", "prompt": "The next scene.", "length": 5, "steps": 2, "seed": "8"}]}),
             self.run, "unit-test", 32, 32, 1, "video", "head", "disabled", "generated_audio",
             1, 5 / 24, 2, 7, 18, 0, "guide")[0]
-        self.plan = chain._plan_with_source_audio(chain._plan_with_external_context(plan, None), None)
+        self.plan = with_source_audio(chain, chain._plan_with_external_context(plan, None), None)
         self.frames = torch.zeros(5, 32, 32, 3)
         self.bases = []
         for index in (1, 2):

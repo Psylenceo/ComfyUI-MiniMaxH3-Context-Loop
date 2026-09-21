@@ -1452,7 +1452,7 @@ class MiniMaxH3ChainUpscalePixelCurrent:
         "their count; Segment Save removes the repeated head exactly once.",
         "Delivered saved scene audio, or None for a silent source. For preview "
         "only: Segment Save preserves this audio automatically. Do not wire "
-        "it to recovered_audio (RAW) or Assemble source_audio (whole run).",
+        "it to recovered_audio (RAW). Assemble recovers the saved Source Timeline.",
         "Original saved scene prompt.", "Original saved scene seed.",
         "One-based scene index.", "Expected RAW frame count.",
         "Repeated head frame count removed by Segment Save.",

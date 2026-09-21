@@ -65,8 +65,7 @@ class ReviewTonePolicyTest(unittest.TestCase):
                 patch.object(chain, "_atomic_json"), \
                 patch.object(chain.MiniMaxH3ChainAssemble, "assemble",
                              side_effect=outcomes) as assemble:
-            preview, warning = chain._assemble_review_partial(
-                state, manifest["segments"][-1], "checkpointed", None)
+            preview, warning = chain._assemble_review_partial(state, manifest["segments"][-1], "checkpointed")
         self.assertEqual(preview, "preview.mp4")
         self.assertEqual(bool(warning), audio_fails)
         self.assertEqual(assemble.call_count, 2 if audio_fails else 1)

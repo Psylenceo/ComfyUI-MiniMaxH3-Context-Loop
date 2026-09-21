@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CPU integration test for deferred checkpoint upscale child runs."""
 
+from source_audio_fixtures import with_source_audio
 import importlib.util
 import json
 import pathlib
@@ -287,7 +288,7 @@ def main():
             "upscale_test", "unit-test", 32, 32, 1,
             "video", "head", "disabled", "generated_audio", 1,
             5 / 24, 2, 7, 18, 0, "guide")[0]
-        prepared_plan = chain._plan_with_source_audio(
+        prepared_plan = with_source_audio(chain,
             chain._plan_with_external_context(plan, None), None)
         state = chain._initial_state(prepared_plan, 1)
         source_images = torch.zeros((5, 32, 32, 3), dtype=torch.float32)

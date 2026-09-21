@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Standalone regression test for preserving H3 audio beside source-audio finals."""
 
+from source_audio_fixtures import bind_manifest_audio
+
 import importlib.util
 import pathlib
 import sys
@@ -74,12 +76,12 @@ def main():
         }
         generated = audio(0.25)
         source = audio(0.0)
+        bind_manifest_audio(chain, manifest, source)
         muxed_pcm = []
 
         chain._validate_manifest = lambda value: value["segments"]
         chain._validate_prelude = lambda _value: None
         chain._generated_audio = lambda _value: generated
-        chain._validate_source_audio_hash = lambda *_args: None
         chain._manifest_media_metadata = lambda _value: {}
         original_which = chain.shutil.which
         original_run_ffmpeg = chain._run_ffmpeg
@@ -102,10 +104,7 @@ def main():
 
         chain._run_ffmpeg = fake_ffmpeg
         try:
-            result = chain.MiniMaxH3ChainAssemble().assemble(
-                manifest, "plan", "source_final", 96, source,
-                copy_to_output=True,
-                output_subfolder="published/finals")
+            result = chain.MiniMaxH3ChainAssemble().assemble(manifest, "plan", "source_final", 96, copy_to_output=True, output_subfolder="published/finals", source_timeline=chain._make_source_timeline(source_audio=source))
             manifest["compatibility"]["audio_mode"] = "generated_audio"
             generated_result = chain.MiniMaxH3ChainAssemble().assemble(
                 manifest, "plan", "generated_final", 96)
@@ -126,8 +125,7 @@ def main():
             chain._pyav_mux_audio = (
                 lambda _video, _audio, path, _bitrate, _frames:
                 pathlib.Path(path).write_bytes(b"PyAV video with audio"))
-            fallback = chain.MiniMaxH3ChainAssemble().assemble(
-                manifest, "source", "broken_ffmpeg_fallback", 96, source)
+            fallback = chain.MiniMaxH3ChainAssemble().assemble(manifest, "source", "broken_ffmpeg_fallback", 96, source_timeline=chain._make_source_timeline(source_audio=source))
         finally:
             chain.shutil.which = original_which
             chain._run_ffmpeg = original_run_ffmpeg

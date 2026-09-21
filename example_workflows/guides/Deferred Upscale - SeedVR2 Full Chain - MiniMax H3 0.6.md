@@ -13,6 +13,6 @@ WHOLE-CHAIN SEEDVR2 FINISH
 5. SeedVR2 Direct reads that movie in chunk_size batches. chunk_size=21 and overlap=2 are conservative defaults; its batching is independent of H3 scene boundaries.
 6. The ethanfel SeedVR2 fork preserves input audio in its returned VIDEO, so it connects directly to core Save Video.
 
-No Plan, Source Timeline, source media, per-scene upscale loop, IMAGE batch, or manual intermediate path is required. Legacy source-audio runs without a saved Source Timeline are the only case that may need source_audio on the adapter.
+No Plan, Source Timeline, source media, per-scene upscale loop, IMAGE batch, or manual intermediate path is required. Old source-audio runs without a saved Source Timeline need their source descriptor restored before using this adapter; the 0.4 AUDIO fallback was removed.
 
 Required SeedVR2 fork: https://github.com/ethanfel/ComfyUI-SeedVR2_VideoUpscaler

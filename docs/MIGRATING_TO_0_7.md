@@ -46,6 +46,15 @@ changed by this catalog consolidation.
 
 ## Retired controls
 
+- The 0.4 full-track `source_audio` input on Plan Studio, Preflight, Loop Start,
+  Current Scene, Review, Manifest Load, Full-Chain Latent Video and Assemble.
+  Use **Load Audio → Source Timeline → Preflight and Loop Start**, or assign
+  **Project timeline source** in Carousel. Downstream nodes recover the track
+  from state/manifest; they do not need repeated AUDIO wires. Source Timeline's
+  own audio input, video-source audio overrides and pass-2 audio latents remain.
+  On loading a saved graph, unused retired sockets are removed without shifting
+  neighboring connections. Connected retired sockets remain visibly marked for
+  rewiring; 0.4 AUDIO wiring is no longer an execution route.
 - `reference_schedule` on Plan Studio, Preflight and Loop Start. Connect
   `tagged_references` instead.
 - Loop Trim's manual `retain_overlap_frames`. Connect Current Shot state for
@@ -80,6 +89,8 @@ upscale previews, deferred upscale, De-Rope and pixel continuity also remain.
 
 No user runs, checkpoint files, working branches, sealed chapters, or recovery
 snapshots are deleted by this source cleanup. Historical checkpoint/plan readers
-and the active Source Audio import/recovery fallbacks remain. Restoring an old
+and readers for already-saved, path-backed source tracks remain. A 0.4 run
+without a saved source descriptor needs migration before source-audio finishing;
+its removed raw AUDIO socket is not a fallback. Restoring an old
 graph containing retired nodes still requires updating that graph before
 execution; preserving saved media is not a promise that every old node executes.

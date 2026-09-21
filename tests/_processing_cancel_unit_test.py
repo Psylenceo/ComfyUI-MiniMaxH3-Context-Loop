@@ -1,5 +1,6 @@
 """Deferred save cancellation, uncertain commits, and disk-only scene resume."""
 
+from source_audio_fixtures import with_source_audio
 import importlib
 import json
 from pathlib import Path
@@ -27,7 +28,7 @@ class ProcessingCancelTests(unittest.TestCase):
                                       length=5, steps=2, seed=str(i)) for i in range(1, 4)]}),
             "cancel_audit", "unit-test", 32, 32, 1, "video", "head", "disabled",
             "generated_audio", 1, 5 / 24, 2, 7, 18, 0, "guide")[0]
-        plan = chain._plan_with_source_audio(chain._plan_with_external_context(plan, None), None)
+        plan = with_source_audio(chain, chain._plan_with_external_context(plan, None), None)
         self.plan = plan
         self.frames = torch.zeros(5, 32, 32, 3)
         self.originals = []

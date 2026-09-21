@@ -287,17 +287,26 @@ with tempfile.TemporaryDirectory() as temporary:
         deferred_prepared["source_timeline"])["audio"]["kind"] == (
             "external_path")
 
-    # A legacy AUDIO connected once at Loop Start is promoted to the same
-    # path-backed recovery contract without changing its released raw-audio
-    # fingerprint. Downstream nodes no longer need the tensor wire, while an
-    # old redundant wire remains valid when it carries the identical track.
+    # Previously saved 0.4 tracks still recover, although the old AUDIO
+    # execution sockets are gone. Construct the released metadata contract.
     legacy_plan = make_plan("legacy-audio-promoted")
-    legacy_started = chain.MiniMaxH3ChainLoopStart().start(
-        legacy_plan, 1, source_audio=tensor_audio)
-    legacy_state = legacy_started[1]
-    legacy_prepared = legacy_state["plan"]
-    legacy_timeline = legacy_state["source_timeline"]
+    legacy_prepared, legacy_timeline = chain._plan_with_source_timeline(
+        legacy_plan, chain._make_source_timeline(source_audio=tensor_audio))
     legacy_hash = chain._audio_fingerprint(tensor_audio)
+    legacy_timeline["recovery"].update({
+        "legacy_loop_start_source_audio": True,
+        "legacy_loop_start_source_audio_hash": legacy_hash,
+    })
+    legacy_prepared["compatibility"].pop("source_timeline_fingerprint")
+    legacy_prepared["compatibility"]["source_audio_hash"] = legacy_hash
+    legacy_prepared["plan_hash"] = chain._fingerprint({
+        "base_plan_hash": legacy_plan["plan_hash"],
+        "source_audio_hash": legacy_hash,
+    })
+    legacy_prepared["source_timeline"] = chain._source_timeline_recovery_record(
+        legacy_timeline)
+    legacy_state = {"plan": legacy_prepared, "index": 1,
+                    "source_timeline": legacy_timeline}
     assert legacy_prepared["compatibility"]["source_audio_hash"] == (
         legacy_hash)
     assert "source_timeline_fingerprint" not in (
@@ -306,13 +315,12 @@ with tempfile.TemporaryDirectory() as temporary:
     assert legacy_timeline["recovery"][
         "legacy_loop_start_source_audio_hash"] == legacy_hash
     assert pathlib.Path(legacy_timeline["audio"]["path"]).is_file()
-    assert "source audio saved in run state" in legacy_started[2]
     assert chain._canonical_source_reference_dependency(
-        legacy_prepared, 1, legacy_timeline, None) == (
+        legacy_prepared, 1, legacy_timeline) == (
             chain._canonical_source_reference_dependency(
-                legacy_prepared, 1, None, tensor_audio))
+                legacy_prepared, 1, None))
     legacy_current = chain.MiniMaxH3ChainCurrent().current(
-        legacy_state, tensor_audio)["result"]
+        legacy_state)["result"]
     assert tuple(legacy_current[12]["waveform"].shape) == (1, 1, 44000)
     assert legacy_current[0]["current_source_reference_dependency"][
         "route"] == "legacy_audio"
@@ -326,12 +334,10 @@ with tempfile.TemporaryDirectory() as temporary:
         legacy_manifest["compatibility"], legacy_recovered,
         "legacy assembly recovery")
     recovered_audio = chain._full_chain_selected_audio(
-        legacy_manifest, "source", None, None)
-    redundant_audio = chain._full_chain_selected_audio(
-        legacy_manifest, "source", None, tensor_audio)
+        legacy_manifest, "source", None)
     assert int(recovered_audio["waveform"].shape[-1]) == 78000
     assert torch.equal(
-        recovered_audio["waveform"], redundant_audio["waveform"])
+        recovered_audio["waveform"], tensor_audio["waveform"][..., :78000])
 
     # Checkpoint Manager must prefer the descriptor persisted with the
     # selected revision, because Run Manager archived the user-facing Plan

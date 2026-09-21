@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Lossless conversion, immutable addresses, and render-success-only retirement."""
 
+from source_audio_fixtures import with_source_audio
 import copy
 import importlib
 import json
@@ -249,7 +250,7 @@ class MigrationTests(unittest.TestCase):
                                     "steps": 2, "seed": "7"}]}),
             "render_test", "catalog", 32, 32, 1, "video", "head", "disabled",
             "generated_audio", 1, 5 / 24, 2, 7, 18, 0, "guide")[0]
-        plan = chain._plan_with_source_audio(chain._plan_with_external_context(plan, None), None)
+        plan = with_source_audio(chain, chain._plan_with_external_context(plan, None), None)
         source = chain.MiniMaxH3ChainSegmentSave().save(
             chain._initial_state(plan, 1), torch.zeros(5, 32, 32, 3), av_latent(0.25),
             audio_for_frames(5), denoised_latent=av_latent(0.75))["result"][0]

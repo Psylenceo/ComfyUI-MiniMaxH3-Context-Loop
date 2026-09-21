@@ -160,8 +160,8 @@ def main():
         original_loader = chain._load_resume_state
 
         def fake_loader(requested_plan, start_clip, verify_history=True,
-                        source_timeline=None, source_audio=None):
-            calls.append((start_clip, source_timeline, source_audio))
+                        source_timeline=None):
+            calls.append((start_clip, source_timeline))
             return {
                 "plan": requested_plan,
                 "index": start_clip,

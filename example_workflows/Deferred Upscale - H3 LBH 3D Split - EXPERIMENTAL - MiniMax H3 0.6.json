@@ -1268,11 +1268,6 @@
           "link": 39
         },
         {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
-        },
-        {
           "name": "source_timeline",
           "type": "H3_SOURCE_TIMELINE",
           "link": null

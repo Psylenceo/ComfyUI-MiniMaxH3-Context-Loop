@@ -389,7 +389,7 @@ def validate_independent_source_audio() -> None:
     for kind in ("MiniMaxH3ChainPreflight", "MiniMaxH3ChainLoopStart"):
         target = one(workflow, kind)
         assert origin(workflow, target, "source_timeline") == timeline
-        assert input_socket(target, "source_audio")["link"] is None
+        assert not any(value["name"] == "source_audio" for value in target["inputs"])
         assert origin(workflow, target, "tagged_references") == reference
     assert one(workflow, "MiniMaxH3GenerationProfile")["widgets_values"][1] == "Lip-sync to source audio"
     assert origin(workflow, one(workflow, "BasicScheduler"), "steps") == current

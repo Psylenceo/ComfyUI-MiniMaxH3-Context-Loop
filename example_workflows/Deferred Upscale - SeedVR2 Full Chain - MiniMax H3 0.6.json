@@ -98,11 +98,6 @@
           "name": "video_vae",
           "type": "VAE",
           "link": 2
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         }
       ],
       "outputs": [

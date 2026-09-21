@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Structured scene dependencies isolate generation and assembly changes."""
 
+from source_audio_fixtures import with_source_audio
 import importlib.util
 import json
 import pathlib
@@ -13,10 +14,11 @@ import torch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PACKAGE = "h3_scene_dependency_unit"
+TEST_OUTPUT = tempfile.TemporaryDirectory(prefix="h3-scene-dependency-test-")
 
 folder_paths = types.ModuleType("folder_paths")
-folder_paths.get_output_directory = lambda: str(ROOT)
-folder_paths.get_temp_directory = lambda: str(ROOT)
+folder_paths.get_output_directory = lambda: TEST_OUTPUT.name
+folder_paths.get_temp_directory = lambda: TEST_OUTPUT.name
 folder_paths.get_input_directory = lambda: str(ROOT)
 folder_paths.get_annotated_filepath = lambda value: str(value)
 sys.modules["folder_paths"] = folder_paths
@@ -308,23 +310,19 @@ changed = base.clone()
 changed[39 * 2000:] *= -1
 audio_a = audio(base)
 audio_b = audio(changed)
-prepared_a = chain._plan_with_source_audio(plan, audio_a)
-prepared_b = chain._plan_with_source_audio(plan, audio_b)
+prepared_a = with_source_audio(chain, plan, audio_a)
+prepared_b = with_source_audio(chain, plan, audio_b)
 
 scene1_a = chain._scene_dependency_record(
-    prepared_a, 1, chain._canonical_source_reference_dependency(
-        prepared_a, 1, None, audio_a))
+    prepared_a, 1, chain._canonical_source_reference_dependency(prepared_a, 1, None))
 scene1_b = chain._scene_dependency_record(
-    prepared_b, 1, chain._canonical_source_reference_dependency(
-        prepared_b, 1, None, audio_b))
+    prepared_b, 1, chain._canonical_source_reference_dependency(prepared_b, 1, None))
 assert chain._scene_dependency_diffs(scene1_a, scene1_b) == []
 
 scene2_a = chain._scene_dependency_record(
-    prepared_a, 2, chain._canonical_source_reference_dependency(
-        prepared_a, 2, None, audio_a))
+    prepared_a, 2, chain._canonical_source_reference_dependency(prepared_a, 2, None))
 scene2_b = chain._scene_dependency_record(
-    prepared_b, 2, chain._canonical_source_reference_dependency(
-        prepared_b, 2, None, audio_b))
+    prepared_b, 2, chain._canonical_source_reference_dependency(prepared_b, 2, None))
 audio_diffs = chain._scene_dependency_diffs(scene2_a, scene2_b)
 assert any(item["scope"] == "scene_generation"
            and item["field"].endswith("pcm_sha256")
@@ -344,9 +342,8 @@ locked_plan = chain._normalize_plan(
     "locked-dependency-test", 64, 64, 5, "video", "head", "disabled",
     "generated_audio", 5, 1.0, 8, 11, 18, "body:auto:v1", 0,
     "guide", locked_policy)
-locked_prepared = chain._plan_with_source_audio(locked_plan, audio_a)
-locked_source_dependency = chain._canonical_source_reference_dependency(
-    locked_prepared, 1, None, audio_a)
+locked_prepared = with_source_audio(chain, locked_plan, audio_a)
+locked_source_dependency = chain._canonical_source_reference_dependency(locked_prepared, 1, None)
 assert locked_source_dependency is not None
 locked_dependency = chain._scene_dependency_record(
     locked_prepared, 1, locked_source_dependency)
@@ -377,14 +374,12 @@ assert "lora_route" not in chain._history_contract(
 
 # A later incoming context does not retroactively redefine scene 1.
 long_context = make_plan(22)
-prepared_long = chain._plan_with_source_audio(long_context, audio_a)
+prepared_long = with_source_audio(chain, long_context, audio_a)
 long_scene1 = chain._scene_dependency_record(
-    prepared_long, 1, chain._canonical_source_reference_dependency(
-        prepared_long, 1, None, audio_a))
+    prepared_long, 1, chain._canonical_source_reference_dependency(prepared_long, 1, None))
 assert chain._scene_dependency_diffs(scene1_a, long_scene1) == []
 long_scene2 = chain._scene_dependency_record(
-    prepared_long, 2, chain._canonical_source_reference_dependency(
-        prepared_long, 2, None, audio_a))
+    prepared_long, 2, chain._canonical_source_reference_dependency(prepared_long, 2, None))
 boundary_diffs = chain._scene_dependency_diffs(scene2_a, long_scene2)
 assert any(item["scope"] == "incoming_boundary"
            and item["field"] == "context_length"
@@ -1491,7 +1486,7 @@ with tempfile.TemporaryDirectory() as temporary:
         "dependency-resume", 64, 64, 5, "video", "head", "disabled",
         "generated_audio", 5, 1.0, 8, 9, 18, "body:auto:v1", 0,
         "guide")
-    resume_plan = chain._plan_with_source_audio(resume_plan, None)
+    resume_plan = with_source_audio(chain, resume_plan, None)
     saved_dependency = chain._scene_dependency_record(resume_plan, 1, None)
     paths = chain._artifact_paths(resume_plan, 1)
     pathlib.Path(paths["segment"]).parent.mkdir(parents=True)
@@ -1554,7 +1549,7 @@ print("H3 structured resume preflight: field-level saved/current mismatch pass")
 with tempfile.TemporaryDirectory() as temporary:
     root = pathlib.Path(temporary)
     chain._output_root = lambda: str(root)
-    saved_plan = chain._plan_with_source_audio(nonlinear_plan, None)
+    saved_plan = with_source_audio(chain, nonlinear_plan, None)
     for scene in range(1, 5):
         paths = chain._artifact_paths(saved_plan, scene)
         pathlib.Path(paths["segment"]).parent.mkdir(parents=True, exist_ok=True)

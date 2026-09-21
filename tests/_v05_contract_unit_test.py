@@ -358,8 +358,10 @@ def main():
         "plan_required_input_order"]
     loop_optional = method_input_order(
         module, "MiniMaxH3ChainLoopStart", "optional")
-    assert loop_optional[:4] == FIXTURE["loop_start_optional_input_order"]
-    assert loop_optional[4:] == ["source_timeline", "tagged_references"] + (
+    retained_optional = [name for name in FIXTURE["loop_start_optional_input_order"]
+                         if name != "source_audio"]
+    assert loop_optional[:len(retained_optional)] == retained_optional
+    assert loop_optional[len(retained_optional):] == ["source_timeline", "tagged_references"] + (
         ["initial_state"] if "initial_state" in loop_optional else [])
     appended_outputs = {
         "MiniMaxH3ChainCurrent": ["video_blend_frames"],

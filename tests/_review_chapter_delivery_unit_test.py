@@ -112,9 +112,7 @@ class ReviewChapterDeliveryTest(unittest.TestCase):
         outcomes = [ValueError('test missing audio'), result] if audio_fails else [result]
         with patch.object(chain, '_partial_manifest', return_value=manifest), \
                 patch.object(chain.MiniMaxH3ChainAssemble, 'assemble', side_effect=outcomes) as assemble:
-            preview, warning = chain._assemble_review_partial(
-                state, self.segments[count - 1], 'checkpointed', None,
-                export_current_chapter=enabled)
+            preview, warning = chain._assemble_review_partial(state, self.segments[count - 1], 'checkpointed', export_current_chapter=enabled)
         self.assertEqual(preview, 'test-preview.mp4')
         self.assertEqual(bool(warning), audio_fails)
         self.assertEqual(state, before)
@@ -203,9 +201,7 @@ class ReviewChapterDeliveryTest(unittest.TestCase):
                     state, torch.full((5, 64, 64, 3), index / 3), latent, audio)['result'][0]
             for enabled, expected_frames in ((True, 5), (False, 10)):
                 with self.subTest(enabled=enabled):
-                    path, warning = chain._assemble_review_partial(
-                        state, segment, 'checkpointed', None,
-                        export_current_chapter=self.scope(graph(enabled)))
+                    path, warning = chain._assemble_review_partial(state, segment, 'checkpointed', export_current_chapter=self.scope(graph(enabled)))
                     self.assertFalse(warning)
                     with chain.av.open(path) as container:
                         self.assertEqual(len(container.streams.audio), 1)

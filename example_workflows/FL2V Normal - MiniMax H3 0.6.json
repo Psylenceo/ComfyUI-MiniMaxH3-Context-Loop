@@ -188,11 +188,6 @@
           "name": "state",
           "type": "H3_CHAIN_STATE",
           "link": 1
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         }
       ],
       "outputs": [
@@ -306,7 +301,7 @@
       "type": "MiniMaxH3ChainAssemble",
       "pos": [
         2990,
-        3292
+        3272
       ],
       "size": [
         440,
@@ -320,11 +315,6 @@
           "name": "manifest",
           "type": "H3_CHAIN_MANIFEST",
           "link": 2
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         },
         {
           "name": "source_timeline",
@@ -1033,11 +1023,6 @@
           "link": 39
         },
         {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
-        },
-        {
           "name": "source_timeline",
           "type": "H3_SOURCE_TIMELINE",
           "link": null
@@ -1272,7 +1257,7 @@
       "type": "MiniMaxH3ChainManifestLoad",
       "pos": [
         2420,
-        3292
+        3272
       ],
       "size": [
         440,
@@ -1286,11 +1271,6 @@
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
           "link": 47
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         },
         {
           "name": "external_context",
@@ -1374,7 +1354,7 @@
       ],
       "size": [
         360,
-        236
+        216
       ],
       "flags": {},
       "order": 24,
@@ -1384,11 +1364,6 @@
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
           "link": 48
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         },
         {
           "name": "external_context",
@@ -1622,11 +1597,6 @@
           "link": 57
         },
         {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
-        },
-        {
           "name": "pending_review",
           "type": "H3_REVIEW_DISPOSITION",
           "link": null
@@ -1759,11 +1729,6 @@
         {
           "name": "source_timeline",
           "type": "H3_SOURCE_TIMELINE",
-          "link": null
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
           "link": null
         },
         {
@@ -2373,7 +2338,7 @@
         2380,
         90,
         480,
-        3062
+        3042
       ],
       "color": "#393f58",
       "font_size": 24,
@@ -2467,7 +2432,7 @@
       "title": "RECOVERY • DISABLED / NO SAMPLING",
       "bounding": [
         2380,
-        3202,
+        3182,
         1090,
         490
       ],

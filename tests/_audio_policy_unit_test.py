@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Independent 0.5 audio axes preserve exact 0.4 mode behavior."""
 
+from source_audio_fixtures import with_source_audio
 import importlib.util
 import json
 import pathlib
@@ -116,7 +117,7 @@ silent = make_plan("source_track", silent_policy)
 assert silent["compatibility"]["audio_mode"] == "custom"
 assert chain._audio_policy_final(silent) == "none"
 assert not chain._audio_policy_requires_source(silent)
-prepared_silent = chain._plan_with_source_audio(silent, None)
+prepared_silent = with_source_audio(chain, silent, None)
 assert prepared_silent["compatibility"]["source_audio_hash"] == "none"
 
 source_audio = {
@@ -124,31 +125,30 @@ source_audio = {
     "sample_rate": 24000,
 }
 try:
-    chain._plan_with_source_audio(custom, None)
+    with_source_audio(chain, custom, None)
 except ValueError as exc:
     assert "final=source" in str(exc)
-    assert "requires source_audio" in str(exc)
+    assert "requires a Source Timeline" in str(exc)
 else:
     raise AssertionError("source final policy accepted missing source audio")
-prepared_custom = chain._plan_with_source_audio(custom, source_audio)
+prepared_custom = with_source_audio(chain, custom, source_audio)
 assert prepared_custom["compatibility"]["source_audio_hash"] == (
-    chain._audio_fingerprint(source_audio))
+    chain._make_source_timeline(source_audio=source_audio)["fingerprints"]["audio"])
 
 reference_policy = chain._contract_audio_policy("none", "on", "off")
 reference_plan = make_plan("generated_audio", reference_policy)
-prepared_reference = chain._plan_with_source_audio(
+prepared_reference = with_source_audio(chain,
     reference_plan, source_audio)
 chain.PromptHistoryStore = lambda _root: types.SimpleNamespace(
     mark_executed=lambda *_args, **_kwargs: None)
 state = {"plan": prepared_reference, "index": 1}
-current = chain.MiniMaxH3ChainCurrent().current(state, source_audio)["result"]
+current = chain.MiniMaxH3ChainCurrent().current(state)["result"]
 assert current[12] is not None
 assert tuple(current[12]["waveform"].shape) == (1, 1, 22000)
 
-locked_plan = chain._plan_with_source_audio(
+locked_plan = with_source_audio(chain,
     make_plan("generated_audio", locked_policy), source_audio)
-locked_current = chain.MiniMaxH3ChainCurrent().current(
-    {"plan": locked_plan, "index": 1}, source_audio)["result"]
+locked_current = chain.MiniMaxH3ChainCurrent().current({"plan": locked_plan, "index": 1})["result"]
 assert locked_current[12] is None
 assert tuple(locked_current[0]["current_source_audio_target"][
     "waveform"].shape) == (1, 1, 22000)
@@ -174,16 +174,15 @@ contextual_source = {
         -0.5, 0.5, contextual_samples).reshape(1, 1, -1),
     "sample_rate": source_audio["sample_rate"],
 }
-contextual_plan = chain._plan_with_source_audio(
+contextual_plan = with_source_audio(chain,
     contextual_plan, contextual_source)
-contextual_current = chain.MiniMaxH3ChainCurrent().current(
-    {"plan": contextual_plan, "index": 2}, contextual_source)["result"]
+contextual_current = chain.MiniMaxH3ChainCurrent().current({"plan": contextual_plan, "index": 2})["result"]
 contextual_state = contextual_current[0]
 assert contextual_state[
     "current_source_audio_target_clip_start_seconds"] == 1.0
 assert int(contextual_state["current_source_audio_target"][
     "waveform"].shape[-1]) == round(
-        (1.0 + 73 / 24 + 0.2) * source_audio["sample_rate"])
+        (24 + 73 + 5) / 24 * source_audio["sample_rate"])
 contextual_dependency = contextual_state[
     "current_source_reference_dependency"]
 assert contextual_dependency["target_start_frame"] == 73
@@ -197,8 +196,7 @@ assert contextual_scene_dependency["scopes"]["global_generation"][
     "lip_sync_options"] == lip_options
 
 silent_state = {"plan": prepared_silent, "index": 1}
-silent_current = chain.MiniMaxH3ChainCurrent().current(
-    silent_state, None)["result"]
+silent_current = chain.MiniMaxH3ChainCurrent().current(silent_state)["result"]
 assert silent_current[12] is None
 
 scene_policy = chain._contract_audio_policy("none", "off", "on")
@@ -234,9 +232,9 @@ assert chain._audio_policy_locks_source_audio(
     scene_plan, scene_plan["shots"][2])
 assert chain._audio_policy_requires_source(scene_plan)
 try:
-    chain._plan_with_source_audio(scene_plan, None)
+    with_source_audio(chain, scene_plan, None)
 except ValueError as exc:
-    assert "requires source_audio" in str(exc)
+    assert "requires a Source Timeline" in str(exc)
 else:
     raise AssertionError("scene source override accepted missing source audio")
 
@@ -247,30 +245,26 @@ scene_audio = {
         -0.5, 0.5, scene_samples).reshape(1, 1, -1),
     "sample_rate": source_audio["sample_rate"],
 }
-prepared_scene_plan = chain._plan_with_source_audio(scene_plan, scene_audio)
-scene_ref_current = chain.MiniMaxH3ChainCurrent().current(
-    {"plan": prepared_scene_plan, "index": 1}, scene_audio)["result"]
+prepared_scene_plan = with_source_audio(chain, scene_plan, scene_audio)
+scene_ref_current = chain.MiniMaxH3ChainCurrent().current({"plan": prepared_scene_plan, "index": 1})["result"]
 assert scene_ref_current[12] is not None
 scene_fresh_current = chain.MiniMaxH3ChainCurrent().current({
     "plan": prepared_scene_plan, "index": 2,
     "current_source_audio_target": {"stale": True},
-}, scene_audio)["result"]
+})["result"]
 assert scene_fresh_current[12] is None
 assert "current_source_audio_target" not in scene_fresh_current[0]
-scene_locked_current = chain.MiniMaxH3ChainCurrent().current(
-    {"plan": prepared_scene_plan, "index": 3}, scene_audio)["result"]
+scene_locked_current = chain.MiniMaxH3ChainCurrent().current({"plan": prepared_scene_plan, "index": 3})["result"]
 assert scene_locked_current[12] is None
 assert scene_locked_current[0]["current_source_audio_target"] is not None
 ref_dependency = chain._scene_dependency_record(
     prepared_scene_plan, 1,
-    chain._canonical_source_reference_dependency(
-        prepared_scene_plan, 1, None, scene_audio))
+    chain._canonical_source_reference_dependency(prepared_scene_plan, 1, None))
 fresh_dependency = chain._scene_dependency_record(
     prepared_scene_plan, 2, None)
 locked_dependency = chain._scene_dependency_record(
     prepared_scene_plan, 3,
-    chain._canonical_source_reference_dependency(
-        prepared_scene_plan, 3, None, scene_audio))
+    chain._canonical_source_reference_dependency(prepared_scene_plan, 3, None))
 assert ref_dependency["scopes"]["global_generation"][
     "source_reference"] == "on"
 assert fresh_dependency["scopes"]["incoming_boundary"][

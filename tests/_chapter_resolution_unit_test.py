@@ -229,7 +229,7 @@ class ChapterResolutionTest(unittest.TestCase):
                     frames = list(container.decode(video=0))
                 self.assertEqual(len(frames), 5)
                 self.assertEqual((frames[0].width, frames[0].height), (64, 64) if number == 1 else (128, 96))
-            preview, warning = chain._assemble_review_partial(state, segment, "none", None)
+            preview, warning = chain._assemble_review_partial(state, segment, "none")
             self.assertFalse(warning)
             with chain.av.open(preview) as container:
                 frames = list(container.decode(video=0))

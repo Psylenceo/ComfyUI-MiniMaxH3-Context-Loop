@@ -9,6 +9,10 @@ optional companion features are not prerequisites. See the
 [migration guide](docs/MIGRATING_TO_0_7.md) and
 [release validation checklist](docs/RELEASING_0_7.md).
 
+- Remove the legacy 0.4 full-track AUDIO inputs from chain consumers. Source
+  Timeline and Carousel are the supported routes; already-saved path-backed
+  tracks remain readable. Rebuild examples and safely clean unused old sockets
+  on workflow load, retaining connected ones as explicit migration warnings.
 - Fix browser duration rounding to match the Python H3 frame grid, including
   the issue reported in PR #60. Seconds-based previews no longer undershoot
   execution lengths; authored exact-frame values remain unchanged. Add

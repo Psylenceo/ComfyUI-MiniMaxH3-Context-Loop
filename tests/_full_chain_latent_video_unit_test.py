@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """CPU test for the disk-streamed full-chain VIDEO adapter."""
 
+from source_audio_fixtures import bind_manifest_audio
+
 import hashlib
 import importlib.util
 import contextlib
@@ -258,15 +260,15 @@ def main():
 
             source_audio = {
                 "waveform": torch.zeros(
-                    (1, 2, round(10 / 24 * 8000)), dtype=torch.float32),
+                    # Cover all ten source frames (3333 samples falls short).
+                    (1, 2, (10 * 8000 + 23) // 24), dtype=torch.float32),
                 "sample_rate": 8000,
             }
-            manifest["compatibility"]["source_audio_hash"] = (
-                chain._audio_fingerprint(source_audio))
+            bind_manifest_audio(chain, manifest, source_audio)
             manifest["compatibility"]["audio_mode"] = "source_track"
             _audio_video, audio_path, audio_status = node().adapt(
                 manifest, FakeVAE(), "plan", "plan", "memory", False,
-                256, source_audio=source_audio)
+                256)
             assert "audio=source" in audio_status
             with av.open(audio_path, mode="r") as container:
                 assert len(container.streams.video) == 1

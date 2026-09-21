@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fresh later ranges and durable resume, using tiny CPU-only media fixtures."""
 
+from source_audio_fixtures import with_source_audio
 import copy
 import json
 from pathlib import Path
@@ -30,7 +31,7 @@ def main():
             "range_test", "range-test", 32, 32, 1,
             "video", "head", "disabled", "generated_audio", 1,
             5 / 24, 2, 7, 18, 0, "guide")[0]
-        plan = chain._plan_with_source_audio(chain._plan_with_external_context(plan, None), None)
+        plan = with_source_audio(chain, chain._plan_with_external_context(plan, None), None)
         lineage = []
         for i in range(1, 8):
             state = chain._initial_state(plan, i)
@@ -90,11 +91,9 @@ def main():
         rate = 8000
         total_samples = chain.sample_boundary_from_frames(source["total_delivered_frames"], rate, chain.FPS)
         waveform = torch.linspace(-0.25, 0.25, total_samples).reshape(1, 1, -1).repeat(1, 2, 1)
-        with patch.object(chain, "_validate_source_audio_hash"), patch.object(
+        with patch.object(chain, "_validate_source_timeline_hash"), patch.object(
                 chain, "_audio_with_editorial_timeline", wraps=chain._audio_with_editorial_timeline) as align:
-            chain.MiniMaxH3ChainAssemble().assemble(
-                partial, "source", "source_range", 96,
-                source_audio={"waveform": waveform, "sample_rate": rate})
+            chain.MiniMaxH3ChainAssemble().assemble(partial, "source", "source_range", 96, source_timeline=chain._make_source_timeline(source_audio={"waveform": waveform, "sample_rate": rate}))
         audio_call = next(c for c in align.call_args_list if c.args[-1] == "H3 source editorial audio")
         lo = chain.sample_boundary_from_frames(offset, rate, chain.FPS)
         hi = chain.sample_boundary_from_frames(offset + saved5["delivered_frames"], rate, chain.FPS)

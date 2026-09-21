@@ -65,7 +65,17 @@ assert nodes.MiniMaxH3LoopTrim.RETURN_NAMES == (
 assert schemas["MiniMaxH3ContexMaskedTarget"]["input"]["optional"]["mask_conversion"][0] == [
     "H3 exact (causal/token max)"]
 assert "source_audio" in schemas["MiniMaxH3SourceTimeline"]["input"]["optional"]
-assert "source_audio" in schemas["MiniMaxH3ChainAssemble"]["input"]["optional"]
+for name in (
+        "MiniMaxH3ChainPlanStudio", "MiniMaxH3ChainPreflight",
+        "MiniMaxH3ChainLoopStart", "MiniMaxH3ChainCurrent",
+        "MiniMaxH3ChainReview", "MiniMaxH3ChainManifestLoad",
+        "MiniMaxH3ChainLatentVideoAdapter", "MiniMaxH3ChainAssemble"):
+    cls = getattr(chain, name)
+    assert "source_audio" not in schemas[name]["input"].get("optional", {})
+    assert "source_audio" not in inspect.signature(getattr(cls, cls.FUNCTION)).parameters
+for name in ("_plan_with_source_audio", "_validate_source_audio_hash",
+             "_plan_with_recoverable_legacy_source_audio"):
+    assert not hasattr(chain, name)
 assert not list((ROOT/"example_workflows/Archive").rglob("*.json"))
 assert not (ROOT/"visual_context_schedule.py").exists()
 print("0.7 retirement: original Plan, Tagged schemas, current imports and output slots preserved")

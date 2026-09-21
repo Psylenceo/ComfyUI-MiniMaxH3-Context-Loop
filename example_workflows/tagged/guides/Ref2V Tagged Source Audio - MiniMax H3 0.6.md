@@ -34,7 +34,7 @@ INDEPENDENT SOURCE AUDIO — NO CAROUSEL
 
 Upload/select your complete soundtrack in Load Audio. Copy the two supplied courier/greenhouse pictures into ComfyUI/input, or replace the Load Image selections and matching prompt tags. The soundtrack must cover the complete planned timeline; adjust scene lengths to your track.
 
-Load Audio feeds Source Timeline and Tagged Audio Ref with the same FULL track. Source Timeline feeds both Preflight and Loop Start. Current Scene.state feeds Tagged Ref2VA.state, so source_timeline references resolve the correct window on every scene. Never feed Current Scene.source_audio_slice into Tagged Audio Ref: its fingerprint connection back to the Plan would create a cycle. Leave the legacy source_audio sockets disconnected.
+Load Audio feeds Source Timeline and Tagged Audio Ref with the same FULL track. Source Timeline feeds both Preflight and Loop Start. Current Scene.state feeds Tagged Ref2VA.state, so source_timeline references resolve the correct window on every scene. Never feed Current Scene.source_audio_slice into Tagged Audio Ref: its fingerprint connection back to the Plan would create a cycle. Downstream nodes recover the track from state; no repeated full-AUDIO wiring is needed.
 
 Lip-sync to source audio locks the scene's exact source audio and uses the source track in final assembly. The preset alone does not load audio. @soundtrack is available as an optional prompt reference; the supplied picture prompts do not use it. For a voice reference only (not a timed soundtrack), use Tagged Audio Ref timeline_mode=standalone with a generated-audio profile; Source Timeline is not required.
 

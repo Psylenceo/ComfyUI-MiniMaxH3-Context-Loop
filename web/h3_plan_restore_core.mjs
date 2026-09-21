@@ -7,7 +7,7 @@ import {
     transitionPreset,
     transitionPresetName,
 } from "./h3_policy_core.mjs?v=0.7.10";
-import {resolveAudioPolicy, resolveTransitionPolicy} from "./h3_socket_presentation_core.mjs?v=0.7.10";
+import {resolveAudioPolicy, resolveTransitionPolicy} from "./h3_socket_presentation_core.mjs?v=0.7.11";
 
 const CHAIN_POLICY_NODE = "MiniMaxH3ChainPolicy";
 const PROFILE_POLICY_NODE = "MiniMaxH3GenerationProfile";

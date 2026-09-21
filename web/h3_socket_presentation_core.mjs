@@ -15,16 +15,7 @@ export const PLAN_NODE = "MiniMaxH3ChainPlan";
 export const MODERN_PLAN_NODE = "MiniMaxH3ChainPlanModern";
 export const PLAN_NODES = new Set([PLAN_NODE, MODERN_PLAN_NODE]);
 
-const CONDITIONAL_SOURCE_AUDIO_NODES = new Set([
-    "MiniMaxH3ChainLoopStart",
-    "MiniMaxH3ChainPlanStudio",
-    "MiniMaxH3ChainPreflight",
-    "MiniMaxH3ChainManifestLoad",
-]);
-
 const CURRENT_NODE = "MiniMaxH3ChainCurrent";
-const REVIEW_NODE = "MiniMaxH3ChainReview";
-const ASSEMBLE_NODE = "MiniMaxH3ChainAssemble";
 
 const ADVANCED_OUTPUTS = Object.freeze({
     MiniMaxH3ChainPolicy: ["status"],
@@ -339,31 +330,6 @@ export function hasSourceTimeline(start) {
         linked(inputByName(node, "source_timeline")));
 }
 
-function sourceAudioInputNeeded(node, policy) {
-    const type = nodeType(node);
-    if (hasSourceTimeline(node)) return false;
-    if (type === CURRENT_NODE) {
-        return !policy.known || policy.sourceReference === "on"
-            || policy.sourceAudioTarget === "locked";
-    }
-    if (type === REVIEW_NODE) {
-        return String(widgetByName(node, "partial_audio_source")?.value)
-            === "source";
-    }
-    if (type === ASSEMBLE_NODE) {
-        const selection = String(widgetByName(node, "audio_source")?.value ?? "plan");
-        if (selection === "source") return true;
-        if (selection !== "plan") return false;
-        return !policy.known || policy.finalAudio === "source";
-    }
-    if (CONDITIONAL_SOURCE_AUDIO_NODES.has(type)) {
-        return !policy.known || policy.finalAudio === "source"
-            || policy.sourceReference === "on"
-            || policy.sourceAudioTarget === "locked";
-    }
-    return true;
-}
-
 function advancedOutputNames(node) {
     const configured = ADVANCED_OUTPUTS[nodeType(node)] ?? [];
     const names = new Set(configured);
@@ -401,10 +367,7 @@ export function presentationForNode(node, showAdvanced = false) {
     if (!showAdvanced) {
         for (const name of advancedOutputNames(node)) hiddenOutputs.add(name);
         for (const name of advancedWidgetNames(node, policy)) hiddenWidgets.add(name);
-        const sourceAudio = inputByName(node, "source_audio");
-        if (sourceAudio && !sourceAudioInputNeeded(node, policy)) {
-            hiddenInputs.add("source_audio");
-        }
+        // Retired connected AUDIO sockets stay visible for explicit rewiring.
         if (nodeType(node) === CURRENT_NODE && policy.known
                 && policy.sourceReference !== "on") {
             hiddenOutputs.add("source_audio_slice");

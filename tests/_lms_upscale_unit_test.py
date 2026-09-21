@@ -3,6 +3,7 @@
 
 Set COMFYUI_PATH to a current ComfyUI checkout. No model weights are loaded.
 """
+from source_audio_fixtures import with_source_audio
 import copy
 import importlib.util
 import os
@@ -184,7 +185,7 @@ def main():
                                    "length": 22, "steps": 2, "seed": "42"}]}),
             "lms_test", "lms-test-cache", 32, 32, 1, "video", "head",
             "disabled", "generated_audio", 1, 22 / 24, 2, 42, 18, 0, "guide")[0]
-        plan = chain._plan_with_source_audio(chain._plan_with_external_context(plan, None), None)
+        plan = with_source_audio(chain, chain._plan_with_external_context(plan, None), None)
         source_state = chain._initial_state(plan, 1)
         av = {"samples": [torch.ones(1, 24, 7, 2, 2), torch.ones(1, 32, 2, 37)]}
         original_audio = {"waveform": torch.full((1, 2, round(22 / 24 * 8000)), 0.25),

@@ -7,6 +7,7 @@ safetensors checkpoint, and assembles both source-track and generated-audio
 outputs with ffmpeg.
 """
 
+from source_audio_fixtures import with_source_audio
 import asyncio
 import hashlib
 import importlib.util
@@ -295,13 +296,9 @@ def main():
     review_inputs = chain.MiniMaxH3ChainReview.INPUT_TYPES()
     partial_audio_tooltip = review_inputs["required"][
         "partial_audio_source"][1]["tooltip"]
-    legacy_source_tooltip = review_inputs["optional"][
-        "source_audio"][1]["tooltip"]
+    assert "source_audio" not in review_inputs["optional"]
     assert "Source Timeline audio carried in state" in partial_audio_tooltip
     assert "none creates a silent partial" in partial_audio_tooltip
-    assert "state predates recoverable source audio" in legacy_source_tooltip
-    assert "legacy AUDIO connected at Loop Start" in legacy_source_tooltip
-    assert "does not affect generation" in legacy_source_tooltip
 
     readable_prompts = chain._normalize_plan(
         json.dumps({
@@ -830,15 +827,15 @@ def main():
             source = audio_for_frames(9)
             changed_source = audio_for_frames(9)
             changed_source["waveform"][..., 0] = 1.0
-            prepared_plan = chain._plan_with_source_audio(plan, source)
+            prepared_plan = with_source_audio(chain, plan, source)
             assert prepared_plan["plan_hash"] == chain._fingerprint({
-                "base_plan_hash": plan["plan_hash"],
-                "source_audio_hash": chain._audio_fingerprint(source),
+                "prepared_plan_hash": plan["plan_hash"],
+                "source_timeline_fingerprint": prepared_plan["compatibility"]["source_timeline_fingerprint"],
+                "source_audio_hash": prepared_plan["compatibility"]["source_audio_hash"],
             })
-            started = chain.MiniMaxH3ChainLoopStart().start(plan, 1, source)
+            started = chain.MiniMaxH3ChainLoopStart().start(plan, 1, source_timeline=chain._make_source_timeline(source_audio=source))
             assert started[1]["plan"]["compatibility"]["source_audio_hash"]
-            current_payload = chain.MiniMaxH3ChainCurrent().current(
-                started[1], source)
+            current_payload = chain.MiniMaxH3ChainCurrent().current(started[1])
             assert current_payload["ui"]["h3_chain_active_scene"] == [{
                 "run_name": prepared_plan["run_name"],
                 "clip_index": 1,
@@ -861,50 +858,40 @@ def main():
                 "source_track", 1, 15, 2, 1, 30,
             )
             aligned_source = audio_for_frames(362, 32000)
-            aligned_state = chain.MiniMaxH3ChainLoopStart().start(
-                aligned_plan, 1, aligned_source)[1]
-            frame_exact = chain.MiniMaxH3ChainCurrent().current(
-                aligned_state, aligned_source,
-                align_audio_reference=False)["result"]
+            aligned_state = chain.MiniMaxH3ChainLoopStart().start(aligned_plan, 1, source_timeline=chain._make_source_timeline(source_audio=aligned_source))[1]
+            frame_exact = chain.MiniMaxH3ChainCurrent().current(aligned_state, align_audio_reference=False)["result"]
             assert int(frame_exact[12]["waveform"].shape[-1]) == 482667
-            grid_aligned = chain.MiniMaxH3ChainCurrent().current(
-                aligned_state, aligned_source,
-                align_audio_reference=True)["result"]
+            grid_aligned = chain.MiniMaxH3ChainCurrent().current(aligned_state, align_audio_reference=True)["result"]
             assert int(grid_aligned[12]["waveform"].shape[-1]) == 482240
             assert "target 603 steps, safe 15.070000s" in grid_aligned[13]
 
             aligned_44k_source = audio_for_frames(362, 44100)
-            aligned_44k_state = chain.MiniMaxH3ChainLoopStart().start(
-                aligned_plan, 1, aligned_44k_source)[1]
-            grid_aligned_44k = chain.MiniMaxH3ChainCurrent().current(
-                aligned_44k_state, aligned_44k_source,
-                align_audio_reference=True)["result"][12]
+            aligned_44k_state = chain.MiniMaxH3ChainLoopStart().start(aligned_plan, 1, source_timeline=chain._make_source_timeline(source_audio=aligned_44k_source))[1]
+            grid_aligned_44k = chain.MiniMaxH3ChainCurrent().current(aligned_44k_state, align_audio_reference=True)["result"][12]
             aligned_44k_samples = int(
                 grid_aligned_44k["waveform"].shape[-1])
             assert aligned_44k_samples == 664587
             assert math.ceil(aligned_44k_samples * 32000 / 44100) == 482240
             try:
-                chain.MiniMaxH3ChainCurrent().current(
-                    started[1], changed_source)
+                chain.MiniMaxH3ChainCurrent().current(dict(
+                    started[1], source_timeline=chain._make_source_timeline(
+                        source_audio=changed_source)))
             except ValueError as exc:
-                assert "different source waveform" in str(exc)
+                assert "different H3 Source Timeline" in str(exc)
             else:
                 raise AssertionError("Current Shot accepted a different source song")
             short_source = audio_for_frames(4)
-            short_started = chain.MiniMaxH3ChainLoopStart().start(
-                plan, 1, short_source)
+            short_started = chain.MiniMaxH3ChainLoopStart().start(plan, 1, source_timeline=chain._make_source_timeline(source_audio=short_source))
             assert short_started[1]["plan"]["compatibility"][
                 "source_audio_silent_padding"]
-            short_current = chain.MiniMaxH3ChainCurrent().current(
-                short_started[1], short_source)["result"]
+            short_current = chain.MiniMaxH3ChainCurrent().current(short_started[1])["result"]
             assert int(short_current[12]["waveform"].shape[-1]) == round(
                 5 / 24 * 8000)
             assert not torch.count_nonzero(short_current[12]["waveform"])
             short_non_silent = audio_for_frames(4)
             short_non_silent["waveform"][..., 0] = 0.25
             try:
-                chain.MiniMaxH3ChainLoopStart().start(
-                    plan, 1, short_non_silent)
+                chain.MiniMaxH3ChainLoopStart().start(plan, 1, source_timeline=chain._make_source_timeline(source_audio=short_non_silent))
             except ValueError as exc:
                 assert "source_audio_too_short" in str(exc)
                 assert "Provide a source track" in str(exc)
@@ -1028,9 +1015,7 @@ def main():
 
             extension_audio = audio_for_frames(8)
             extension_audio["waveform"].fill_(0.25)
-            external_started = chain.MiniMaxH3ChainLoopStart().start(
-                external_plan, 1, extension_audio,
-                external_context=external_context)
+            external_started = chain.MiniMaxH3ChainLoopStart().start(external_plan, 1, external_context=external_context, source_timeline=chain._make_source_timeline(source_audio=extension_audio))
             external_state1 = external_started[1]
             effective_external_plan = external_state1["plan"]
             assert [shot["delivered_frames"] for shot in
@@ -1039,8 +1024,7 @@ def main():
             assert external_state1["external_context"]
             assert tuple(external_state1["previous_frames"].shape) == (
                 1, 32, 32, 3)
-            first_current = chain.MiniMaxH3ChainCurrent().current(
-                external_state1, extension_audio)["result"]
+            first_current = chain.MiniMaxH3ChainCurrent().current(external_state1)["result"]
             external_current_state1 = first_current[0]
             first_slice = first_current[12]["waveform"]
             first_lead_samples = round(1 / 24 * 8000)
@@ -1081,8 +1065,7 @@ def main():
                 av_latent())["result"][0]
             external_state2 = chain._initial_state(
                 effective_external_plan, 2)
-            external_current_state2 = chain.MiniMaxH3ChainCurrent().current(
-                external_state2, extension_audio)["result"][0]
+            external_current_state2 = chain.MiniMaxH3ChainCurrent().current(external_state2)["result"][0]
             external_segment2 = external_saver.save(
                 external_current_state2,
                 torch.zeros((4, 32, 32, 3), dtype=torch.float32),
@@ -1092,8 +1075,7 @@ def main():
                 external_current_state2["segments"] + [external_segment2])
             external_manifest = chain._manifest_from_state(external_complete)
             assert external_manifest["prelude"]["frame_count"] == 6
-            loaded_external = chain.MiniMaxH3ChainManifestLoad().load(
-                external_plan, extension_audio, external_context)[0]
+            loaded_external = chain.MiniMaxH3ChainManifestLoad().load(external_plan, source_timeline=chain._make_source_timeline(source_audio=extension_audio), external_context=external_context)[0]
             assert loaded_external["plan_hash"] == external_manifest["plan_hash"]
 
             joined_audio = chain._audio_with_prelude(
@@ -1105,9 +1087,7 @@ def main():
                 joined_audio["waveform"][..., :prelude_samples],
                 torch.full_like(
                     joined_audio["waveform"][..., :prelude_samples], 0.75))
-            external_result = chain.MiniMaxH3ChainAssemble().assemble(
-                external_manifest, "source", "extended_with_original", 96,
-                extension_audio)
+            external_result = chain.MiniMaxH3ChainAssemble().assemble(external_manifest, "source", "extended_with_original", 96, source_timeline=chain._make_source_timeline(source_audio=extension_audio))
             external_path = pathlib.Path(external_result["result"][0])
             assert external_path.is_file() and external_path.stat().st_size > 0
             external_duration = float(subprocess.check_output([
@@ -1121,9 +1101,7 @@ def main():
                 None if executable == "ffmpeg"
                 else external_original_which(executable))
             try:
-                external_fallback = chain.MiniMaxH3ChainAssemble().assemble(
-                    external_manifest, "source", "extended_pyav", 96,
-                    extension_audio)
+                external_fallback = chain.MiniMaxH3ChainAssemble().assemble(external_manifest, "source", "extended_pyav", 96, source_timeline=chain._make_source_timeline(source_audio=extension_audio))
             finally:
                 chain.shutil.which = external_original_which
             with chain.av.open(
@@ -1137,7 +1115,7 @@ def main():
 
             saver = chain.MiniMaxH3ChainSegmentSave()
             generated_state = chain._initial_state(
-                chain._plan_with_source_audio(before_plan, None), 1)
+                with_source_audio(chain, before_plan, None), 1)
             try:
                 saver.save(
                     generated_state,
@@ -1269,8 +1247,7 @@ def main():
             print("recovery metadata: MP4, prompt sidecar, plan, API prompt, "
                   "and workflow archive exact inputs")
 
-            interrupted_manifest = chain.MiniMaxH3ChainManifestLoad().load(
-                plan, source)
+            interrupted_manifest = chain.MiniMaxH3ChainManifestLoad().load(plan, source_timeline=chain._make_source_timeline(source_audio=source))
             assert interrupted_manifest[0]["format"] == (
                 "h3_chain_partial_manifest_v3")
             assert interrupted_manifest[0]["clip_count"] == 1
@@ -1557,7 +1534,8 @@ def main():
 
             fake_prompt = {
                 "1": {"class_type": "MiniMaxH3ChainLoopStart", "inputs": {
-                    "plan": plan, "start_clip": 1, "source_audio": source,
+                    "plan": plan, "start_clip": 1,
+                    "source_timeline": chain._make_source_timeline(source_audio=source),
                 }},
                 "2": {"class_type": "MiniMaxH3ChainCurrent", "inputs": {
                     "state": ["1", 1],
@@ -1620,8 +1598,7 @@ def main():
             assert len(state2["previous_latent"]["samples"]) == 2
             print("resume: clip 2 restored clip 1 frame tail + AV latent")
 
-            state2 = chain.MiniMaxH3ChainCurrent().current(
-                state2, source)["result"][0]
+            state2 = chain.MiniMaxH3ChainCurrent().current(state2)["result"][0]
             images2 = torch.zeros((4, 32, 32, 3), dtype=torch.float32)
             result2 = saver.save(
                 state2, images2, av_latent(), audio_for_frames(4))
@@ -1643,10 +1620,7 @@ def main():
                 chain.PromptServer = ReviewServer
                 try:
                     task = asyncio.create_task(
-                        chain.MiniMaxH3ChainReview().review(
-                            state2, segment2, True, False, 0.0,
-                            False, True, "checkpointed", audio_for_frames(4),
-                            source, unique_id="review-node"))
+                        chain.MiniMaxH3ChainReview().review(state2, segment2, True, False, 0.0, False, True, "checkpointed", audio_for_frames(4), unique_id="review-node"))
                     for _ in range(100):
                         if chain._PENDING_REVIEWS:
                             break
@@ -1707,8 +1681,7 @@ def main():
             complete["segments"] = state2["segments"] + [segment2]
             manifest = chain._manifest_from_state(complete)
 
-            loaded_manifest = chain.MiniMaxH3ChainManifestLoad().load(
-                plan, source)[0]
+            loaded_manifest = chain.MiniMaxH3ChainManifestLoad().load(plan, source_timeline=chain._make_source_timeline(source_audio=source))[0]
             assert loaded_manifest["plan_hash"] == manifest["plan_hash"]
             assert len(loaded_manifest["segments"]) == 2
             assert pathlib.Path(chain._absolute_output_path(
@@ -1765,8 +1738,7 @@ def main():
                   "overlap trimmed and workflow metadata preserved")
 
             assembler = chain.MiniMaxH3ChainAssemble()
-            source_result = assembler.assemble(
-                manifest, "source", "source_final", 96, source)
+            source_result = assembler.assemble(manifest, "source", "source_final", 96, source_timeline=chain._make_source_timeline(source_audio=source))
             source_path = pathlib.Path(source_result["result"][0])
             assert source_path.is_file() and source_path.stat().st_size > 0
             generated_sidecar = source_path.with_suffix(".generated.wav")
@@ -1791,21 +1763,17 @@ def main():
             short_silent_manifest = dict(manifest)
             short_silent_manifest["compatibility"] = dict(
                 short_started[1]["plan"]["compatibility"])
-            # Exercise legacy AUDIO padding, without the different source
-            # timeline recovered from the original full-length fixture.
-            short_silent_manifest.pop("source_timeline", None)
+            # Exercise the persisted, padded timeline of a short silent track.
+            short_silent_manifest["source_timeline"] = short_started[1]["plan"]["source_timeline"]
             short_silent_manifest["plan"] = dict(manifest.get("plan") or {})
             short_silent_manifest["plan"].pop("source_timeline", None)
-            short_silent_result = assembler.assemble(
-                short_silent_manifest, "source", "short_silent_final", 96,
-                short_source)
+            short_silent_result = assembler.assemble(short_silent_manifest, "source", "short_silent_final", 96)
             short_silent_path = pathlib.Path(short_silent_result["result"][0])
             assert short_silent_path.is_file() and short_silent_path.stat().st_size > 0
             try:
-                assembler.assemble(
-                    manifest, "source", "wrong_source", 96, changed_source)
+                assembler.assemble(manifest, "source", "wrong_source", 96, source_timeline=chain._make_source_timeline(source_audio=changed_source))
             except ValueError as exc:
-                assert "different source waveform" in str(exc)
+                assert "different H3 Source Timeline" in str(exc)
             else:
                 raise AssertionError("Assemble accepted a different source song")
 
@@ -1846,14 +1814,14 @@ def main():
                 "disabled", "source_track", 1, 1, 2, 1, 30)
             try:
                 chain._initial_state(
-                    chain._plan_with_source_audio(changed_plan, source), 2)
+                    with_source_audio(chain, changed_plan, source), 2)
             except ValueError as exc:
                 assert "scene_generation.prompt_hash" in str(exc)
             else:
                 raise AssertionError("resume accepted a changed predecessor")
             print("resume guard: changed predecessor rejected")
             unsafe_state = chain._initial_state(
-                chain._plan_with_source_audio(changed_plan, source), 2,
+                with_source_audio(chain, changed_plan, source), 2,
                 verify_resume_history=False)
             assert unsafe_state["resumed_from"] == 1
             assert unsafe_state["resume_history_verification_disabled"]
@@ -1870,7 +1838,7 @@ def main():
                 "smoke", 32, 32, 1, "video", "head", "disabled",
                 "source_track", 1, 1, 2, 1, 30, "model-and-refs-v2")
             try:
-                chain._initial_state(chain._plan_with_source_audio(
+                chain._initial_state(with_source_audio(chain,
                     changed_generation_plan, source), 2)
             except ValueError as exc:
                 assert "global_generation.generation_fingerprint" in str(exc)
@@ -1881,7 +1849,7 @@ def main():
 
             try:
                 chain._initial_state(
-                    chain._plan_with_source_audio(plan, changed_source), 2)
+                    with_source_audio(chain, plan, changed_source), 2)
             except ValueError as exc:
                 assert "scene_generation.source_reference_window" in str(exc)
             else:

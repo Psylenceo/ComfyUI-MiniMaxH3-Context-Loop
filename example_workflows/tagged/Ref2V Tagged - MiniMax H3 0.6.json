@@ -216,7 +216,7 @@
       ],
       "size": [
         360,
-        236
+        216
       ],
       "flags": {},
       "order": 6,
@@ -226,11 +226,6 @@
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
           "link": 2
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         },
         {
           "name": "external_context",
@@ -284,7 +279,7 @@
       "type": "MiniMaxH3ChainCurrent",
       "pos": [
         3480,
-        516
+        496
       ],
       "size": [
         460,
@@ -298,11 +293,6 @@
           "name": "state",
           "type": "H3_CHAIN_STATE",
           "link": 3
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         }
       ],
       "outputs": [
@@ -432,11 +422,6 @@
           "name": "manifest",
           "type": "H3_CHAIN_MANIFEST",
           "link": 4
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         },
         {
           "name": "source_timeline",
@@ -1194,11 +1179,6 @@
           "link": 44
         },
         {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
-        },
-        {
           "name": "source_timeline",
           "type": "H3_SOURCE_TIMELINE",
           "link": null
@@ -1467,11 +1447,6 @@
           "link": 55
         },
         {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
-        },
-        {
           "name": "pending_review",
           "type": "H3_REVIEW_DISPOSITION",
           "link": null
@@ -1525,11 +1500,6 @@
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
           "link": 56
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         },
         {
           "name": "external_context",
@@ -1773,11 +1743,6 @@
         {
           "name": "source_timeline",
           "type": "H3_SOURCE_TIMELINE",
-          "link": null
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
           "link": null
         },
         {
@@ -2380,7 +2345,7 @@
       30,
       0,
       31,
-      3,
+      2,
       "H3_TAGGED_REFERENCES"
     ]
   ],
@@ -2427,7 +2392,7 @@
         3440,
         90,
         540,
-        866
+        846
       ],
       "color": "#393f58",
       "font_size": 24,

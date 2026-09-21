@@ -53,7 +53,7 @@ import {
     resolveAudioContextLength,
     resolveAudioPolicy,
     resolveTransitionPolicy,
-} from "./h3_socket_presentation_core.mjs?v=0.7.10";
+} from "./h3_socket_presentation_core.mjs?v=0.7.11";
 import {
     availableLoRARoutes,
     loraRouteLabel,

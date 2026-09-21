@@ -136,7 +136,7 @@ const inputOrder = start.inputs.map((slot) => slot.name);
 const outputOrder = start.outputs.map((slot) => slot.name);
 const linkIds = start.inputs.map((slot) => slot.link);
 applySocketPresentation(start, false);
-assert.equal(start.inputs[1].hidden, true, "unused legacy AUDIO is compact");
+assert.equal(start.inputs[1].hidden, false, "retired AUDIO remains visible for migration");
 assert.equal(start.outputs[2].hidden, true, "diagnostic status is compact");
 assert.deepEqual(start.inputs.map((slot) => slot.name), inputOrder);
 assert.deepEqual(start.outputs.map((slot) => slot.name), outputOrder);
@@ -157,7 +157,7 @@ start.graph = new Graph([audioPolicy, plan, timeline, start], {
     13: {origin_id: 4, target_id: 3},
 });
 assert.equal(hasSourceTimeline(start), true);
-assert.equal(presentationForNode(start, false).hiddenInputs.has("source_audio"), true);
+assert.equal(presentationForNode(start, false).hiddenInputs.has("source_audio"), false);
 
 const current = node(5, "MiniMaxH3ChainCurrent", [["state", 12], ["source_audio", null]], [
     ["state", null], ["source_audio_slice", null], ["status", null],
@@ -166,7 +166,7 @@ start.graph._nodes.push(current);
 current.graph = start.graph;
 start.graph.links[12] = {origin_id: 3, target_id: 5};
 const currentPresentation = presentationForNode(current, false);
-assert.equal(currentPresentation.hiddenInputs.has("source_audio"), true);
+assert.equal(currentPresentation.hiddenInputs.has("source_audio"), false);
 assert.equal(currentPresentation.hiddenOutputs.has("source_audio_slice"), false,
     "source reference is on, so its output stays available");
 
@@ -261,7 +261,7 @@ assert.deepEqual(resolveAudioPolicy(compactStart), {
 assert.equal(
     presentationForNode(compactStart, false).hiddenInputs.has("source_audio"),
     false,
-    "locked source target still needs legacy source audio without a timeline",
+    "retired sockets remain visible regardless of audio policy",
 );
 
 const generationProfile = node(40, PROFILE_POLICY_NODE, [], [

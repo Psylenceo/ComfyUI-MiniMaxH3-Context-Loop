@@ -182,7 +182,7 @@
       ],
       "size": [
         360,
-        236
+        216
       ],
       "flags": {},
       "order": 5,
@@ -192,11 +192,6 @@
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
           "link": 1
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         },
         {
           "name": "external_context",
@@ -250,7 +245,7 @@
       "type": "MiniMaxH3ChainCurrent",
       "pos": [
         3820,
-        3148
+        3128
       ],
       "size": [
         460,
@@ -264,11 +259,6 @@
           "name": "state",
           "type": "H3_CHAIN_STATE",
           "link": 2
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         }
       ],
       "outputs": [
@@ -381,7 +371,7 @@
       "type": "MiniMaxH3ChainAssemble",
       "pos": [
         4390,
-        4200
+        4180
       ],
       "size": [
         440,
@@ -395,11 +385,6 @@
           "name": "manifest",
           "type": "H3_CHAIN_MANIFEST",
           "link": 3
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         },
         {
           "name": "source_timeline",
@@ -1129,11 +1114,6 @@
           "link": 41
         },
         {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
-        },
-        {
           "name": "source_timeline",
           "type": "H3_SOURCE_TIMELINE",
           "link": null
@@ -1172,7 +1152,7 @@
       "type": "ModelAttentionBackend",
       "pos": [
         3820,
-        3648
+        3628
       ],
       "size": [
         360,
@@ -1349,11 +1329,6 @@
           "link": null
         },
         {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
-        },
-        {
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
           "link": 47
@@ -1460,7 +1435,7 @@
       "type": "MiniMaxH3ChainManifestLoad",
       "pos": [
         3820,
-        4200
+        4180
       ],
       "size": [
         440,
@@ -1474,11 +1449,6 @@
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
           "link": 49
-        },
-        {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
         },
         {
           "name": "external_context",
@@ -1621,11 +1591,6 @@
           "link": 57
         },
         {
-          "name": "source_audio",
-          "type": "AUDIO",
-          "link": null
-        },
-        {
           "name": "pending_review",
           "type": "H3_REVIEW_DISPOSITION",
           "link": null
@@ -1665,7 +1630,7 @@
       "type": "LoadVideo",
       "pos": [
         3820,
-        1628
+        1608
       ],
       "size": [
         400,
@@ -1697,7 +1662,7 @@
       "type": "GetVideoComponents",
       "pos": [
         3820,
-        3856
+        3836
       ],
       "size": [
         360,
@@ -1903,7 +1868,7 @@
       "type": "LoadImageMask",
       "pos": [
         3820,
-        2108
+        2088
       ],
       "size": [
         400,
@@ -2118,7 +2083,7 @@
       "type": "LoadImage",
       "pos": [
         3820,
-        2628
+        2608
       ],
       "size": [
         400,
@@ -2700,7 +2665,7 @@
       39,
       1,
       24,
-      3,
+      2,
       "H3_TAGGED_REFERENCES"
     ],
     [
@@ -2708,7 +2673,7 @@
       39,
       0,
       24,
-      5,
+      4,
       "H3_PROJECT_ASSETS"
     ],
     [
@@ -2939,7 +2904,7 @@
         3780,
         90,
         540,
-        3970
+        3950
       ],
       "color": "#393f58",
       "font_size": 24,
@@ -3021,7 +2986,7 @@
       "title": "RECOVERY • DISABLED / NO SAMPLING",
       "bounding": [
         3780,
-        4110,
+        4090,
         1090,
         490
       ],

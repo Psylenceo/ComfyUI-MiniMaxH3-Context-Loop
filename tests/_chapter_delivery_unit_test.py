@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Chapter delivery, selection, isolation, and recovery regressions."""
 
+from source_audio_fixtures import bind_manifest_audio
+
 import copy
 import hashlib
 import importlib.util
@@ -263,10 +265,8 @@ def main():
             "waveform": torch.arange(60, dtype=torch.float32).reshape(1, 1, 60),
             "sample_rate": 24,
         }
-        chapter_two["compatibility"]["source_audio_hash"] = (
-            chain._audio_fingerprint(source_audio))
-        selected = chain._full_chain_selected_audio(
-            chapter_two, "source", None, source_audio)
+        bind_manifest_audio(chain, chapter_two, source_audio)
+        selected = chain._full_chain_selected_audio(chapter_two, "source", None)
         assert torch.equal(
             selected["waveform"], source_audio["waveform"][..., 30:60])
 

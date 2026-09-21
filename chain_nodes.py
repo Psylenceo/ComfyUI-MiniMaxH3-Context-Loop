@@ -6188,7 +6188,7 @@ def _selected_resume_history_hash(
 
 def _canonical_source_reference_dependency(
         plan: dict[str, Any], index: int,
-        source_timeline: Any = None, source_audio: Any = None
+        source_timeline: Any = None
         ) -> dict[str, Any] | None:
     """Hash the canonical source PCM window which affects one scene."""
     shot = plan["shots"][int(index) - 1]
@@ -6208,6 +6208,8 @@ def _canonical_source_reference_dependency(
     if (not _audio_policy_uses_source_reference(plan, shot)
             and not _audio_policy_locks_source_audio(plan, shot)):
         return None
+    if source_timeline is None:
+        source_timeline = _source_timeline_from_metadata(plan)
     external_lead = int(shot.get("external_context_frames", 0))
     start_frame = (0 if int(index) == 1 and external_lead > 0 else
                    max(0, int(shot["generation_start_frame"])))
@@ -6229,11 +6231,8 @@ def _canonical_source_reference_dependency(
             source = _validate_source_timeline(
                 source_timeline, require_runtime=True)
             maximum_frame = int(source["extent"]["frame_count"])
-        elif source_audio is not None:
-            source_waveform, source_rate = _validate_audio(
-                source_audio, "H3 lip-sync source dependency")
-            maximum_frame = int(math.floor(
-                int(source_waveform.shape[-1]) / float(source_rate) * FPS))
+            if plan["compatibility"].get("source_audio_silent_padding"):
+                maximum_frame = max(maximum_frame, int(plan["total_delivered_frames"]))
         else:
             maximum_frame = int(plan.get(
                 "total_delivered_frames", target_end_frame + lookahead_frames))
@@ -6242,22 +6241,24 @@ def _canonical_source_reference_dependency(
     if source_timeline is not None:
         generation_source = _source_timeline_generation_track(
             source_timeline, lip_sync=_audio_policy_locks_source_audio(plan, shot))
-        audio = _source_timeline_scene_audio(
-            generation_source, start_frame, end_frame)
+        descriptor = generation_source["audio"]
+        if (descriptor["kind"] == "deferred_tensor"
+                and plan["compatibility"].get("source_audio_silent_padding")):
+            # Preflight hashes the same padded PCM that Loop Start will persist,
+            # without writing files or mutating the connected timeline.
+            audio = _slice_audio(
+                descriptor["value"], start_frame / float(FPS),
+                frame_count / float(FPS), pad_silence=True)
+        else:
+            audio = _source_timeline_scene_audio(
+                generation_source, start_frame, end_frame)
         route = (
             "legacy_audio"
             if _source_timeline_recovers_legacy_audio(
                 plan["compatibility"], source_timeline)
             else "source_timeline")
     else:
-        if source_audio is None:
-            return None
-        audio = _slice_audio(
-            source_audio, start_frame / float(FPS),
-            frame_count / float(FPS),
-            pad_silence=bool(plan["compatibility"].get(
-                "source_audio_silent_padding")))
-        route = "legacy_audio"
+        return None
     waveform, sample_rate = _validate_audio(
         audio, "Scene %d source-reference dependency" % int(index))
     dependency = {
@@ -6891,22 +6892,6 @@ def _resample_audio_tail_exact(audio: dict[str, Any], sample_rate: int,
     }
 
 
-def _validate_source_audio_hash(compatibility: dict[str, Any],
-                                source_audio: dict[str, Any] | None,
-                                usage: str) -> None:
-    if source_audio is None:
-        raise ValueError("%s requires source_audio." % usage)
-    _validate_audio(source_audio, "%s source audio" % usage)
-    expected = str(compatibility.get("source_audio_hash") or "")
-    if not expected or expected == "none":
-        raise ValueError("%s has no source-audio fingerprint to validate." % usage)
-    actual = _audio_fingerprint(source_audio)
-    if actual != expected:
-        raise ValueError(
-            "%s received a different source waveform than H3 Chain Loop Start. "
-            "Wire the same AUDIO value to Start, Current Shot, and Assemble." % usage)
-
-
 def _external_context_contract(external_context: dict[str, Any]) -> dict[str, Any]:
     frames = external_context.get("context_frames")
     audio = external_context.get("context_audio")
@@ -7051,87 +7036,23 @@ def _plan_with_external_context(
     return prepared
 
 
-def _plan_with_source_audio(plan: dict[str, Any],
-                            source_audio: dict[str, Any] | None) -> dict[str, Any]:
-    policy = _resolved_audio_policy(plan)
+def _plan_without_source_timeline(plan: dict[str, Any]) -> dict[str, Any]:
+    """Bind the no-source contract without changing existing generated-run hashes."""
     if _audio_policy_requires_source(plan):
-        if source_audio is None:
-            raise ValueError(
-                "H3 chain Audio Policy %s requires source_audio on Loop "
-                "Start." % _audio_policy_summary({"audio_policy": policy}))
-        waveform, sample_rate = _validate_audio(
-            source_audio, "H3 Chain Loop Start source audio")
-        required_samples = int(round(
-            int(plan["total_delivered_frames"]) / float(FPS) * sample_rate))
-        silent_padding = False
-        if int(waveform.shape[-1]) < required_samples:
-            if _audio_is_silent(waveform):
-                silent_padding = True
-            else:
-                raise ValueError(
-                    "H3 Chain Loop Start source audio is too short: it contains %d "
-                    "samples at %d Hz, but this plan requires at least %d samples "
-                    "for %d delivered frames. Only silent placeholder audio is "
-                    "automatically padded." %
-                    (int(waveform.shape[-1]), sample_rate, required_samples,
-                     int(plan["total_delivered_frames"])))
-        source_hash = _audio_fingerprint(source_audio)
-    else:
-        source_hash = "none"
-        silent_padding = False
+        raise ValueError(
+            "H3 chain Audio Policy %s requires a Source Timeline or a "
+            "Carousel Project timeline source." % _audio_policy_summary(plan))
     prepared = dict(plan)
     prepared["base_plan_hash"] = str(
         plan.get("base_plan_hash") or plan["plan_hash"])
     prepared["compatibility"] = dict(plan["compatibility"])
-    prepared["compatibility"]["source_audio_hash"] = source_hash
-    prepared["compatibility"]["source_audio_silent_padding"] = silent_padding
-    if plan["compatibility"].get("external_context_hash"):
-        prepared["plan_hash"] = _fingerprint({
-            "prepared_plan_hash": plan["plan_hash"],
-            "source_audio_hash": source_hash,
-        })
-    else:
-        # Preserve the exact pre-v0.3.6 hash contract for ordinary chains so
-        # every existing checkpoint remains resumable.
-        prepared["plan_hash"] = _fingerprint({
-            "base_plan_hash": plan["plan_hash"],
-            "source_audio_hash": source_hash,
-        })
+    prepared["compatibility"].update({
+        "source_audio_hash": "none", "source_audio_silent_padding": False})
+    key = ("prepared_plan_hash" if plan["compatibility"].get(
+        "external_context_hash") else "base_plan_hash")
+    prepared["plan_hash"] = _fingerprint({
+        key: plan["plan_hash"], "source_audio_hash": "none"})
     return prepared
-
-
-def _plan_with_recoverable_legacy_source_audio(
-        plan: dict[str, Any], source_audio: dict[str, Any] | None
-        ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Bind legacy Loop Start AUDIO once and persist it for later consumers.
-
-    Keep the released legacy plan/source hash unchanged, but materialize the
-    waveform as an audio-only Source Timeline. The runtime state and eventual
-    manifest can then recover the same source track without repeated AUDIO
-    wires or a live tensor retained across recursive scenes.
-    """
-    prepared = _plan_with_source_audio(plan, source_audio)
-    if source_audio is None or not _audio_policy_requires_source(prepared):
-        return prepared, None
-    source_hash = str(
-        prepared["compatibility"].get("source_audio_hash") or "")
-    timeline = _make_source_timeline(
-        source_audio=source_audio, embedded_audio="ignore",
-        source_route="legacy Loop Start AUDIO")
-    timeline = _materialize_source_timeline_audio(timeline, prepared)
-    timeline = dict(timeline)
-    timeline["video"] = None
-    timeline["audio"] = dict(timeline["audio"])
-    timeline["fingerprints"] = dict(timeline["fingerprints"])
-    timeline["recovery"] = dict(timeline.get("recovery") or {})
-    timeline["recovery"].update({
-        "legacy_loop_start_source_audio": True,
-        "legacy_loop_start_source_audio_hash": source_hash,
-    })
-    timeline = _validate_source_timeline(timeline, require_runtime=True)
-    prepared = dict(prepared)
-    prepared["source_timeline"] = _source_timeline_recovery_record(timeline)
-    return prepared, timeline
 
 
 def _plan_with_source_timeline(
@@ -11627,10 +11548,11 @@ def _resume_dependency_diffs(
 def _load_resume_state(
         plan: dict[str, Any], start_clip: int,
         verify_history: bool = True, source_timeline: Any = None,
-        source_audio: Any = None,
         artifact_verification: _ResumeArtifactVerification | None = None,
         context_only: bool = False
         ) -> dict[str, Any]:
+    if source_timeline is None:
+        source_timeline = _source_timeline_from_metadata(plan)
     _recover_checkpoint_pointer_transactions(plan.get("run_name"))
     previous_index = start_clip - 1
     context_sources = _resume_context_predecessors(plan, int(start_clip))
@@ -11671,7 +11593,7 @@ def _load_resume_state(
         if (bool(verify_history) and index in consumed_predecessors
                 and isinstance(saved_dependency, dict)):
             current_source_dependency = _canonical_source_reference_dependency(
-                plan, index, source_timeline, source_audio)
+                plan, index, source_timeline)
             if current_source_dependency is None:
                 saved_compatibility = metadata.get("compatibility") or {}
                 if (str(saved_compatibility.get("source_audio_hash") or "") ==
@@ -11773,10 +11695,11 @@ def _initial_state(plan: dict[str, Any], start_clip: int,
                    end_clip: int | None = None,
                    external_context: dict[str, Any] | None = None,
                    source_timeline: dict[str, Any] | None = None,
-                   source_audio: dict[str, Any] | None = None,
                    verify_resume_history: bool = True,
                    artifact_verification: _ResumeArtifactVerification | None = None
                    ) -> dict[str, Any]:
+    if source_timeline is None:
+        source_timeline = _source_timeline_from_metadata(plan)
     total = len(plan["shots"])
     start_clip = int(start_clip)
     if start_clip < 1 or start_clip > total:
@@ -11789,7 +11712,7 @@ def _initial_state(plan: dict[str, Any], start_clip: int,
     if start_clip > 1:
         state = _load_resume_state(
             plan, start_clip, verify_history=verify_resume_history,
-            source_timeline=source_timeline, source_audio=source_audio,
+            source_timeline=source_timeline,
             artifact_verification=artifact_verification, context_only=True)
     else:
         state = {
@@ -15851,11 +15774,8 @@ def _preflight_shortfall_solutions(
 
 def _preflight_bind_source(
         plan: dict[str, Any], report: dict[str, Any],
-        source_timeline: Any = None, source_audio: Any = None
+        source_timeline: Any = None
         ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    if source_timeline is not None and source_audio is not None:
-        raise ValueError(
-            "Connect Source Timeline or legacy source_audio, not both.")
     if source_timeline is None and isinstance(plan.get("source_timeline"), dict):
         source_timeline = _source_timeline_from_recovery(
             plan["source_timeline"])
@@ -15938,8 +15858,8 @@ def _preflight_bind_source(
                 "below require it.",
                 "Choose embedded or external audio for Source Timeline.",
                 solutions=(
-                    "Connect the legacy source_audio input instead of this "
-                    "Source Timeline.",
+                    "Connect Load Audio to Source Timeline.source_audio, or "
+                    "select a soundtrack in Carousel.",
                     "Change each reported setting at its reported scope if "
                     "source audio was not intended."),
                 requirements=source_requirements,
@@ -16003,11 +15923,11 @@ def _preflight_bind_source(
         })
         report["source"] = source_report
         return prepared, source
-    if required and source_audio is None:
+    if required:
         _preflight_issue(
             report, "errors", "source_audio_missing",
-            "Loop Start source_timeline and legacy source_audio inputs are "
-            "both disconnected, but the Plan settings listed below require "
+            "No Source Timeline is connected or saved in the Plan, "
+            "but the Plan settings listed below require "
             "source audio.",
             "Connect one H3 Source Timeline to Loop Start.",
             solutions=(
@@ -16015,73 +15935,17 @@ def _preflight_bind_source(
                 "connect that timeline to both Preflight and Loop Start. "
                 "For Tagged Audio source_timeline mode, also connect "
                 "Current Scene.state -> Tagged Ref2VA.state.",
-                "Use the legacy source_audio input instead.",
                 "Change each reported setting at its reported scope if "
                 "source audio was not intended."),
             requirements=source_requirements,
             measurements=_preflight_source_measurements(
                 plan, 0, source_requirements))
-        source_hash = "none"
-    elif source_audio is not None:
-        waveform, sample_rate = _validate_audio(
-            source_audio, "Preflight legacy source audio")
-        available = int(waveform.shape[-1])
-        available_frames = int(math.floor(
-            available / float(sample_rate) * FPS + 1e-9))
-        shortfall = max(0, required_frames - available_frames) if required else 0
-        source_report.update({
-            "route": "legacy_audio", "sample_rate": sample_rate,
-            "sample_count": available, "audio_frames": available_frames,
-            "shortfall_frames": shortfall,
-            "shortfall_seconds": shortfall / float(FPS),
-        })
-        if shortfall and not _audio_is_silent(waveform):
-            measurements = _preflight_source_measurements(
-                plan, available_frames, source_requirements)
-            source_report.update({
-                "last_complete_scene": (
-                    measurements["last_complete_scene"] or {}).get("scene", 0),
-                "first_affected_scene": (
-                    measurements["first_affected_scene"] or {}).get("scene"),
-            })
-            action, alternatives = _preflight_shortfall_solutions(measurements)
-            _preflight_issue(
-                report, "errors", "source_audio_too_short",
-                "Legacy source audio is %d frames (%.3fs) short." %
-                (shortfall, shortfall / float(FPS)),
-                action, solutions=alternatives,
-                triggers=source_requirements,
-                measurements=measurements)
-        elif shortfall:
-            measurements = _preflight_source_measurements(
-                plan, available_frames, source_requirements)
-            _preflight_issue(
-                report, "warnings", "silent_source_will_pad",
-                "Silent placeholder audio is %.3f seconds short and will be "
-                "padded." % (shortfall / float(FPS)),
-                "No action is required unless real source audio was intended.",
-                solutions=(
-                    "Replace the placeholder with a track at least %.3fs "
-                    "long when real source audio is intended." %
-                    measurements["required_seconds"],),
-                triggers=source_requirements,
-                measurements=measurements)
-        source_hash = _audio_fingerprint(source_audio) if required else "none"
-    else:
-        source_hash = "none"
     prepared["compatibility"].update({
-        "source_audio_hash": source_hash,
-        "source_audio_silent_padding": bool(
-            source_report.get("shortfall_frames") and source_audio is not None
-            and _audio_is_silent(_validate_audio(
-                source_audio, "Preflight legacy source audio")[0])),
-    })
-    prepared["plan_hash"] = _fingerprint(
-        {"prepared_plan_hash": plan["plan_hash"],
-         "source_audio_hash": source_hash}
-        if plan["compatibility"].get("external_context_hash") else
-        {"base_plan_hash": plan["plan_hash"],
-         "source_audio_hash": source_hash})
+        "source_audio_hash": "none", "source_audio_silent_padding": False})
+    key = ("prepared_plan_hash" if plan["compatibility"].get(
+        "external_context_hash") else "base_plan_hash")
+    prepared["plan_hash"] = _fingerprint({
+        key: plan["plan_hash"], "source_audio_hash": "none"})
     report["source"] = source_report
     return prepared, None
 
@@ -16089,7 +15953,6 @@ def _preflight_bind_source(
 def _preflight_resume(
         plan: dict[str, Any], start: int, verify_history: bool,
         report: dict[str, Any], source_timeline: Any = None,
-        source_audio: Any = None,
         artifact_verification: _ResumeArtifactVerification | None = None
         ) -> dict[str, Any]:
     result: dict[str, Any] = {
@@ -16137,7 +16000,7 @@ def _preflight_resume(
                     and isinstance(saved_dependency, dict)):
                 current_source_dependency = (
                     _canonical_source_reference_dependency(
-                        plan, index, source_timeline, source_audio))
+                        plan, index, source_timeline))
                 if current_source_dependency is None:
                     saved_compatibility = metadata.get("compatibility") or {}
                     if (str(saved_compatibility.get("source_audio_hash") or "") ==
@@ -16282,7 +16145,7 @@ def _preflight_validation_recovery(
 
 
 def _preflight_chain(
-        plan: Any, *, source_timeline: Any = None, source_audio: Any = None,
+        plan: Any, *, source_timeline: Any = None,
         start_clip: int = 1, scene_range: Any = "",
         verify_resume_history: bool = True, tagged_references: Any = None,
         artifact_verification: _ResumeArtifactVerification | None = None
@@ -16307,7 +16170,7 @@ def _preflight_chain(
             _validate_scene_resolution_boundary(plan, scene)
         stage = "source"
         prepared, runtime_timeline = _preflight_bind_source(
-            plan, report, source_timeline, source_audio)
+            plan, report, source_timeline)
         if not report.get("source"):
             # Timeline route returns before setting the shared report field.
             source = runtime_timeline
@@ -16359,8 +16222,7 @@ def _preflight_chain(
                     and not any(issue["code"].startswith("source_")
                                 for issue in report["errors"])):
                 source_dependency = _canonical_source_reference_dependency(
-                    prepared, int(shot["index"]), runtime_timeline,
-                    source_audio)
+                    prepared, int(shot["index"]), runtime_timeline)
                 record["dependency"] = _scene_dependency_record(
                     prepared, int(shot["index"]), source_dependency)
             report["scenes"].append(record)
@@ -16617,7 +16479,7 @@ def _preflight_chain(
         stage = "resume"
         report["resume"] = _preflight_resume(
             prepared, start, verify_resume_history, report,
-            runtime_timeline, source_audio, artifact_verification)
+            runtime_timeline, artifact_verification)
     except Exception as exc:
         code, action, alternatives = _preflight_validation_recovery(stage)
         _preflight_issue(
@@ -17105,8 +16967,6 @@ def _plan_studio_preflight_input_types():
     return {
         "source_timeline": (SOURCE_TIMELINE_TYPE, {
             "tooltip": "Optional source media for the shared model-free preflight."}),
-        "source_audio": ("AUDIO", {
-            "tooltip": "Legacy source route; do not connect with Source Timeline."}),
         "start_clip": ("INT", {"default": 1, "min": 1,
             "max": MAX_SHOTS, "tooltip": "Resume scene to preflight."}),
         "scene_range": ("STRING", {"default": "",
@@ -17233,7 +17093,7 @@ class MiniMaxH3ChainPlanStudio:
             "queued_alternate": queued_alternate,
         })
 
-    def passthrough(self, plan=None, source_timeline=None, source_audio=None,
+    def passthrough(self, plan=None, source_timeline=None,
                     start_clip=1, scene_range="", verify_resume_history=True,
                     tagged_references=None,
                     plan_json='{"shots":[{"id":"intro","prompt":"Describe the opening shot."}]}',
@@ -17275,20 +17135,20 @@ class MiniMaxH3ChainPlanStudio:
             else:
                 plan.pop("_branch_id", None)
         return self._branch_passthrough(
-            plan, source_timeline, source_audio, start_clip, scene_range,
+            plan, source_timeline, start_clip, scene_range,
             verify_resume_history, tagged_references,
             alternate_take_json)
 
-    def _branch_passthrough(self, plan, source_timeline, source_audio,
+    def _branch_passthrough(self, plan, source_timeline,
                            start_clip, scene_range, verify_resume_history,
                            tagged_references, alternate_take_json):
         # Explicit scope here because standalone Studio creates the Plan itself.
         with branch_scope(plan["run_name"], plan.get("_branch_id", "main")):
-            return self._present_branch(plan, source_timeline, source_audio,
+            return self._present_branch(plan, source_timeline,
                 start_clip, scene_range, verify_resume_history,
                 tagged_references, alternate_take_json)
 
-    def _present_branch(self, plan, source_timeline, source_audio,
+    def _present_branch(self, plan, source_timeline,
                         start_clip, scene_range, verify_resume_history,
                         tagged_references, alternate_take_json):
         editorial = _load_run_editorial(plan.get("run_name"))
@@ -17313,7 +17173,7 @@ class MiniMaxH3ChainPlanStudio:
             start_clip = int(alternate["scene"])
             scene_range = str(start_clip)
         prepared, report = _preflight_chain(
-            plan, source_timeline=source_timeline, source_audio=source_audio,
+            plan, source_timeline=source_timeline,
             start_clip=start_clip, scene_range=scene_range,
             verify_resume_history=verify_resume_history,
             tagged_references=tagged_references)
@@ -18277,31 +18137,14 @@ class MiniMaxH3ChainLoopStart:
                                "shape, and internal metadata consistency are "
                                "still verified. Changes to the predecessor "
                                "itself are not applied retroactively."}),
-                "source_audio": ("AUDIO", {
-                    "tooltip": "Legacy 0.4 full-AUDIO route. Leave this "
-                               "unconnected in a 0.5 workflow when "
-                               "source_timeline is connected; the two inputs "
-                               "are mutually exclusive. Use this socket only "
-                               "for an older workflow whose Audio Policy "
-                               "needs final source audio or Source "
-                               "reference=on. Loop Start saves it once as a "
-                               "path-backed run asset, so Current Shot, "
-                               "partial review, final assembly, and full-chain "
-                               "finishing do not need the AUDIO wired again. "
-                               "A short, completely silent placeholder is "
-                               "padded."}),
                 "external_context": (EXTERNAL_CONTEXT_TYPE, {
                     "tooltip": "Optional output from MiniMax H3 Existing Video "
                                "Context. When connected, scene 1 continues from "
                                "that video's tail and its repeated head is "
                                "trimmed exactly like every later scene."}),
-                # Append 0.5 sockets after every 0.4 custom-type socket. Saved
-                # workflows address these positions numerically even though
-                # execution ultimately resolves the input by name.
                 "source_timeline": (SOURCE_TIMELINE_TYPE, {
-                    "tooltip": "Primary 0.5 media wire from Source Timeline "
-                               "or Run Manager. It replaces the repeated full "
-                               "source_audio connection and stays lazy across "
+                    "tooltip": "Source media from Source Timeline or Run Manager. "
+                               "It stays lazy across "
                                "recursive scenes."}),
                 "tagged_references": (TAGGED_REFERENCE_TYPE, {
                     "tooltip": "Optional active prompt-driven reference "
@@ -18333,7 +18176,7 @@ class MiniMaxH3ChainLoopStart:
     def IS_CHANGED(cls, *args, **kwargs):
         return float("NaN")
 
-    def start(self, plan, start_clip, source_audio=None, scene_range="",
+    def start(self, plan, start_clip, *, scene_range="",
               verify_resume_history=True, external_context=None,
               source_timeline=None, tagged_references=None,
               initial_state=None):
@@ -18348,17 +18191,13 @@ class MiniMaxH3ChainLoopStart:
                     plan.get("source_timeline"), dict):
                 source_timeline = _source_timeline_from_recovery(
                     plan["source_timeline"])
-            if source_timeline is not None and source_audio is not None:
-                raise ValueError(
-                    "H3 Chain Loop Start accepts one source-media route: "
-                    "connect Source Timeline or legacy source_audio, not both.")
             verification = _ResumeArtifactVerification()
             preflight_started = time.perf_counter()
             _throw_if_review_interrupted()
             _LOG.info("H3 Loop Start: preflight and context-checkpoint verification...")
             _dry_plan, preflight = _preflight_chain(
                 prepared_plan, source_timeline=source_timeline,
-                source_audio=source_audio, start_clip=start_clip,
+                start_clip=start_clip,
                 scene_range=scene_range,
                 verify_resume_history=verify_resume_history,
                 tagged_references=tagged_references,
@@ -18385,16 +18224,13 @@ class MiniMaxH3ChainLoopStart:
                 prepared_plan, runtime_timeline = _plan_with_source_timeline(
                     prepared_plan, source_timeline)
             else:
-                prepared_plan, runtime_timeline = (
-                    _plan_with_recoverable_legacy_source_audio(
-                        prepared_plan, source_audio))
+                prepared_plan = _plan_without_source_timeline(prepared_plan)
             range_start, range_end = _parse_scene_range(
                 scene_range, len(prepared_plan["shots"]), start_clip)
             state = _initial_state(
                 prepared_plan, range_start, range_end,
                 external_context=external_context if range_start == 1 else None,
                 source_timeline=runtime_timeline,
-                source_audio=source_audio,
                 verify_resume_history=verify_resume_history,
                 artifact_verification=verification)
             state["scene_range_explicit"] = bool(str(scene_range or "").strip())
@@ -18446,11 +18282,6 @@ class MiniMaxH3ChainCurrent:
                     "tooltip": "Current state from H3 Chain Loop Start."}),
             },
             "optional": {
-                "source_audio": ("AUDIO", {
-                    "tooltip": "Legacy 0.4 full-track input. Loop Start now "
-                               "carries a path-backed copy in state, so this "
-                               "wire is unnecessary. A still-connected copy "
-                               "is accepted only when its fingerprint matches."}),
                 "align_audio_reference": ("BOOLEAN", {
                     "default": False,
                     "tooltip": "Experimental. Cap only source_audio_slice 5ms "
@@ -18503,7 +18334,7 @@ class MiniMaxH3ChainCurrent:
     DESCRIPTION = ("Expose the current shot's prompt, seed, dimensions, valid "
                    "length, steps, and source-audio reference/target window.")
 
-    def current(self, state, source_audio=None, align_audio_reference=False):
+    def current(self, state, *, align_audio_reference=False):
         plan = state["plan"]
         # Check at every recursive scene boundary. A forced takeover that
         # occurred after Loop Start therefore stops before prompt-history or
@@ -18513,18 +18344,8 @@ class MiniMaxH3ChainCurrent:
         index = int(state["index"])
         shot = plan["shots"][index - 1]
         source_timeline = state.get("source_timeline")
-        if source_timeline is not None and source_audio is not None:
-            if _source_timeline_recovers_legacy_audio(
-                    plan["compatibility"], source_timeline):
-                _validate_source_audio_hash(
-                    plan["compatibility"], source_audio,
-                    "H3 Chain Current Shot redundant legacy source audio")
-                source_audio = None
-            else:
-                raise ValueError(
-                    "H3 Chain Current Shot already receives source media "
-                    "through Loop Start's Source Timeline; disconnect legacy "
-                    "source_audio.")
+        if source_timeline is None:
+            source_timeline = _source_timeline_from_metadata(plan)
         audio_slice = None
         target_audio_slice = None
         alignment_status = "audio ref unavailable"
@@ -18586,43 +18407,10 @@ class MiniMaxH3ChainCurrent:
                         generation_source, context_start, context_end)
                 alignment_status = "Source Timeline frame-exact"
             else:
-                _validate_source_audio_hash(
-                    plan["compatibility"], source_audio,
-                    "H3 Chain Current Shot")
-                if index == 1 and external_lead > 0:
-                    lookahead_frames = (
-                        int(math.ceil(float(lip_sync_options[
-                            "lookahead_seconds"]) * FPS))
-                        if lip_sync_options is not None else 0)
-                    target_audio_slice = _slice_audio_after_external_context(
-                        source_audio, state.get("previous_audio"),
-                        int(shot["raw_frames"]) + lookahead_frames,
-                        external_lead,
-                        pad_silence=bool(plan["compatibility"].get(
-                            "source_audio_silent_padding")))
-                else:
-                    target_start = float(shot["audio_start_seconds"])
-                    target_end = (
-                        target_start + float(shot["audio_duration_seconds"]))
-                    context_start = target_start
-                    context_end = target_end
-                    if lip_sync_options is not None:
-                        context_start = max(
-                            0.0, target_start - float(
-                                lip_sync_options["preroll_seconds"]))
-                        waveform, sample_rate = _validate_audio(
-                            source_audio, "H3 Chain Current Shot source audio")
-                        source_duration = (
-                            int(waveform.shape[-1]) / float(sample_rate))
-                        context_end = min(
-                            source_duration, target_end + float(
-                                lip_sync_options["lookahead_seconds"]))
-                        target_clip_start_seconds = target_start - context_start
-                    target_audio_slice = _slice_audio(
-                        source_audio, context_start,
-                        context_end - context_start,
-                        pad_silence=bool(plan["compatibility"].get(
-                            "source_audio_silent_padding")))
+                raise ValueError(
+                    "H3 Chain Current Shot needs source audio in its saved "
+                    "Source Timeline. Use Carousel or connect Source Timeline "
+                    "to Loop Start; the legacy source_audio wire was retired.")
             if source_audio_locked and target_audio_slice is None:
                 raise ValueError(
                     "H3 Chain Current Shot cannot lock source audio because "
@@ -18693,7 +18481,7 @@ class MiniMaxH3ChainCurrent:
                 "current_source_audio_target_clip_start_seconds", None)
         dependency_state["current_source_reference_dependency"] = (
             _canonical_source_reference_dependency(
-                plan, index, source_timeline, source_audio))
+                plan, index, source_timeline))
         result = (
             dependency_state, index, len(plan["shots"]), shot["id"], shot["prompt"],
             shot["seed"], shot["raw_frames"], shot["steps"], cfg["width"],
@@ -20964,9 +20752,8 @@ class MiniMaxH3ChainReview:
                     "tooltip": "Audio for the partial MP4 created by Approve "
                                "& Stop. checkpointed uses each saved generated "
                                "delivered-audio track; source uses the exact "
-                               "Source Timeline audio carried in state, or the "
-                               "legacy full source_audio input when no Source "
-                               "Timeline is available; none creates a silent "
+                               "Source Timeline audio carried in state; none "
+                               "creates a silent "
                                "partial."}),
             },
             "optional": {
@@ -20974,12 +20761,6 @@ class MiniMaxH3ChainReview:
                     "tooltip": "Wire frame-exact delivered audio from H3 "
                                "MiniMax H3 Context Loop Trim for synchronized "
                                "review."}),
-                "source_audio": ("AUDIO", {
-                    "tooltip": "Fallback only for runs whose state predates "
-                               "recoverable source audio. Both Source Timeline "
-                               "and a legacy AUDIO connected at Loop Start are "
-                               "now carried path-backed in state. This does not "
-                               "affect generation or the per-scene preview."}),
                 "candidate_count": ("INT", {
                     "default": 1,
                     "min": 1,
@@ -21034,7 +20815,7 @@ class MiniMaxH3ChainReview:
     async def review(self, state, segment, enabled, play_notification_sound,
                      auto_continue_timeout_minutes, unload_models_while_waiting,
                      assemble_partial_on_stop, partial_audio_source, audio=None,
-                     source_audio=None, candidate_count=1,
+                     candidate_count=1,
                      review_each_candidate=False,
                      pending_review=None,
                      dynprompt=None, unique_id=None):
@@ -21584,7 +21365,7 @@ class MiniMaxH3ChainReview:
                 try:
                     partial_path, partial_warning = _assemble_review_partial(
                         accepted_state, accepted_segment,
-                        partial_audio_source, source_audio,
+                        partial_audio_source,
                         export_current_chapter=_review_partial_current_chapter(
                             dynprompt, unique_id))
                     partial_item = _video_output_item(partial_path)
@@ -22619,18 +22400,13 @@ class MiniMaxH3ChainManifestLoad:
                                "scene."}),
             },
             "optional": {
-                "source_audio": ("AUDIO", {
-                    "tooltip": "The original full source track when the plan "
-                               "selects final source audio or enables Source "
-                               "reference. Its "
-                               "fingerprint must match the saved checkpoints."}),
                 "external_context": (EXTERNAL_CONTEXT_TYPE, {
                     "tooltip": "Reconnect the same Existing Video Context used "
                                "for scene 1. Its tail fingerprint restores the "
                                "correct resume contract and its persisted "
                                "prelude remains available to Assemble."}),
                 "source_timeline": (SOURCE_TIMELINE_TYPE, {
-                    "tooltip": "Primary 0.5 recovery route. Reconnect the "
+                    "tooltip": "Source-media recovery route. Reconnect the "
                                "same Source Timeline, or leave blank when its "
                                "path-backed descriptor is already stored on "
                                "the managed Plan."}),
@@ -22655,7 +22431,7 @@ class MiniMaxH3ChainManifestLoad:
     def IS_CHANGED(cls, *args, **kwargs):
         return float("NaN")
 
-    def load(self, plan, source_audio=None, external_context=None,
+    def load(self, plan, *, external_context=None,
              source_timeline=None):
         prepared_plan = _plan_with_external_context(plan, external_context)
         runtime_timeline = None
@@ -22663,17 +22439,11 @@ class MiniMaxH3ChainManifestLoad:
                 plan.get("source_timeline"), dict):
             source_timeline = _source_timeline_from_recovery(
                 plan["source_timeline"])
-        if source_timeline is not None and source_audio is not None:
-            raise ValueError(
-                "H3 Chain Manifest Load accepts Source Timeline or legacy "
-                "source_audio, not both.")
         if source_timeline is not None:
             prepared_plan, runtime_timeline = _plan_with_source_timeline(
                 prepared_plan, source_timeline)
         else:
-            prepared_plan, runtime_timeline = (
-                _plan_with_recoverable_legacy_source_audio(
-                    prepared_plan, source_audio))
+            prepared_plan = _plan_without_source_timeline(prepared_plan)
         saved_count = _saved_scene_prefix_length(prepared_plan)
         if saved_count < 1:
             raise FileNotFoundError(
@@ -22681,8 +22451,7 @@ class MiniMaxH3ChainManifestLoad:
                 % (prepared_plan["run_name"], _run_dir(prepared_plan)))
         recovered = _load_resume_state(
             prepared_plan, saved_count + 1,
-            source_timeline=runtime_timeline,
-            source_audio=source_audio if runtime_timeline is None else None)
+            source_timeline=runtime_timeline)
         complete = saved_count == len(prepared_plan["shots"])
         manifest = _manifest_from_segments(
             prepared_plan, recovered["segments"], complete=complete)
@@ -25894,7 +25663,6 @@ def _full_chain_selected_audio(
     manifest: dict[str, Any],
     selected: str,
     prelude: dict[str, Any] | None,
-    source_audio: Any = None,
     editorial_records: list[dict[str, Any]] | None = None,
     editorial_frames: int | None = None,
 ) -> dict[str, Any] | None:
@@ -25909,56 +25677,15 @@ def _full_chain_selected_audio(
         audio = _generated_audio(manifest)
     elif selected == "source":
         timeline = _source_timeline_from_metadata(manifest)
-        if timeline is not None and source_audio is not None:
-            if _source_timeline_recovers_legacy_audio(
-                    manifest["compatibility"], timeline):
-                _validate_source_audio_hash(
-                    manifest["compatibility"], source_audio,
-                    "H3 Full-Chain Latent Video redundant legacy source audio")
-                source_audio = None
-            else:
-                raise ValueError(
-                    "H3 Full-Chain Latent Video already recovered its Source "
-                    "Timeline from the manifest; disconnect legacy "
-                    "source_audio.")
-        if timeline is not None:
-            _validate_source_timeline_hash(
-                manifest["compatibility"], timeline,
-                "H3 Full-Chain Latent Video")
-            audio = _source_timeline_scene_audio(
-                timeline, source_start_frame, source_end_frame)
-        else:
-            _validate_source_audio_hash(
-                manifest["compatibility"], source_audio,
-                "H3 Full-Chain Latent Video")
-            waveform, sample_rate = _validate_audio(
-                source_audio, "H3 Full-Chain Latent Video source audio")
-            source_start_sample = sample_boundary_from_frames(
-                source_start_frame, sample_rate, FPS)
-            source_end_sample = sample_boundary_from_frames(
-                source_end_frame, sample_rate, FPS)
-            if int(waveform.shape[-1]) < source_end_sample:
-                if (manifest["compatibility"].get(
-                        "source_audio_silent_padding")
-                        and _audio_is_silent(waveform)):
-                    padded = _pad_audio_to_samples(
-                        source_audio, source_end_sample,
-                        "H3 Full-Chain Latent Video silent source audio")
-                    waveform, sample_rate = _validate_audio(
-                        padded,
-                        "H3 Full-Chain Latent Video padded source audio")
-                else:
-                    raise ValueError(
-                        "H3 Full-Chain Latent Video source audio has %d "
-                        "samples; %d are required to reach Chapter source "
-                        "frame %d." %
-                        (int(waveform.shape[-1]), source_end_sample,
-                         source_end_frame))
-            audio = {
-                "waveform": waveform[
-                    ..., source_start_sample:source_end_sample],
-                "sample_rate": sample_rate,
-            }
+        if timeline is None:
+            raise ValueError(
+                "H3 Full-Chain Latent Video has no saved Source Timeline. "
+                "Restore the source track before exporting; the legacy "
+                "source_audio wire was retired.")
+        _validate_source_timeline_hash(
+            manifest["compatibility"], timeline, "H3 Full-Chain Latent Video")
+        audio = _source_timeline_scene_audio(
+            timeline, source_start_frame, source_end_frame)
     else:
         raise ValueError(
             "Unknown H3 full-chain audio source %r." % selected)
@@ -26218,12 +25945,7 @@ class MiniMaxH3ChainLatentVideoAdapter:
                     "tooltip": "AAC bitrate embedded in the lossless RGB "
                                "adapter movie for SeedVR2 to preserve."}),
             },
-            "optional": {
-                "source_audio": ("AUDIO", {
-                    "tooltip": "Legacy fallback only. Current manifests "
-                               "recover source audio saved from either Source "
-                               "Timeline or Loop Start's legacy AUDIO."}),
-            },
+            "optional": {},
         }
 
     RETURN_TYPES = ("VIDEO", "STRING", "STRING")
@@ -26247,7 +25969,7 @@ class MiniMaxH3ChainLatentVideoAdapter:
         return float("NaN")
 
     def adapt(self, manifest, video_vae, audio_source, blend_schedule,
-              decode_buffer, reuse_cache, audio_bitrate, source_audio=None):
+              decode_buffer, reuse_cache, audio_bitrate):
         if _st_load is None or torch is None or av is None or np is None:
             raise RuntimeError(
                 "H3 Full-Chain Latent Video requires safetensors, torch, "
@@ -26457,7 +26179,7 @@ class MiniMaxH3ChainLatentVideoAdapter:
                     "frames; the video timeline contains %d." %
                     (packed_frames, editorial_frames))
             audio = _full_chain_selected_audio(
-                manifest, selected_audio, prelude, source_audio,
+                manifest, selected_audio, prelude,
                 editorial_records=natural_records,
                 editorial_frames=editorial_frames)
             if audio is None:
@@ -26582,15 +26304,8 @@ class MiniMaxH3ChainAssemble:
                                "blends pixels for color, and does not affect "
                                "motion or audio sync. Off preserves the "
                                "existing stream-copy/blend behavior."}),
-                "source_audio": ("AUDIO", {
-                    "tooltip": "Legacy fallback for manifests created before "
-                               "Loop Start persisted its AUDIO. New manifests "
-                               "recover the original source track themselves; "
-                               "a redundant matching wire is harmless. The "
-                               "track is trimmed or safely silent-padded to "
-                               "the final duration."}),
                 "source_timeline": (SOURCE_TIMELINE_TYPE, {
-                    "tooltip": "Primary 0.5 source-audio route. Usually this "
+                    "tooltip": "Source-audio route. Usually this "
                                "can be left unconnected because the manifest "
                                "contains its path-backed recovery descriptor."}),
                 "blend_video_vae": ("VAE", {
@@ -26631,7 +26346,7 @@ class MiniMaxH3ChainAssemble:
         return float("NaN")
 
     def assemble(self, manifest, audio_source, filename, audio_bitrate,
-                 source_audio=None, overwrite_existing=False,
+                 *, overwrite_existing=False,
                  copy_to_output=False, output_subfolder="",
                  source_timeline=None, blend_schedule="plan",
                  blend_video_vae=None, boundary_tone_match="off",
@@ -26740,58 +26455,15 @@ class MiniMaxH3ChainAssemble:
                 source_start_frame + generated_extension_frames)
             if source_timeline is None:
                 source_timeline = _source_timeline_from_metadata(manifest)
-            if source_timeline is not None and source_audio is not None:
-                if _source_timeline_recovers_legacy_audio(
-                        manifest["compatibility"], source_timeline):
-                    _validate_source_audio_hash(
-                        manifest["compatibility"], source_audio,
-                        "H3 Chain Assemble redundant legacy source audio")
-                    source_audio = None
-                else:
-                    raise ValueError(
-                        "H3 Chain Assemble accepts Source Timeline or legacy "
-                        "source_audio, not both.")
-            if source_timeline is not None:
-                _validate_source_timeline_hash(
-                    manifest["compatibility"], source_timeline,
-                    "H3 Chain Assemble")
-                source_audio = _source_timeline_scene_audio(
-                    source_timeline, source_start_frame, source_end_frame)
-            else:
-                _validate_source_audio_hash(
-                    manifest["compatibility"], source_audio,
-                    "H3 Chain Assemble")
-            waveform, sample_rate = _validate_audio(
-                source_audio, "H3 Chain Assemble source audio")
-            source_start_sample = (
-                0 if source_timeline is not None else
-                sample_boundary_from_frames(
-                    source_start_frame, sample_rate, FPS))
-            source_end_sample = (
-                sample_boundary_from_frames(
-                    generated_extension_frames, sample_rate, FPS)
-                if source_timeline is not None else
-                sample_boundary_from_frames(
-                    source_end_frame, sample_rate, FPS))
-            if int(waveform.shape[-1]) < source_end_sample:
-                if manifest["compatibility"].get(
-                        "source_audio_silent_padding") and _audio_is_silent(waveform):
-                    padded = _pad_audio_to_samples(
-                        source_audio, source_end_sample,
-                        "H3 Chain Assemble silent placeholder audio")
-                    waveform, sample_rate = _validate_audio(
-                        padded, "H3 Chain Assemble padded source audio")
-                else:
-                    raise ValueError(
-                        "H3 Chain Assemble source audio has %d samples; at least "
-                        "%d are required to reach Chapter source frame %d." %
-                        (int(waveform.shape[-1]), source_end_sample,
-                         source_end_frame))
-            audio = {
-                "waveform": waveform[
-                    ..., source_start_sample:source_end_sample],
-                "sample_rate": sample_rate,
-            }
+            if source_timeline is None:
+                raise ValueError(
+                    "H3 Chain Assemble has no saved Source Timeline. Connect "
+                    "Source Timeline with the original track; the legacy "
+                    "source_audio wire was retired.")
+            _validate_source_timeline_hash(
+                manifest["compatibility"], source_timeline, "H3 Chain Assemble")
+            audio = _source_timeline_scene_audio(
+                source_timeline, source_start_frame, source_end_frame)
             audio = _audio_with_scene_lip_sync(audio, manifest, "source")
             audio = _audio_with_editorial_timeline(
                 audio, editorial_records, generated_extension_frames,
@@ -27153,7 +26825,6 @@ def _assemble_review_partial(
     state: dict[str, Any],
     segment: dict[str, Any],
     audio_source: str,
-    source_audio: dict[str, Any] | None,
     *, export_current_chapter: bool | None = None,
 ) -> tuple[str, str]:
     manifest = _partial_manifest(state, segment)
@@ -27190,7 +26861,7 @@ def _assemble_review_partial(
     warning = ""
     try:
         result = assembler.assemble(
-            manifest, selected, filename, 192, source_audio,
+            manifest, selected, filename, 192,
             overwrite_existing=True,
             source_timeline=state.get("source_timeline"),
             boundary_tone_match=tone_match)
@@ -27201,7 +26872,7 @@ def _assemble_review_partial(
             "H3 Chain partial audio assembly failed; saving silent video: %s",
             audio_error)
         result = assembler.assemble(
-            manifest, "none", filename, 192, source_audio,
+            manifest, "none", filename, 192,
             overwrite_existing=True,
             source_timeline=state.get("source_timeline"),
             boundary_tone_match=tone_match)

@@ -44,7 +44,7 @@ for typ in ("MiniMaxH3ChainUpscaleSegmentSave", "MiniMaxH3ChainUpscaleLoopEnd"):
     assert origin(typ, "state") == (current, "state")
     assert origin(typ, "upscaled_latent") is None
 assert origin("MiniMaxH3ChainUpscaleSegmentSave", "recovered_audio") is None
-assert origin("MiniMaxH3ChainAssemble", "source_audio") is None
+assert origin("MiniMaxH3ChainAssemble", "source_timeline") is None
 assert origin("MiniMaxH3ChainAssemble", "manifest") == ("MiniMaxH3ChainUpscaleLoopEnd", "manifest")
 assert origin("MiniMaxH3ChainUpscaleLoopEnd", "flow") == ("MiniMaxH3ChainUpscaleAdapter", "flow")
 assert all(n["mode"] == 0 for n in wf["nodes"])

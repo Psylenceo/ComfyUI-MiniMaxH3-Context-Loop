@@ -934,7 +934,7 @@ def main():
     original_resume_loader = chain._load_resume_state
 
     def fake_resume_loader(requested_plan, start_clip, verify_history=True,
-                           source_timeline=None, source_audio=None,
+                           source_timeline=None,
                            artifact_verification=None, context_only=False):
         resume_calls.append((start_clip, verify_history))
         return {

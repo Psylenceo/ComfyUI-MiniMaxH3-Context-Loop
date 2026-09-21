@@ -163,15 +163,14 @@ track rather than model-decoded audio. For a short voice/timbre
 reference where H3 should generate new words, choose Generated final audio and
 schedule that clip as an ordinary tagged audio reference.
 
-Legacy music-video workflows may still connect a full `AUDIO` directly to
-Loop Start instead of building Source Timeline. Loop Start now materializes
-that waveform once under the run's `source_timeline/` folder and carries its
-path-backed recovery descriptor through recursive state, checkpoint metadata,
-and the final manifest. Current Shot, partial review assembly, final assembly,
-and the full-chain SeedVR2 adapter can therefore recover it without another
-audio wire. Existing redundant downstream wires remain compatible when their
-fingerprint matches. A manifest produced before this recovery descriptor was
-added still needs its legacy `source_audio` fallback connected.
+Connect a full `AUDIO` to **Source Timeline**, then connect that timeline to
+Preflight and Loop Start (or assign Project timeline source in Carousel).
+Loop Start persists the track once under the run's `source_timeline/` folder.
+Current Scene, partial review, final assembly and the full-chain SeedVR2 adapter
+recover it from state/checkpoint/manifest metadata without repeated AUDIO wires.
+The 0.4 `source_audio` inputs on those consumers were removed in 0.7. Already
+saved path-backed tracks remain readable; old graphs must be rewired before
+execution. See [migration notes](MIGRATING_TO_0_7.md).
 
 For normal finishing, leave `audio_source` set to `plan`. `Final audio =
 generated` uses the generated WAV sidecars written by Segment Save, `Final
@@ -384,26 +383,9 @@ decoded. A tensor-only AUDIO input is normalized once into a run-owned file.
 The source must cover the required delivered timeline; Preflight reports the
 exact shortfall and last complete scene before model loading.
 
-The 0.4 Lazy Motion AV Loader fan-out remains accepted as a compatibility route:
-
-```text
-Lazy Motion AV Loader source_video ─┬→ Tagged Motion Ref source_video
-                                    └→ Run Manager asset
-Lazy Motion AV Loader source_audio ─┬→ Loop Start
-                                    ├→ Current Shot
-                                    ├→ Tagged Audio Ref
-                                    └→ Assemble
-Lazy Motion AV Loader skip frames ───→ Tagged Motion Ref skip frames
-```
-
-The native VIDEO remains disk-backed. The loader decodes only the complete
-post-skip audio track, which is still required: Loop Start establishes its
-fingerprint and Current Shot maps exact Plan frame windows onto its sample
-clock for H3 audio-latent alignment. Scene-local paired audio from the tagged
-motion reference does not replace this master track.
-
-For new workflows, Source Timeline performs that registration without decoding
-the complete audio track or requiring the downstream fan-out.
+The 0.4 Lazy Motion AV Loader and its full-track AUDIO fan-out were retired in
+0.7. Replace that loader with Source Timeline and use the wiring above. A
+scene-local paired audio reference does not replace the complete source track.
 
 ### Tagged Ref2VA source timeline
 

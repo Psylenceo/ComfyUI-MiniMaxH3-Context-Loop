@@ -134,6 +134,25 @@ with tempfile.TemporaryDirectory() as temporary:
         timeline["fingerprints"]["timeline"])
     assert not root.exists() or not any(root.iterdir())
 
+    silent_timeline = chain._make_source_timeline(source_audio={
+        "waveform": torch.zeros((1, 1, 1000)), "sample_rate": 24000})
+    silent_before = chain._source_timeline_recovery_record(silent_timeline)
+    silent_prepared, silent_report = chain._preflight_chain(
+        plan, source_timeline=silent_timeline)
+    assert silent_report["ok"] is True
+    assert silent_prepared["compatibility"]["source_audio_silent_padding"]
+    assert any(item["code"] == "silent_source_will_pad"
+               for item in silent_report["warnings"])
+    assert chain._source_timeline_recovery_record(silent_timeline) == silent_before
+    assert not any(root.iterdir()), "Preflight must not materialize a track"
+    persisted_plan, persisted_timeline = chain._plan_with_source_timeline(
+        dict(plan, run_name="silent-padding"), silent_timeline)
+    for index in (1, 2):
+        assert chain._canonical_source_reference_dependency(
+            silent_prepared, index, silent_timeline) == (
+                chain._canonical_source_reference_dependency(
+                    persisted_plan, index, persisted_timeline))
+
     studio = chain.MiniMaxH3ChainPlanStudio().passthrough(
         plan, source_timeline=timeline)
     assert studio["result"][0] is plan and studio["result"][2] is True
@@ -326,8 +345,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert missing_issue["measurements"]["first_affected_scene"] == {
         "scene": 4, "scene_id": "4_5"}
     failure_text = chain._preflight_failure_text(missing_source)
-    assert ("Loop Start source_timeline and legacy source_audio inputs are "
-            "both disconnected" in failure_text)
+    assert "No Source Timeline is connected or saved in the Plan" in failure_text
     assert ('Trigger: Scene 4 "4_5": source_reference=on '
             '(scene override)' in failure_text)
 
@@ -344,8 +362,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert_complete_diagnostic(selection_issue)
 
     _prepared, invalid_source = chain._preflight_chain(
-        scene_override_plan, source_timeline=deferred_timeline(100),
-        source_audio=deferred_timeline(100)["audio"]["value"])
+        scene_override_plan, source_timeline={"format": "invalid"})
     source_issue = invalid_source["errors"][0]
     assert source_issue["code"] == "invalid_source_input"
     assert_complete_diagnostic(source_issue)
