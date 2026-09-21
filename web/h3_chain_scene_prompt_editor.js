@@ -52,7 +52,7 @@ import {createH3PromptSchemaController} from "./h3_prompt_schema_ui.mjs?v=0.7.6"
 import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.26";
 import {
     PROJECT_ASSET_CATALOG_CHANGED_EVENT,
-} from "./h3_project_asset_sync_core.mjs?v=0.7.2";
+} from "./h3_project_asset_sync_core.mjs?v=0.7.3";
 
 const {
     publishCompanionScene,

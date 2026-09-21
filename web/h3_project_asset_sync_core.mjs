@@ -1,5 +1,66 @@
+import {inputSource, nodeType, PROJECT_ASSET_MANAGER_TYPES} from "./h3_reference_preview_core.mjs?v=0.7.27";
+
 export const PROJECT_ASSET_CATALOG_CHANGED_EVENT =
     "minimax-h3-project-assets-changed";
+
+const PLAN_TYPES = new Set([
+    "MiniMaxH3ChainPlan", "MiniMaxH3ChainPlanModern", "MiniMaxH3ChainPlanStudio",
+]);
+
+function graphNodes(graph, seen = new Set()) {
+    if (!graph || seen.has(graph)) return [];
+    seen.add(graph);
+    return [...(graph._nodes ?? graph.nodes ?? [])].flatMap(node => [
+        node, ...graphNodes(node.subgraph, seen),
+    ]);
+}
+
+function widget(node, name) {
+    return node?.widgets?.find(item => item.name === name);
+}
+
+export function projectAssetManagers(graph) {
+    return graphNodes(graph).filter(node => PROJECT_ASSET_MANAGER_TYPES.has(nodeType(node)));
+}
+
+export function connectedProjectAssetPlans(manager) {
+    const root = manager?.graph?.rootGraph ?? manager?.graph;
+    // Resolve each actual project_assets input instead of walking every output:
+    // supports Map links, reroutes, Set/Get and native subgraph rails without
+    // renaming unrelated Plans which merely share a policy or preview node.
+    return graphNodes(root).filter(plan => PLAN_TYPES.has(nodeType(plan))
+        && inputSource(plan, "project_assets") === manager);
+}
+
+function writePlanRunName(plan, runName) {
+    const run = widget(plan, "run_name");
+    if (!run || !runName || run.value === runName) return false;
+    run.value = runName;
+    run.callback?.(runName);
+    plan.graph?.setDirtyCanvas?.(true, true);
+    return true;
+}
+
+export function syncProjectAssetPlanRun(manager, runName) {
+    const changed = [];
+    for (const plan of connectedProjectAssetPlans(manager)) {
+        if (!writePlanRunName(plan, runName)) continue;
+        changed.push(plan);
+        // The Modern Plan has its own DOM settings form; changing a hidden
+        // backing widget alone does not repaint its disabled Run name field.
+        plan._h3ChainEditorConnectionRefresh?.();
+        plan._h3PlanStudioRefresh?.();
+    }
+    return changed;
+}
+
+export function syncManagedPlanRunName(plan) {
+    const manager = inputSource(plan, "project_assets");
+    if (!PROJECT_ASSET_MANAGER_TYPES.has(nodeType(manager))) return false;
+    const runName = serializedProjectAssetIdentity(
+        widget(manager, "run_name")?.value, widget(manager, "catalog_json")?.value);
+    return writePlanRunName(plan, runName);
+}
 
 export function serializedProjectAssetCatalog(value, requestedProject = "") {
     let catalog = value;

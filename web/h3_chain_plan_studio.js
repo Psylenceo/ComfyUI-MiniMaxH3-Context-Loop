@@ -13,6 +13,8 @@ import {contextMaskEditor} from "./h3_context_mask_editor.mjs?v=0.7.2";
 import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId, visibleWorkingBranches} from "./h3_working_branches.mjs?v=0.7.26";
 import {browserBranchRecoveryStorage} from "./h3_branch_recovery_storage.mjs?v=0.7.23";
 import {branchPolicyNodes, captureBranchPolicyInputs, restoreBranchPolicyInputs} from "./h3_plan_restore_core.mjs?v=0.7.21";
+import {inputSource as resolvedInputSource} from "./h3_reference_preview_core.mjs?v=0.7.27";
+import {syncManagedPlanRunName} from "./h3_project_asset_sync_core.mjs?v=0.7.3";
 import {
     CONTINUATION_MODES,
     FPS,
@@ -591,8 +593,7 @@ function upstreamPlanNode(start) {
         if (node !== start && PLAN_NAMES.has(nodeType(node))) return node;
         for (const input of node.inputs ?? []) {
             if (input.link == null) continue;
-            const link = node.graph?.links?.[input.link];
-            const parent = link ? node.graph?.getNodeById?.(link.origin_id) : null;
+            const parent = resolvedInputSource(node, input.name);
             if (parent) queue.push(parent);
         }
     }
@@ -7112,6 +7113,7 @@ function mount(node) {
             try { branchWidget.value = workingBranchId(parsePlanJson(value)._branch_id); }
             catch { /* The normal Plan validation below reports this. */ }
         }
+        syncManagedPlanRunName(planOwner);
         const currentRun = String(widget(planOwner, "run_name")?.value ?? "").trim();
         const currentSettings = settingsSignature(planOwner);
         const promptEditors = planNode ? connectedPromptEditors(node).filter(

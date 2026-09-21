@@ -36,7 +36,7 @@ MINIMUM_CACHE_VERSION = {
     # leave an entire DOM node blank before it can render an error message.
     "h3_checkpoint_manager_core.mjs": "0.7.20",
     "h3_prompt_companion_sync.mjs": "0.7.2",
-    "h3_project_asset_sync_core.mjs": "0.7.2",
+    "h3_project_asset_sync_core.mjs": "0.7.3",
     "h3_project_ownership.mjs": "0.7.5",
     "h3_reference_preview_core.mjs": "0.7.25",
     "h3_lora_scheduler_core.mjs": "0.7.25",

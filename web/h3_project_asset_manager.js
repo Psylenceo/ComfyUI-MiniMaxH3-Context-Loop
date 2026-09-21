@@ -14,7 +14,10 @@ import {
     publishProjectAssetCatalogChanged,
     serializedProjectAssetCatalog,
     serializedProjectAssetIdentity,
-} from "./h3_project_asset_sync_core.mjs?v=0.7.2";
+    connectedProjectAssetPlans,
+    projectAssetManagers,
+    syncProjectAssetPlanRun,
+} from "./h3_project_asset_sync_core.mjs?v=0.7.3";
 import {
     projectMutationOptions,
     registerProjectOwnership,
@@ -35,10 +38,6 @@ const NODE_NAMES = new Set([NODE_NAME, TREE_NODE_NAME]);
 const SEMANTIC_SETTING_WIDGETS = [
     "semantic_anchor_size", "semantic_anchor_mode",
 ];
-const PLAN_TYPES = new Set([
-    "MiniMaxH3ChainPlan", "MiniMaxH3ChainPlanModern",
-    "MiniMaxH3ChainPlanStudio",
-]);
 const ROLES = {
     image: ["picture", "semantic_anchor"],
     video: ["video", "motion", "source_track"],
@@ -389,31 +388,13 @@ function refreshSemanticSettingVisibility(node) {
 }
 
 function syncDownstreamPlan(node, runName) {
-    for (const output of node.outputs ?? []) {
-        for (const linkId of output.links ?? []) {
-            const link = node.graph?.links?.[linkId];
-            const target = link ? node.graph?.getNodeById?.(link.target_id) : null;
-            if (!target || !PLAN_TYPES.has(nodeType(target))) continue;
-            const run = widget(target, "run_name");
-            if (run && run.value !== runName) {
-                run.value = runName;
-                run.callback?.(runName);
-            }
-        }
-    }
+    syncProjectAssetPlanRun(node, runName);
 }
 
 function downstreamPlanRunName(node) {
-    for (const output of node.outputs ?? []) {
-        for (const linkId of output.links ?? []) {
-            const link = node.graph?.links?.[linkId];
-            const target = link ? node.graph?.getNodeById?.(link.target_id) : null;
-            if (!target || !PLAN_TYPES.has(nodeType(target))) continue;
-            const value = String(widget(target, "run_name")?.value ?? "").trim();
-            if (value) return value;
-        }
-    }
-    return "";
+    const names = new Set(connectedProjectAssetPlans(node)
+        .map(plan => String(widget(plan, "run_name")?.value ?? "").trim()).filter(Boolean));
+    return names.size === 1 ? [...names][0] : "";
 }
 
 function mount(node) {
@@ -2285,7 +2266,12 @@ function mount(node) {
     }
     function adoptConnectedRunName() {
         const current = project();
-        if (current && current !== "h3_project") return false;
+        if (current && current !== "h3_project") {
+            // A restored/reconnected named Carousel is already authoritative,
+            // even before its first catalog request or generation completes.
+            syncDownstreamPlan(node, current);
+            return false;
+        }
         const connected = downstreamPlanRunName(node);
         if (!connected) return false;
         refreshSequence += 1;
@@ -2677,12 +2663,10 @@ app.registerExtension({
     },
     async nodeCreated(node) { if (NODE_NAMES.has(nodeType(node))) mount(node); },
     async afterConfigureGraph() {
-        for (const node of app.graph?._nodes ?? []) {
-            if (NODE_NAMES.has(nodeType(node))) {
-                setTimeout(() => node._h3ProjectAssetRefresh?.({
-                    fromConfiguration: true,
-                }), 0);
-            }
+        for (const node of projectAssetManagers(app.graph)) {
+            setTimeout(() => node._h3ProjectAssetRefresh?.({
+                fromConfiguration: true,
+            }), 0);
         }
     },
 });

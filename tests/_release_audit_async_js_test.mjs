@@ -7,6 +7,7 @@ import vm from "node:vm";
 import * as planCore from "../web/h3_chain_plan_core.mjs";
 import {remapStudioEditorialSceneId} from "../web/h3_chain_plan_studio_core.mjs";
 import {applyAssetBinding} from "../web/h3_run_assets_core.mjs";
+import {syncManagedPlanRunName} from "../web/h3_project_asset_sync_core.mjs";
 
 const runSource = fs.readFileSync(new URL("../web/h3_chain_run_manager.js", import.meta.url), "utf8");
 const studioSource = fs.readFileSync(new URL("../web/h3_chain_plan_studio.js", import.meta.url), "utf8");
@@ -27,7 +28,7 @@ function restoreFixture() {
     const state = {busy:false, disposed:false, restoreEpoch:0, watchedSources:new Set()};
     const requests = [];
     const context = vm.createContext({
-        state, node, app:{graph}, URLSearchParams, applyAssetBinding,
+        state, node, app:{graph}, URLSearchParams, applyAssetBinding, syncManagedPlanRunName,
         plan, loader, currentPlan:plan, run:{run_name:"archived", asset_count:1},
         selectedRun:() => context.run, upstreamPlanNode:() => context.currentPlan,
         status:{}, window:{confirm:() => true, queueMicrotask:fn => fn()},
@@ -38,7 +39,7 @@ function restoreFixture() {
     });
     vm.runInContext([
         handler(runSource, "widgetByName", ""), handler(runSource, "applyPlanInputs", ""),
-        ...["captureRestoreOperation", "requireCurrentRestore", "loadRun"].map(name => handler(runSource, name)),
+        ...["activeRunName", "captureRestoreOperation", "requireCurrentRestore", "loadRun"].map(name => handler(runSource, name)),
         runSource.match(/^    const activeRunChanged = \(\) => {[^]*?^    };/m)[0],
         runSource.match(/^    node.onRemoved = function \(\) {[^]*?^    };/m)[0],
     ].join("\n"), context);

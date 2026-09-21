@@ -18,6 +18,8 @@ import {
     restoreConnectedPolicyInputs,
 } from "./h3_plan_restore_core.mjs?v=0.7.21";
 import {projectMutationOptions} from "./h3_project_ownership.mjs?v=0.7.5";
+import {inputSource as resolvedInputSource} from "./h3_reference_preview_core.mjs?v=0.7.27";
+import {syncManagedPlanRunName} from "./h3_project_asset_sync_core.mjs?v=0.7.3";
 
 const NODE_NAME = "MiniMaxH3ChainRunManager";
 const PLAN_NAME = "MiniMaxH3ChainPlan";
@@ -36,8 +38,7 @@ function upstreamPlanNode(start) {
         if (node !== start && PLAN_NAMES.has(nodeType(node))) return node;
         for (const input of node.inputs ?? []) {
             if (input.link == null) continue;
-            const link = node.graph?.links?.[input.link];
-            const parent = link ? node.graph?.getNodeById?.(link.origin_id) : null;
+            const parent = resolvedInputSource(node, input.name);
             if (parent) queue.push(parent);
         }
     }
@@ -289,6 +290,7 @@ function mount(node) {
 
     function activeRunName() {
         const planNode = upstreamPlanNode(node);
+        syncManagedPlanRunName(planNode);
         return String(widgetByName(planNode, "run_name")?.value ?? "").trim();
     }
 
@@ -564,7 +566,7 @@ function mount(node) {
             }
             return;
         }
-        const current = String(widgetByName(planNode, "run_name")?.value ?? "").trim();
+        const current = activeRunName();
         const assetNotice = run.asset_count
             ? ` It will also attempt to restore ${run.asset_count} loader asset${run.asset_count === 1 ? "" : "s"}.`
             : "";
@@ -657,7 +659,7 @@ function mount(node) {
 
     async function saveRunAssets() {
         const planNode = upstreamPlanNode(node);
-        const runName = String(widgetByName(planNode, "run_name")?.value ?? "").trim();
+        const runName = activeRunName();
         if (!planNode || !runName || !state.bindings.length || state.busy) {
             status.className = "h3rm-status h3rm-error";
             status.textContent = !planNode

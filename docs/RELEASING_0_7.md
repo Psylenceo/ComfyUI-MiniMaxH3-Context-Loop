@@ -68,6 +68,7 @@ export CHROME_PATH="$H3_TEST_BROWSER"
 node tests/_checkpoint_manager_browser_js_test.mjs --browser
 node tests/_prompt_editor_browser_js_test.mjs --browser
 node tests/_project_asset_layout_browser_test.mjs
+node tests/_project_asset_run_sync_browser_test.mjs
 node tests/_studio_prompt_refresh_browser_test.mjs
 node tests/_studio_chapters_browser_test.mjs
 node tests/_plan_collapse_browser_test.mjs

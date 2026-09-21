@@ -15,6 +15,11 @@ If the project contains a **Source track**, Plan stores its recoverable Source
 Timeline automatically. Loop Start, Plan Studio, recovery, and Assemble can
 read it from the Plan; another Source Timeline wire is normally unnecessary.
 
+The connected Plan follows the Carousel's selected run, including after workflow
+reloads and reconnections. Modern Plan, the legacy Run Manager's **Active Plan**
+label, and linked Plan Studio show that same run. The Run Manager's **Selected
+archive** is a separate recovery selection; unrelated Plans are not renamed.
+
 ## Inputs and outputs
 
 | Side | Field | Use |

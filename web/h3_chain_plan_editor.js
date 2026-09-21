@@ -38,6 +38,7 @@ import {
     visualContextCompositions,
 } from "./h3_chain_plan_core.mjs?v=0.7.11";
 import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.7.27";
+import {syncManagedPlanRunName} from "./h3_project_asset_sync_core.mjs?v=0.7.3";
 import {
     applySceneAudioOverride,
     applySceneLipSync,
@@ -689,6 +690,7 @@ function mountEditor(node) {
     }
 
     function syncProjectAssetManagedWidgets() {
+        syncManagedPlanRunName(node);
         const managed = inputConnected(node, "project_assets");
         setProjectAssetManagedWidget(
             node.widgets?.find((item) => item.name === "run_name"), managed,

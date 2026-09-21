@@ -9,6 +9,10 @@ optional companion features are not prerequisites. See the
 [migration guide](docs/MIGRATING_TO_0_7.md) and
 [release validation checklist](docs/RELEASING_0_7.md).
 
+- Fix Carousel/Tree project switches leaving Modern Plan, legacy Run Manager
+  and linked Studio on a stale run name. Resolve the connected project-assets
+  source across Map links, reroutes and subgraphs, resync on reload/reconnect,
+  and refresh Modern Plan's custom Run-name field without renaming unrelated Plans.
 - Add **Delete empty branch** beside Checkpoint Manager's branch selector and
   reversible **Hide empty Original** / **Show Original** actions. Check saved
   work before removal, retain Plan metadata, and preserve the surviving branch
