@@ -119,6 +119,19 @@ export function branchWidgetTransaction(nodes, action) {
     }
 }
 
+export function visibleWorkingBranches(records, selected, defaultBranch) {
+    // A hidden Original remains usable by an already-open workflow. Never
+    // silently switch that workflow's Plan or lose its unsaved edits.
+    return records.filter(item => !item.hidden || item.id === selected || item.id === defaultBranch);
+}
+
+export function emptyBranchKeepTarget(records, selected, defaultBranch, activeBranch = null) {
+    if (activeBranch != null) return activeBranch !== selected
+        && records.some(item => item.id === activeBranch && !item.hidden) ? activeBranch : null;
+    return records.find(item => item.id !== selected && !item.hidden && item.id === defaultBranch)?.id
+        ?? records.find(item => item.id !== selected && !item.hidden)?.id ?? null;
+}
+
 export class StudioBranches {
     constructor({request, capture, apply, flush, changed, selected = "main",
         binding = null, rememberBinding = () => {}, drafts = null, settle = async () => {},

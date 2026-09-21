@@ -15,7 +15,7 @@ IMPORT = re.compile(
 SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 MINIMUM_CACHE_VERSION = {
     "h3_checkpoint_graph.mjs": "0.7.19",
-    "h3_working_branches.mjs": "0.7.25",
+    "h3_working_branches.mjs": "0.7.26",
     "h3_policy_core.mjs": "0.7.10",
     "h3_project_asset_editor_core.mjs": "0.7.9",
     "h3_plan_restore_core.mjs": "0.7.21",

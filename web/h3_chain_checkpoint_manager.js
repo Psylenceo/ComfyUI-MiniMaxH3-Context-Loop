@@ -2,7 +2,7 @@ import {app} from "/scripts/app.js";
 import {bindNodeWheel} from "./h3_dom_wheel.mjs?v=0.7.1";
 import {api} from "/scripts/api.js";
 import {mountStorageInspector} from "./h3_storage_inspector.mjs?v=0.7.1";
-import {branchRequestPath, branchSelectionJson} from "./h3_working_branches.mjs?v=0.7.25";
+import {branchRequestPath, branchSelectionJson, visibleWorkingBranches, emptyBranchKeepTarget} from "./h3_working_branches.mjs?v=0.7.26";
 import {checkpointForkGraph, checkpointGraphKey, checkpointSaveOrder, checkpointGraphOutput, mountCheckpointGraphEdges} from "./h3_checkpoint_graph.mjs?v=0.7.20";
 import {mountCheckpointMultiSelect} from "./h3_checkpoint_multiselect.mjs?v=0.7.1";
 import {
@@ -406,10 +406,13 @@ function mount(node) {
     workingSelect.setAttribute("aria-label", "Working branch whose assignments are shown");
     const workingRow = element("label", "h3cm-working-row");
     const deleteBranchClips = button("Delete branch clips…", "Clear this branch's saved paths and delete unused takes; keep other branches and shared clips", () => void branchCleanupAction(), "h3cm-delete-button");
+    const removeEmptyBranch = button("Delete empty branch…", "Remove an empty branch entry; retain its Plan metadata for recovery", () => void emptyBranchAction(), "h3cm-delete-button");
+    const showOriginal = button("Show Original", "Make the hidden Original branch visible again", () => void showOriginalBranch());
     const branchCleanupPanel = element("section", "h3cm-branch-cleanup");
     branchCleanupPanel.hidden = true;
     let branchCleanupIdentity = "", branchCleanupConfirm = null;
-    workingRow.append(element("span", "", "Assignments shown for:"), workingSelect, deleteBranchClips);
+    workingRow.append(element("span", "", "Assignments shown for:"), workingSelect,
+        deleteBranchClips, removeEmptyBranch, showOriginal);
     const workingHelp = element("div", "h3cm-muted",
         "Working-branch names are labels, not resolution restrictions. Saved clips are shared: assign a path to Original or another named branch without moving or deleting clips.");
     workingSelect.addEventListener("change", async () => {
@@ -805,12 +808,13 @@ function mount(node) {
                         : " · saved path marked on the Original tab")
             : "Connect a Plan or Plan Studio to show its working-branch marker.";
         workingSelect.replaceChildren();
-        for (const item of state.workingBranches) {
+        for (const item of visibleWorkingBranches(state.workingBranches, selectedWorkingBranch(), state.defaultWorkingBranch)) {
             const isPlan = marker?.run === state.runName && marker.branch === item.id;
             const option = element("option", "", `${workingBranchName(item.id)}${item.id === state.defaultWorkingBranch ? " · project default" : ""}${isPlan ? " · " + marker.label : ""}`);
             option.value = item.id; workingSelect.append(option);
         }
         workingSelect.value = selectedWorkingBranch();
+        updateEmptyBranchControls();
         deleteBranchClips.disabled = state.busy || !branchCleanupSelection();
         deleteBranchClips.title = branchCleanupSelection()
             ? `Clear ${workingBranchName()}'s saved paths; keep ${workingBranchName(marker.branch)} and other branches' shared clips`
@@ -1021,6 +1025,7 @@ function mount(node) {
         state.busy = Boolean(value);
         runSelect.disabled = state.busy;
         workingSelect.disabled = state.busy;
+        updateEmptyBranchControls();
         deleteBranchClips.disabled = state.busy || !branchCleanupSelection();
         if (branchCleanupConfirm) branchCleanupConfirm.disabled = state.busy
             || branchCleanupIdentity !== branchCleanupSelection();
@@ -2489,6 +2494,79 @@ function mount(node) {
             ? JSON.stringify([state.runName, selectedWorkingBranch(), marker.branch]) : "";
     }
 
+    function emptyBranchKeep() {
+        const marker = currentPlanMarker();
+        return emptyBranchKeepTarget(state.workingBranches, selectedWorkingBranch(),
+            state.defaultWorkingBranch, marker?.run === state.runName ? marker.branch : null);
+    }
+
+    function updateEmptyBranchControls() {
+        removeEmptyBranch.textContent = selectedWorkingBranch() === "main"
+            ? "Hide empty Original…" : "Delete empty branch…";
+        removeEmptyBranch.disabled = state.busy || !state.runName || !emptyBranchKeep();
+        removeEmptyBranch.title = emptyBranchKeep()
+            ? "Check that this branch has no assigned clips, saved cut, chapters, processing results or pending reviews"
+            : "Keep your current branch open in Plan Studio, then select an empty branch here.";
+        showOriginal.hidden = !state.workingBranches.some(item => item.id === "main" && item.hidden);
+        showOriginal.disabled = state.busy;
+    }
+
+    async function emptyBranchAction() {
+        const run = state.runName, selected = selectedWorkingBranch(), keep = emptyBranchKeep();
+        if (state.busy || !run || !keep) return;
+        const current = () => state.runName === run && selectedWorkingBranch() === selected && emptyBranchKeep() === keep;
+        setBusy(true, "Checking whether this branch is empty…");
+        try {
+            const endpoint = "/minimax_h3_context_loop/working-branches";
+            const body = {run_name:run, branch_id:selected, keep_branch_id:keep};
+            const preview = await jsonRequest(endpoint, {method:"POST",
+                headers:{"Content-Type":"application/json"}, body:JSON.stringify({...body, action:"empty-preview"})});
+            if (!current()) return;
+            if (!preview.allowed) throw new Error(preview.blockers.join("\n"));
+            if (!window.confirm(`${selected === "main" ? "Hide" : "Delete"} empty branch “${preview.branch_name}”?\n\n`
+                    + preview.message + `\n\nCheckpoint Manager will return to “${preview.keep_branch_name}”. Plan Studio stays unchanged.`
+                    + (preview.changes_default
+                        ? `\n\nProject default will become “${preview.keep_branch_name}”.` : ""))) {
+                status.textContent = "Branch removal cancelled; nothing changed.";
+                return;
+            }
+            if (!current()) return;
+            const result = await mutationRequest(node, run, endpoint, {method:"POST",
+                headers:{"Content-Type":"application/json"}, body:JSON.stringify({...body,
+                    action:preview.action, snapshot:preview.snapshot})});
+            if (!current()) return;
+            node.properties.h3_working_branch_id = keep;
+            if (selectionWidget) selectionWidget.value = "";
+            if (state.finalCutBranch === selected) state.finalCutBranch = "auto";
+            state.outputTip = null; state.selected = null;
+            await refreshCheckpoints();
+            window.dispatchEvent(new CustomEvent("h3-working-branches-changed", {detail:{run_name:run, source:node}}));
+            status.className = "h3cm-status";
+            status.textContent = result.message;
+        } catch (error) {
+            if (state.runName === run) {
+                status.className = "h3cm-status h3cm-error";
+                status.textContent = error.message;
+            }
+        } finally { if (state.runName === run) setBusy(false); }
+    }
+
+    async function showOriginalBranch() {
+        const run = state.runName;
+        if (state.busy || !run) return;
+        setBusy(true, "Showing Original…");
+        try {
+            await mutationRequest(node, run, "/minimax_h3_context_loop/working-branches", {
+                method:"POST", headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({action:"show-original", run_name:run, branch_id:"main"})}, "main");
+            if (state.runName !== run) return;
+            await refreshCheckpoints();
+            window.dispatchEvent(new CustomEvent("h3-working-branches-changed", {detail:{run_name:run, source:node}}));
+        } catch (error) {
+            if (state.runName === run) status.textContent = error.message;
+        } finally { if (state.runName === run) setBusy(false); }
+    }
+
     async function branchCleanupAction(preview = null) {
         const identity = branchCleanupSelection();
         if (state.busy || !identity || (preview && identity !== branchCleanupIdentity)) return;
@@ -2782,6 +2860,13 @@ function mount(node) {
         return result;
     };
     const removed = node.onRemoved;
+    const onWorkingBranchesChanged = (event) => {
+        if (event.detail?.run_name === state.runName && event.detail.source !== node && !state.busy) {
+            // Preserve pinned outputs and the browsed branch; refresh only.
+            void refreshCheckpoints();
+        }
+    };
+    window.addEventListener("h3-working-branches-changed", onWorkingBranchesChanged);
     const refreshPlanMarker = () => {
         const signature = JSON.stringify(currentPlanMarker());
         if (signature === state.planMarkerSignature || state.busy) return;
@@ -2794,6 +2879,7 @@ function mount(node) {
     node._h3CheckpointManagerPlanMarkerRefresh = refreshPlanMarker;
     const markerTimer = window.setInterval?.(refreshPlanMarker, 500);
     node.onRemoved = function () {
+        window.removeEventListener("h3-working-branches-changed", onWorkingBranchesChanged);
         bulkSelection.destroy();
         storageInspector?.dismiss();
         if (markerTimer != null) window.clearInterval(markerTimer);

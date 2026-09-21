@@ -60,6 +60,27 @@ The **Assignments shown for** dropdown selects the working branch being inspecte
 also labels, not resolution restrictions or exclusive owners of saved clips.
 Every working branch can use the same compatible saved path.
 
+### Remove an empty branch
+
+Keep the branch you want in Plan Studio. In Checkpoint Manager, select the empty
+branch under **Assignments shown for**, then click **Delete empty branch…** beside
+the dropdown and confirm. If the removed branch was the project default, the
+confirmation names the branch that will replace it.
+
+For the built-in **Original**, the action is **Hide empty Original…** instead.
+**Show Original** makes it available again without changing the project default.
+An already-open workflow on Original keeps its explicit selection; new saved work
+on Original also makes it visible again.
+
+These actions do not delete clips or media. Branch Plan metadata stays on disk
+for recovery, but a removed named branch cannot be reopened or written by stale
+workflows. Assigned clips, saved cut edits, sealed chapters, processing results
+or pending reviews block removal. Clear that work explicitly first; **Delete
+branch clips…** is the separate action for clearing a branch's saved clip paths.
+Generation must be stopped or finished, and the normal ownership checks apply.
+
+### Assign an existing path
+
 To make Original use an existing seven-scene path, choose **Original** in that
 dropdown, click the desired **scene 7** take, then **Assign path to Original**
 above the graph. The toolbar shows the full scene range being assigned. This

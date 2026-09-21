@@ -30881,6 +30881,35 @@ async def _working_branch_command(request):
             result = await asyncio.to_thread(
                 _working_branch_store_command, _output_root(), run, selected, action, body)
             return web.json_response(result)
+        if action in ("empty-preview", "delete-empty", "hide-original", "show-original"):
+            if request.method != "POST":
+                return web.json_response({"error": "Branch removal requires POST."}, status=405)
+            store = await asyncio.to_thread(WorkingBranches, _output_root(), run)
+            if action == "empty-preview":
+                if not body.get("keep_branch_id"):
+                    raise ValueError("Choose another branch to keep first.")
+                return web.json_response(await asyncio.to_thread(
+                    store.empty_branch_preview, selected, body["keep_branch_id"]))
+            if ((action == "delete-empty" and selected == "main")
+                    or (action in ("hide-original", "show-original") and selected != "main")):
+                raise ValueError("Original can be hidden, not deleted. Select the matching branch action.")
+            rejection = await asyncio.to_thread(
+                _project_write_rejection, request, run, "remove an empty working branch")
+            if rejection is not None:
+                return rejection
+            queue = getattr(getattr(PromptServer, "instance", None), "prompt_queue", None)
+            if action != "show-original" and queue is not None and queue.get_tasks_remaining():
+                return web.json_response({"error": "Finish or stop queued generation before removing a branch."}, status=409)
+            if action == "show-original":
+                operation, args = store.show_original, ()
+            else:
+                if not body.get("keep_branch_id"):
+                    raise ValueError("Choose another branch to keep first.")
+                operation, args = store.retire_empty, (
+                    selected, body["keep_branch_id"], body.get("snapshot"))
+            result = await asyncio.to_thread(_owned_project_mutation, run,
+                _request_project_ownership(request), "remove an empty working branch", operation, *args)
+            return web.json_response(result)
         if action in ("delete-path-preview", "delete-path"):
             if request.method != "POST":
                 return web.json_response({"error": "Branch cleanup requires POST."}, status=405)

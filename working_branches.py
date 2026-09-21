@@ -65,6 +65,8 @@ class WorkingBranches:
 
     def _load_record(self, selected="main"):
         selected = branch_id(selected)
+        if selected != "main" and self._retirement(selected):
+            raise ValueError("This H3 branch was deleted. Select another branch in Plan Studio.")
         path = self._path(selected)
         if selected == "main" and not path.exists():
             return {"format": "h3_working_branch_v1", "run_name": self.run,
@@ -135,16 +137,182 @@ class WorkingBranches:
         if self.folder.is_dir():
             for path in sorted(self.folder.iterdir()):
                 if path.is_dir() and re.fullmatch(r"[0-9a-f]{32}", path.name):
-                    records.append(self._load_record(path.name))
+                    if not self._retirement(path.name):
+                        records.append(self._load_record(path.name))
         default_path = self.folder / "default.json"
         if not default_path.resolve().is_relative_to(self.root):
             raise ValueError("H3 branch metadata escapes the project.")
         records[1:] = sorted(records[1:], key=lambda item: (item.get("created_at", ""), item["id"]))
         default = self._read(default_path).get("branch_id") if default_path.exists() else "main"
+        hidden = self._retirement("main")
+        if hidden and hidden.get("hidden") and not self._empty_blockers("main"):
+            records[0] = dict(records[0], hidden=True)
+        # One atomic retirement marker also redirects a removed default. No
+        # half-written default/branch transaction can strand the project.
+        seen = set()
+        while True:
+            marker = self._retirement(default)
+            if not marker or (default == "main" and not marker.get("hidden")):
+                break
+            if default in seen:
+                raise ValueError("Invalid retired branch default cycle.")
+            seen.add(default)
+            default = marker["keep_branch_id"]
         self._load_record(default)
         return {"run_name": self.run, "default_branch": default,
                 "branches": [{key: value for key, value in item.items() if key != "authoring"}
                              for item in records]}
+
+    def _retirement_path(self, selected):
+        selected = branch_id(selected)
+        path = (self.folder / "original.hidden.json" if selected == "main"
+                else self.folder / selected / "deleted.json")
+        return self._safe_branch_path(path)
+
+    def _safe_branch_path(self, path):
+        path = Path(path)
+        current = self.root
+        if current.is_symlink():
+            raise ValueError("Branch cleanup cannot follow symlinks.")
+        for part in path.relative_to(self.root).parts:
+            current /= part
+            if current.is_symlink():
+                raise ValueError("Branch cleanup cannot follow symlinks.")
+        if not path.resolve().is_relative_to(self.root):
+            raise ValueError("Branch cleanup path escapes the project.")
+        return path
+
+    def _retirement(self, selected):
+        selected = branch_id(selected)
+        path = self._retirement_path(selected)
+        if not path.exists():
+            return None
+        value = self._read(path)
+        if (not isinstance(value, dict) or value.get("format") != "h3_branch_retirement_v1"
+                or value.get("run_name") != self.run or value.get("branch_id") != selected
+                or not isinstance(value.get("keep_branch_id"), str)
+                or branch_id(value.get("keep_branch_id")) == selected):
+            raise ValueError("Invalid H3 branch retirement metadata.")
+        return value
+
+    def _empty_blockers(self, selected):
+        """Inspect branch-local metadata only, never decode or hash media."""
+        scope = self._safe_branch_path(working_directory(str(self.root), self.run, selected))
+        blockers = []
+
+        def files(folder, pattern):
+            folder = self._safe_branch_path(folder)
+            return [self._safe_branch_path(path) for path in folder.glob(pattern)]
+
+        if any(re.fullmatch(r"clip_[0-9]+\.json", path.name)
+               for path in files(scope / "checkpoints", "clip_*.json")):
+            blockers.append("This branch still has assigned clips. Use Delete branch clips first.")
+        if files(scope / "checkpoints" / ".transactions", "*.json"):
+            blockers.append("Checkpoint assignment recovery is pending; refresh first.")
+        editorial = self._safe_branch_path(scope / "editorial.json")
+        if editorial.exists():
+            value = self._read(editorial)
+            if not isinstance(value, dict):
+                raise ValueError("Cannot verify the branch's saved edit.")
+            if any(value.get(key) for key in (
+                    "replacements", "trims", "locked_scene_ids", "alternate_draft")):
+                blockers.append("This branch still has saved cut edits. Use Delete branch clips first.")
+        scopes = [scope]
+        for chapter in files(scope / "chapters", "*"):
+            if chapter.is_dir():
+                if files(chapter / "manifests", "*.json"):
+                    blockers.append("This branch still has sealed chapter snapshots.")
+                scopes.append(chapter)
+        for directory in scopes:
+            for profile in files(directory / "upscaled", "*"):
+                if profile.is_dir() and (files(profile / "checkpoints", "clip_*.json")
+                        or files(profile, "upscale_manifest.json")
+                        or files(profile / "partial", "*.json")):
+                    blockers.append("This branch still has saved processing/upscale results.")
+        for name in ("reviews", "pending_reviews"):
+            pending = self._safe_branch_path(scope / name)
+            if pending.is_dir() and any(pending.iterdir()):
+                blockers.append("This branch still has review/recovery work in %s." % name)
+        # Review snapshots are branch-local, but queue handoffs live at project
+        # scope and identify their branch explicitly. Keep crashed-job recovery
+        # visible even when it has no active pointers or in-memory queue entry.
+        orchestration = scope / "orchestration"
+        for directory in {orchestration, self.folder.parent / "orchestration"}:
+            for path in files(directory, "*.json"):
+                value = self._read(path)
+                if not isinstance(value, dict):
+                    raise ValueError("Cannot verify pending branch recovery.")
+                if value.get("format") == "h3_top_level_handoff_v1":
+                    if value.get("working_branch_id", "main") != selected:
+                        continue
+                elif directory != orchestration:
+                    continue
+                if value.get("status") not in ("decided", "consumed", "cancelled", "failed"):
+                    blockers.append("This branch still has pending review/handoff recovery. Resolve it first.")
+        return sorted(set(blockers))
+
+    def empty_branch_preview(self, selected, keep_branch):
+        selected, keep = branch_id(selected), branch_id(keep_branch)
+        with checkpoint_run_lock(str(self.output), self.run):
+            if selected == keep:
+                raise ValueError("Switch Plan Studio to the branch you want to keep first.")
+            record, kept = self.load(selected), self.load(keep)
+            listing = self.listing()
+            if next(item for item in listing["branches"] if item["id"] == keep).get("hidden"):
+                raise ValueError("Show Original or choose another visible branch to keep first.")
+            blockers = self._empty_blockers(selected)
+            preview = {"ok": True, "allowed": not blockers, "blockers": blockers,
+                "run_name": self.run, "branch_id": selected, "branch_name": record["name"],
+                "keep_branch_id": keep, "keep_branch_name": kept["name"],
+                "action": "hide-original" if selected == "main" else "delete-empty",
+                "changes_default": listing["default_branch"] == selected,
+                "message": ("Hide empty Original; it can be shown again. " if selected == "main" else
+                            "Remove this empty branch from the branch list. ") +
+                           "Saved Plan metadata is retained for recovery. No clips, media or other branches are deleted."}
+            preview["snapshot"] = self._digest([preview, record, kept, listing])
+            return preview
+
+    def retire_empty(self, selected, keep_branch, expected_snapshot):
+        selected, keep = branch_id(selected), branch_id(keep_branch)
+        with checkpoint_run_lock(str(self.output), self.run):
+            previous = self._retirement(selected)
+            if (previous and previous.get("snapshot") == expected_snapshot
+                    and previous["keep_branch_id"] == keep
+                    and (selected != "main" or previous.get("hidden"))):
+                sync_directory(self._retirement_path(selected).parent)
+                return previous["result"]
+            preview = self.empty_branch_preview(selected, keep)
+            if not preview["allowed"]:
+                raise ValueError(" ".join(preview["blockers"]))
+            if not expected_snapshot or expected_snapshot != preview["snapshot"]:
+                raise ValueError("Branch settings changed. Preview branch removal again.")
+            if keep == "main":
+                # Original may have become visible again after gaining work.
+                # Clear an older hide redirect before pointing a retired branch
+                # back at it, so default resolution cannot form a cycle.
+                self.show_original()
+            result = {"ok": True, "branch_id": selected, "keep_branch_id": keep,
+                      "message": ("Hidden empty Original." if selected == "main" else
+                                  "Deleted empty branch %s." % preview["branch_name"]) +
+                                 " Plan metadata retained; no media deleted."}
+            self._write(self._retirement_path(selected), {
+                "format": "h3_branch_retirement_v1", "run_name": self.run,
+                "branch_id": selected, "keep_branch_id": keep, "hidden": selected == "main",
+                "retired_at": datetime.now(timezone.utc).isoformat(),
+                "snapshot": expected_snapshot, "result": result})
+            return result
+
+    def show_original(self):
+        with checkpoint_run_lock(str(self.output), self.run):
+            marker = self._retirement("main")
+            if marker and marker.get("hidden"):
+                # Showing Original is not an instruction to change the project
+                # default. Materialize the resolved default before un-hiding.
+                default = self.listing()["default_branch"]
+                self._write(self._safe_branch_path(self.folder / "default.json"),
+                            {"branch_id": default})
+                self._write(self._retirement_path("main"), dict(marker, hidden=False))
+            return {"ok": True, "message": "Original is visible again."}
 
     @staticmethod
     def authoring(value):
@@ -294,6 +462,8 @@ class WorkingBranches:
     def make_default(self, selected):
         with checkpoint_run_lock(str(self.output), self.run):
             self.load(selected)
+            if selected == "main":
+                self.show_original()
             if not (self.folder / "default.json").resolve().is_relative_to(self.root):
                 raise ValueError("H3 branch metadata escapes the project.")
             self._write(self.folder / "default.json", {"branch_id": selected})

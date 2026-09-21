@@ -10,7 +10,7 @@ import {
 } from "./h3_studio_chapters.mjs?v=0.7.1";
 import {CONTEXT_MASK_MODES} from "./h3_context_mask_core.mjs?v=0.7.1";
 import {contextMaskEditor} from "./h3_context_mask_editor.mjs?v=0.7.2";
-import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId} from "./h3_working_branches.mjs?v=0.7.25";
+import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId, visibleWorkingBranches} from "./h3_working_branches.mjs?v=0.7.26";
 import {browserBranchRecoveryStorage} from "./h3_branch_recovery_storage.mjs?v=0.7.23";
 import {branchPolicyNodes, captureBranchPolicyInputs, restoreBranchPolicyInputs} from "./h3_plan_restore_core.mjs?v=0.7.21";
 import {
@@ -933,7 +933,7 @@ function mount(node) {
 
     function branchToolbar() {
         const bar = element("div", "h3studio-toolbar");
-        const records = branches.records;
+        const records = visibleWorkingBranches(branches.records, currentBranch(), branches.defaultBranch);
         const selected = records.findIndex(item => item.id === currentBranch());
         const previous = button("←", "Previous working branch", () => void branches.switchTo(records[selected - 1]?.id));
         const next = button("→", "Next working branch", () => void branches.switchTo(records[selected + 1]?.id));
@@ -7298,6 +7298,7 @@ function mount(node) {
     node.onRemoved = function () {
         saveLocalBranchDraft();
         window.removeEventListener("pagehide", onBranchPageHide);
+        window.removeEventListener("h3-working-branches-changed", onWorkingBranchesChanged);
         const finalFlush = flushProjectWrites(runName());
         state.disposed = true;
         refreshStudio.cancel();
@@ -7357,6 +7358,12 @@ function mount(node) {
         if (status) status.textContent = branchDraftError || branches.draftStatus;
     };
     const onBranchPageHide = () => saveLocalBranchDraft();
+    const onWorkingBranchesChanged = (event) => {
+        if (!state.disposed && !branches.busy && event.detail?.run_name === runName()) {
+            void branches.refresh(runName()).catch(error => { branches.error = error.message; renderShell(); });
+        }
+    };
+    window.addEventListener("h3-working-branches-changed", onWorkingBranchesChanged);
     window.addEventListener("pagehide", onBranchPageHide);
     root.addEventListener("input", saveLocalBranchDraft);
     root.addEventListener("change", saveLocalBranchDraft);

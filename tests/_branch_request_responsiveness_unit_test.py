@@ -72,6 +72,16 @@ class ResponsivenessTests(unittest.IsolatedAsyncioTestCase):
                     chain._working_branch_command,
                     Request({"run_name": self.run, "action": action}), {"id": "main"})
 
+    async def test_empty_branch_actions(self):
+        for action, method in (("empty-preview", "empty_branch_preview"),
+                               ("delete-empty", "retire_empty"),
+                               ("show-original", "show_original")):
+            with self.subTest(action=action):
+                await self.slow_call(chain.WorkingBranches, method,
+                    chain._working_branch_command, Request({"run_name": self.run,
+                        "action": action, "branch_id": "main" if action == "show-original" else "a" * 32,
+                        "keep_branch_id": "b" * 32}), {"ok": True})
+
     async def test_preview_preserves_branch_context(self):
         selected = "b" * 32
         await self.slow_call(chain.CheckpointGraphManager, "deletion_preview",

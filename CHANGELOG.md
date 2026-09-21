@@ -9,6 +9,10 @@ optional companion features are not prerequisites. See the
 [migration guide](docs/MIGRATING_TO_0_7.md) and
 [release validation checklist](docs/RELEASING_0_7.md).
 
+- Add **Delete empty branch** beside Checkpoint Manager's branch selector and
+  reversible **Hide empty Original** / **Show Original** actions. Check saved
+  work before removal, retain Plan metadata, and preserve the surviving branch
+  and project default. No media is deleted by these actions.
 - Remove the legacy 0.4 full-track AUDIO inputs from chain consumers. Source
   Timeline and Carousel are the supported routes; already-saved path-backed
   tracks remain readable. Rebuild examples and safely clean unused old sockets

@@ -52,6 +52,8 @@ def working_directory(project_directory, run, selected=None):
         raise ValueError("H3 branch directory escapes its project.")
     if not os.path.isfile(os.path.join(path, "branch.json")):
         raise ValueError("Selected H3 branch is unavailable; select it again in Plan Studio.")
+    if os.path.lexists(os.path.join(path, "deleted.json")):
+        raise ValueError("Selected H3 branch was deleted; select another branch in Plan Studio.")
     return path
 
 

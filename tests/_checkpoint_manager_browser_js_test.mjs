@@ -26,7 +26,7 @@ writeFileSync(file, html);
 const run = spawnSync(process.env.H3_TEST_BROWSER || "/opt/google/chrome/chrome", [
     "--headless", "--disable-gpu", "--no-first-run", "--disable-background-networking",
     "--disable-component-update", "--disable-sync", "--host-resolver-rules=MAP * ~NOTFOUND",
-    "--user-data-dir=" + join(out, "profile"), "--virtual-time-budget=4000", "--window-size=1900,1100",
+    "--user-data-dir=" + join(out, "profile"), "--virtual-time-budget=6000", "--window-size=1900,1100",
     "--screenshot=" + join(out, "checkpoint-manager.png"), "--dump-dom", pathToFileURL(file).href,
 ], {encoding:"utf8",timeout:25000,maxBuffer:2 * 1024 * 1024});
 assert.equal(run.status,0,run.error?.message || run.stderr);
@@ -70,6 +70,9 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         const obsoleteRequests = [];
         const branchCleanupRequests = [];
         let branchCleanupDeletes = 0, branchCleanupError = "";
+        let branchList = {default_branch:"main",branches:[{id:"main",name:"Original"},{id:named,name:"960x544"}]};
+        const emptyActions = [];
+        let emptyBlocked = true;
         const projectMutationOptions = async (_node, _run, options) => options;
         const storageReport = {format:"h3_storage_inventory_v1",run_name:"demo",scan_complete:true,
             totals:{files:61,logical_bytes:6100,allocated_bytes:8192,allocation_unknown_files:0},
@@ -81,7 +84,29 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         const api = {apiURL:path=>path,fetchApi:async (path,options={})=>{
             let data;
             if (path.endsWith("/runs")) data = {runs:[{run_name:"demo",checkpoint_count:7}]};
-            else if (path.includes("/working-branches?")) data = {default_branch:"main",branches:[{id:"main",name:"Original"},{id:named,name:"960x544"}]};
+            else if (path.includes("/working-branches?") && options.method !== 'POST') data = structuredClone(branchList);
+            else if (path.split('?')[0].endsWith('/working-branches') && ['empty-preview','delete-empty','hide-original','show-original'].includes(JSON.parse(options.body).action)) {
+                const body = JSON.parse(options.body);
+                emptyActions.push(body);
+                const target = branchList.branches.find(item => item.id === body.branch_id);
+                if (body.action === 'empty-preview') {
+                    data = {allowed:!emptyBlocked,blockers:emptyBlocked ? ['Saved clips remain.'] : [],
+                        branch_name:target.name,keep_branch_name:'960x544',snapshot:'empty-test',
+                        changes_default:branchList.default_branch === body.branch_id,
+                        action:body.branch_id === 'main' ? 'hide-original' : 'delete-empty',
+                        message:'Plan metadata retained; no media deleted.'};
+                } else {
+                    if (body.action === 'show-original') delete target.hidden;
+                    else {
+                        check(body.snapshot === 'empty-test' && body.keep_branch_id === named,
+                            'Empty branch removal confirms the exact preview and keeps the active Plan branch');
+                        if (body.action === 'hide-original') target.hidden = true;
+                        else branchList.branches = branchList.branches.filter(item => item.id !== body.branch_id);
+                        if (branchList.default_branch === body.branch_id) branchList.default_branch = named;
+                    }
+                    data = {ok:true,message:'Empty branch action completed; metadata retained.'};
+                }
+            }
             else if (path.endsWith('/working-branches')) {
                 const body = JSON.parse(options.body);
                 branchCleanupRequests.push(body);
@@ -558,6 +583,39 @@ async function browserChecks(extensionSource, keepStorageOpen) {
         branchPanel.querySelector('button').click(); await new Promise(resolve=>setTimeout(resolve,50));
         check(branchCleanupDeletes === 2 && branchPanel.hidden, 'Confirmed branch cleanup refreshes and closes its preview');
         check(originalPlanBranch.value === named, 'Branch deletion never switches Plan Studio');
+        const branchSelect = root.querySelector('[aria-label="Working branch whose assignments are shown"]');
+        const emptyButton = [...root.querySelectorAll('button')].find(item => item.textContent === 'Hide empty Original…');
+        const showOriginal = [...root.querySelectorAll('button')].find(item => item.textContent === 'Show Original');
+        check(emptyButton && !emptyButton.disabled && showOriginal.hidden,
+            'Empty branch action is beside the selector; Show Original is initially hidden');
+        check(emptyButton.parentElement === branchSelect.parentElement && emptyButton.parentElement === branchCleanup.parentElement,
+            'All branch cleanup actions stay together beside the branch selector');
+        emptyButton.click(); await new Promise(resolve=>setTimeout(resolve,30));
+        check(emptyActions.length === 1 && root.querySelector('.h3cm-status').textContent.includes('Saved clips remain'),
+            'Nonempty branch displays its blocker without sending a removal');
+        emptyBlocked = false; window.confirm = () => false;
+        emptyButton.click(); await new Promise(resolve=>setTimeout(resolve,30));
+        check(emptyActions.every(item=>item.action === 'empty-preview'), 'Cancelled empty-branch confirmation changes nothing');
+        window.confirm = () => true;
+        emptyButton.click(); await new Promise(resolve=>setTimeout(resolve,80));
+        check(![...branchSelect.options].some(item=>item.value === 'main') && !showOriginal.hidden,
+            'Hiding Original removes its dropdown entry and reveals Show Original');
+        check(branchSelect.value === named && originalPlanBranch.value === named && emptyButton.disabled,
+            'Manager returns to the surviving branch without switching Plan Studio or allowing its removal');
+        showOriginal.click(); await new Promise(resolve=>setTimeout(resolve,80));
+        check([...branchSelect.options].some(item=>item.value === 'main') && showOriginal.hidden && branchList.default_branch === named,
+            'Showing Original restores its dropdown entry without changing the default');
+        const emptyId = 'd'.repeat(32);
+        branchList.branches.push({id:emptyId,name:'Empty test'});
+        node._h3CheckpointManagerRefresh(); await new Promise(resolve=>setTimeout(resolve,80));
+        branchSelect.value = emptyId; branchSelect.dispatchEvent(new Event('change'));
+        await new Promise(resolve=>setTimeout(resolve,80));
+        check(emptyButton.textContent === 'Delete empty branch…' && !emptyButton.disabled,
+            'Named empty branch has its own delete-entry action');
+        emptyButton.click(); await new Promise(resolve=>setTimeout(resolve,80));
+        check(emptyActions.at(-1).action === 'delete-empty' && branchSelect.value === named
+            && ![...branchSelect.options].some(item=>item.value === emptyId),
+            'Deleting a named empty branch removes its entry and returns to the surviving branch');
         const host = document.getElementById("host"); host.style.width="1850px";host.style.height="1040px";
         root.querySelector(".h3cm-main").style.gridTemplateColumns="minmax(0,1fr)";
         root.querySelector(".h3cm-detail").style.display="none";
