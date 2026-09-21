@@ -96,7 +96,7 @@
       "widgets_values": [
         "h3_lbh_3d",
         "h3_latent",
-        "{\"upscaler\":\"LBH 3D\",\"scale_multiplier\":2.0,\"pass2_steps\":2,\"denoise\":0.24,\"conditioning\":\"latent_sync\",\"audio_denoise\":0}",
+        "{\"upscaler\":\"LBH 3D\",\"scale_multiplier\":2.0,\"pass2_steps\":20,\"denoise\":0.24,\"conditioning\":\"latent_sync\",\"audio_denoise\":0}",
         1,
         0,
         false,

@@ -52,6 +52,7 @@ const context = vm.createContext({...core, ...chapters, state, video, generatedA
     positionTimelinePlayhead(){}, updateSubtitleOverlay(){},
     captureHandoffFrame(){}, promotePrimedSegment:index => preloads.push(index),
     synchronizeGeneratedAudio(){}, synchronizeSourceTimelineAudio(){}, syncSource(){},
+    synchronizeSceneDialogue:() => null, // These fixtures have no per-scene dialogue.
     pausePlayerMonitors() { generatedAudio.pause(); sourceVideo.pause(); sourceTimelineAudio.pause(); },
     extendTimelineWorkspace() { throw Error("Chapter playback must not extend the project workspace"); },
 });

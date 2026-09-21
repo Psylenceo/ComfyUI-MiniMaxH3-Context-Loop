@@ -77,7 +77,7 @@
       "key": "n12",
       "type": "MiniMaxH3ChainCurrent",
       "settings": {
-        "align_audio_reference": false
+        "align_audio_reference": true
       },
       "inputs": {
         "state": [
@@ -92,7 +92,7 @@
       "type": "MiniMaxH3ChainAssemble",
       "settings": {
         "audio_source": "plan",
-        "filename": "t2v_studio_recovered_%date:yyyy-MM-dd%",
+        "filename": "ref2v_studio_recovered_%date:yyyy-MM-dd%",
         "audio_bitrate": 256,
         "copy_to_output": false,
         "output_subfolder": "",
@@ -193,8 +193,7 @@
     {
       "key": "n17",
       "type": "MiniMaxH3ChainContext",
-      "settings": {
-      },
+      "settings": {},
       "inputs": {
         "state": [
           "n12",
@@ -211,6 +210,10 @@
         "latent": [
           "n16",
           "latent"
+        ],
+        "audio_vae": [
+          "n5",
+          "VAE"
         ]
       },
       "label": "MiniMax H3 Context Loop Context — MASKED AV CONTEXT — PRESERVE PREFIX / GENERATE FUTURE"
@@ -386,7 +389,7 @@
       "type": "MiniMaxH3ChainAssemble",
       "settings": {
         "audio_source": "plan",
-        "filename": "t2v_studio_%date:yyyy-MM-dd%",
+        "filename": "ref2v_studio_%date:yyyy-MM-dd%",
         "audio_bitrate": 256,
         "copy_to_output": false,
         "output_subfolder": "",
@@ -512,7 +515,7 @@
       "key": "n35",
       "type": "Note",
       "settings": {
-        "text": "0.6 Studio quick start\n\n1. Open the Project Asset Carousel.\n2. Import h3_v06_courier_greenhouse_arrival.png; tag courier_arrival (Picture).\n3. Import h3_v06_courier_greenhouse_delivery.png; tag greenhouse_delivery (Picture).\n4. Edit scenes in Production Plan or Plan Studio.\n5. Queue; inspect, branch, trim, or restore in Checkpoint Manager."
+        "text": "0.6 Studio quick start\n\n1. Open the Project Asset Carousel.\n2. Import h3_v06_courier_greenhouse_arrival.png; tag courier_arrival (Picture).\n3. Import h3_v06_courier_greenhouse_delivery.png; tag greenhouse_delivery (Picture).\n4. Edit scenes in Production Plan or Plan Studio.\n5. Queue; inspect, branch, trim, or restore in Checkpoint Manager.\n\nOptional source soundtrack (no separate workflow needed):\nImport an audio file in Project Asset Carousel and set Audio use → Project timeline source. Select Generation Profile → Lip-sync to source audio; choose Visual continuity if you want the former Source Audio preset. The preset alone does not load an audio file. Carousel.project_assets carries the track to the Plan and loop; both VAEs are connected to Chain Context. Leave Generate audio selected when you want a generated soundtrack."
       },
       "inputs": {},
       "label": "0.6 STUDIO QUICK START"
@@ -639,5 +642,6 @@
       "label": "MiniMax H3 Checkpoint Manager — BRANCHES / PREVIEWS / RESTORE"
     }
   ],
-  "compatibility_note": "Adapted for **nightly** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against nightly."
+  "compatibility_note": "Adapted for **nightly** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against nightly.",
+  "setup_steps": "1. CAROUSEL / STUDIO: set a unique run name in Project Asset Carousel.\n2. Import the supplied courier images; tag them courier_arrival and greenhouse_delivery (Picture).\n3. Edit scenes in Production Plan or Plan Studio. Generate audio is the default.\n4. OPTIONAL SOURCE AUDIO: import a soundtrack in Project Asset Carousel.\n   Audio use → Project timeline source; Generation Profile → Lip-sync to source audio.\n   The preset alone does not load an audio file; Carousel.project_assets carries your track.\n5. Queue; review takes and manage saved scenes in Checkpoint Manager.\n\nInstall models and packs as described in example_workflows/README.md."
 }

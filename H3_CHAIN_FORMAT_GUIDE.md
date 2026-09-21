@@ -665,7 +665,7 @@ model, so additional references may still cost VRAM and introduce competing
 motion instructions.
 
 See
-[`Ref2V Sequential Motion - EXPERIMENTAL - MiniMax H3.json`](<example_workflows/Ref2V Sequential Motion - EXPERIMENTAL - MiniMax H3.json>)
+[Ref2V Sequential Motion — Experimental](<example_workflows/tagged/Ref2V Sequential Motion - EXPERIMENTAL - MiniMax H3 0.6.json>)
 for the minimal two-scene wiring. Its Reference Video Prep selects 464 frames,
 so the user-supplied native video and embedded audio must cover at least
 19.333 seconds after conversion to 24 fps.
@@ -751,13 +751,11 @@ slices remain resume-safe without creating a graph cycle.
 Use **MiniMax H3 Existing Video Context** when scene 1 must continue a decoded
 video rather than begin from an empty timeline.
 
-Open
-[`Extend Existing Video Model Workflow - MiniMax H3.json`](<example_workflows/Extend Existing Video Model Workflow - MiniMax H3.json>)
-for a complete two-scene model with generated-audio continuity, original-video
-prepend, review/retry controls, and a muted recovery branch. This workflow is
-**experimental** while the imported AV continuation path receives broader
-real-world validation. It is a separate example; the existing looping and
-historical workflows are not modified.
+The former Extend Existing Video Model Workflow example is retired. For a
+maintained, ready-wired extension example, open
+[Masked AV Extension — Chain + Reference Image](<example_workflows/Masked AV Extension - Chain + Reference Image - MiniMax H3 0.6.json>).
+The direct Existing Video Context wiring below remains available for custom
+graphs; it is not a claim that the masked example uses the same graph.
 
 ```text
 Chain Plan ───────────────────────────┐

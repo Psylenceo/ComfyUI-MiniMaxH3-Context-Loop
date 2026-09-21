@@ -1,7 +1,7 @@
 import {app} from "/scripts/app.js";
-import {appendedReviewPrompts} from "./h3_chain_review_append.mjs?v=1";
+import {appendedReviewPrompts} from "./h3_chain_review_append.mjs?v=0.7.1";
 import {api} from "/scripts/api.js";
-import {activeSceneFromOutput} from "./h3_chain_cancel_reroll_core.mjs?v=0.7.10";
+import {activeSceneFromOutput} from "./h3_chain_cancel_reroll_core.mjs?v=0.7.12";
 import {
     DEFAULT_CLEANUP_DELAY_MS,
     HANDOFF_API_BASE,
@@ -19,7 +19,7 @@ import {
     topLevelRequeueCompletionMatches,
     topLevelRequeueFinishedMatches,
     createRequeueSelectionTracker,
-} from "./h3_chain_top_level_requeue_core.mjs?v=0.7.11-requeue-reset";
+} from "./h3_chain_top_level_requeue_core.mjs?v=0.7.12";
 import {createNotificationStack} from "./h3_notification_stack_core.mjs?v=0.7.10";
 import {projectMutationOptions} from "./h3_project_ownership.mjs?v=0.7.5";
 import {submitWithPromptIdentity, submissionFailure, createContinuationTracker, runRequeueLifecycle, authoritativeRunName, finalizeAcceptedSubmission, handleConfirmedSubmissionRejection, handleUncertainSubmission, classifySubmissionOutcome, releaseHandoffChecked} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.7.26";

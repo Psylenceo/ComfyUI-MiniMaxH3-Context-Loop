@@ -1,8 +1,12 @@
 # SelfLift Seed Hunt (nightly, experimental)
 
 Use **MiniMax H3 SelfLift Seed Hunt** in place of the Chain SelfLift Sampler,
-or open the dedicated **Ref2V Studio SelfLift Seed Hunt** example. Existing
-workflows and the ordinary Review Gate are unchanged.
+or open the **Ref2V Studio SelfLift Seed Hunt** example. It is now the one
+shipped SelfLift example, covering both automatic and reviewed sampling.
+Set `review_enabled=false` for automatic mode without tiny previews or a
+seed-review pause; new batches use the input seed and existing approved batches
+retain their resume selections. Existing user workflows, the original sampler
+node and the ordinary Review Gate remain supported.
 
 1. Enable SelfLift Project and select its H3 upscaler (see choices below). Use Euler
    (the default) or the experimental Radau setup below, with the same
@@ -78,6 +82,17 @@ or release the gate. With `rho=0`, it does not need a full-VAE round trip.
 This is an artifact-screening aid, not a final-quality guarantee: the tiny
 decoder is approximate, and artifacts can also appear during high denoising.
 No upscale-preview computation happens unless explicitly requested.
+
+### Known quality limitation
+
+Some learned-lift results develop localized colored patches or blocky detail
+that were absent in the low-resolution latent. This has been observed with
+the LBH lift and is not resolved by this release. A clean low preview alone
+does not guarantee a clean upscale: inspect **Preview upscale**, then check
+the fully decoded final take before keeping it. Another seed can help, but is
+not a guaranteed fix. Tr1dae and bilinear remain comparison options, not
+equivalent-quality replacements. High-resolution denoising tiles do not change
+the learned lift and should not be presented as a fix for its artifacts.
 
 ## Latent upscaler choices
 

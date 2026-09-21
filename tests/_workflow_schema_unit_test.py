@@ -7,7 +7,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from workflow_schema import load_schemas, fields, is_widget, widget_fields, validate_value
+from workflow_schema import load_schemas, fields, is_widget, widget_fields, validate_value  # noqa: E402
+from build_v06_workflows import build  # noqa: E402
 
 
 def validate_workflow(workflow, schemas):
@@ -51,10 +52,16 @@ def validate_workflow(workflow, schemas):
 
 def main():
     schemas = load_schemas()
-    paths = sorted((ROOT / "example_workflows").glob("*.json"))
+    paths = sorted((ROOT / "example_workflows").rglob("*.json"))
     for path in paths:
         try:
             validate_workflow(json.loads(path.read_text()), schemas)
+            recipe = json.loads((ROOT / "tools/v06/recipes" / path.relative_to(ROOT / "example_workflows")).read_text())
+            workflow, guide = build(recipe, path.relative_to(ROOT / "example_workflows").as_posix(), schemas)
+            assert path.read_text() == json.dumps(workflow, ensure_ascii=False, indent=2) + "\n", (
+                "Stale generated workflow; run tools/build_v06_workflows.py")
+            assert (path.parent / "guides" / path.with_suffix(".md").name).read_text() == guide, (
+                "Stale generated workflow guide; run tools/build_v06_workflows.py")
         except Exception as exc:
             raise AssertionError(path.name) from exc
     # The old audit passed this real broken array: prompt -> clip_index,
@@ -71,7 +78,7 @@ def main():
     # Nightly's extra controls must be explicitly serialized. A straight 0.6
     # copy can pass link checks while losing/offsetting these widget values.
     for path in paths:
-        recipe = json.loads((ROOT / "tools/v06/recipes" / path.name).read_text())
+        recipe = json.loads((ROOT / "tools/v06/recipes" / path.relative_to(ROOT / "example_workflows")).read_text())
         for node in recipe["nodes"]:
             if node["type"] == "MiniMaxH3ChainContext":
                 assert "visual_cond_noise_aug" not in node["settings"]

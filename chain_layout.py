@@ -186,7 +186,13 @@ def output_path(output_root, address):
             path = local_project / path.relative_to(saved_project)
     resolved = os.path.realpath(resolve_path(path))
     root = os.path.realpath(output_root)
-    if os.path.commonpath((root, resolved)) != root:
+    try:
+        contained = os.path.commonpath((root, resolved)) == root
+    except ValueError:
+        # Windows rejects comparisons across drives/UNC shares. Report the
+        # same explicit containment error as other out-of-root addresses.
+        contained = False
+    if not contained:
         raise ValueError("H3 artifact path escapes the output directory.")
     return resolved
 

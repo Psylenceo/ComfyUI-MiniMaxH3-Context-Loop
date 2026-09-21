@@ -16,7 +16,9 @@ const modules = [
     "h3_prompt_schema_core.mjs", "h3_rich_prompt_editor_core.mjs",
     "h3_prompt_completion_core.mjs", "h3_prompt_marker_ui.mjs",
     "h3_prompt_editor_settings_core.mjs",
-].map(name => read(name).replace(/^import [^]*?;\n/gm, "").replace(/^export /gm, "")).join("\n");
+].map(name => read(name).replace(/^import [^]*?;\n/gm, "").replace(/^export /gm, "")).join("\n")
+    + "\n" + ["editedFieldsSet", "markShotFieldEdited"].map(name => functionSource(
+        read("h3_prompt_companion_sync.mjs").replace(/^export /gm, ""), name)).join("\n");
 const fixtures = [];
 for (const rich of [false, true]) {
     const source = read(rich ? "h3_chain_rich_scene_prompt_editor.js" : "h3_chain_scene_prompt_editor.js");
@@ -68,6 +70,7 @@ assert.deepEqual(report.failures, []);
 
 function browserChecks(fixtures, basicOnly = false) {
     const report = {checks:0, failures:[]};
+    window.addEventListener("error", event => report.failures.push(event.message));
     const test = (condition, message) => {
         report.checks++;
         if (!condition) throw new Error(message);
@@ -240,7 +243,8 @@ function browserChecks(fixtures, basicOnly = false) {
             f.editor.firstChild.textContent = "Before\nKeep ";
             chip.click();
             choose("<Subject 2>");
-            test(f.text() === "Before\nKeep <Subject 2> and @Hero", "Live chip replacement offsets");
+            test(f.text() === "Before\nKeep <Subject 2> and @Hero",
+                "Live chip replacement offsets: " + JSON.stringify(f.text()));
             test(f.saved.at(-1) === f.text() && f.drafts.at(-1).text === f.text(), "Completion saves through current scene");
             f.editor.querySelector('[data-token="@Hero"]').click();
             test(f.referenceEdits() === 1 && !f.state.completion.visible, "Existing reference popup remains authoritative");

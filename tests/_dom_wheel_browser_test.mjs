@@ -11,7 +11,7 @@ const panels = fs.readdirSync(web).filter(name => name.endsWith(".js")
     && fs.readFileSync(new URL(name, web), "utf8").includes("node.addDOMWidget("));
 for (const name of panels) {
     const source = fs.readFileSync(new URL(name, web), "utf8");
-    assert.match(source, /import \{\s*bindNodeWheel\s*\} from "\.\/h3_dom_wheel\.mjs";/, name);
+    assert.match(source, /import \{\s*bindNodeWheel\s*\} from "\.\/h3_dom_wheel\.mjs\?v=\d+\.\d+\.\d+";/, name);
     assert.match(source, /bindNodeWheel\(root, node, app\);/, name);
     assert.doesNotMatch(source, /root\.addEventListener\("wheel"/, name);
 }

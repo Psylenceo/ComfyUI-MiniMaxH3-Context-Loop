@@ -116,8 +116,8 @@ def main():
             plan, revision="1" * 32, promote=False)
         assert pathlib.Path(chain._absolute_output_path(
             archive_one["plan"])).is_file()
-        canonical_plan = pathlib.Path(tempdir) / "h3_chains" / (
-            "revision_test") / "plan.json"
+        canonical_plan = pathlib.Path(chain._absolute_output_path(
+            "h3_chains/revision_test/plan.json"))
         assert not canonical_plan.exists()
         chain._promote_run_archive_snapshot(plan, archive_one)
         promoted_plan = canonical_plan.read_text(encoding="utf-8")

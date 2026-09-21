@@ -45,12 +45,12 @@ with tempfile.TemporaryDirectory(prefix="h3-step-regression-") as temporary:
 
     # Updated shipped examples inherit the chosen default for every scene.
     root = Path(__file__).resolve().parents[1]
-    for name in ("Ref2V Basic", "Ref2V Tagged", "Ref2V Studio",
-                 "Ref2V Studio Source Audio", "Ref2V Tagged Source Audio"):
+    for name in ("Ref2V Basic", "tagged/Ref2V Tagged", "Ref2V Studio",
+                 "tagged/Ref2V Tagged Source Audio"):
         recipe = json.loads((root / "tools" / "v06" / "recipes" /
                             (name + " - MiniMax H3 0.6.json")).read_text())
         author = next(n for n in recipe["nodes"]
                       if n["type"] == "MiniMaxH3ChainPlanModern")
         parsed = json.loads(author["settings"]["plan_json"])
         assert all(s["steps"] == 8 for s in build(parsed, 8)["shots"]), name
-print("Step counts: actual Current Scene outputs, changed queues, saved overrides, and five recipes pass")
+print("Step counts: actual Current Scene outputs, changed queues, saved overrides, and four recipes pass")

@@ -81,6 +81,7 @@ const context = vm.createContext({
     persistView(){}, renderSourceTimeline(){}, renderSourceAudioTimeline(){},
     updateTimelineSelection(){}, revealActiveTimelineScene(){}, publishActiveScene(){},
     applyAudioVolumes(){}, synchronizeGeneratedAudio(){},
+    synchronizeSceneDialogue:() => null, // These fixtures have no per-scene dialogue.
     positionTimelinePlayhead:value => { redLine = value; },
     updateSubtitleOverlay:value => { subtitlePosition = value; },
 });

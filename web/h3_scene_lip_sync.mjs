@@ -1,4 +1,4 @@
-import {sceneAudioPolicy} from "./h3_policy_core.mjs";
+import {sceneAudioPolicy} from "./h3_policy_core.mjs?v=0.7.10";
 
 export function normalizeSceneLipSyncSource(value) {
     if (value == null) return null;

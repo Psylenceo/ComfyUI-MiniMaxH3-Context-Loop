@@ -31,3 +31,6 @@ Keep subject_definitions, summary, retention_analysis, detailed_description, ove
 3. Import h3_v06_courier_greenhouse_delivery.png; tag greenhouse_delivery (Picture).
 4. Edit scenes in Production Plan or Plan Studio.
 5. Queue; inspect, branch, trim, or restore in Checkpoint Manager.
+
+Optional source soundtrack (no separate workflow needed):
+Import an audio file in Project Asset Carousel and set Audio use → Project timeline source. Select Generation Profile → Lip-sync to source audio; choose Visual continuity if you want the former Source Audio preset. The preset alone does not load an audio file. Carousel.project_assets carries the track to the Plan and loop; both VAEs are connected to Chain Context. Leave Generate audio selected when you want a generated soundtrack.

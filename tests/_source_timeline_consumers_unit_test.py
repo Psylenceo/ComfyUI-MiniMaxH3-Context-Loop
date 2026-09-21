@@ -188,8 +188,8 @@ with tempfile.TemporaryDirectory() as temporary:
     assert manager_timeline["recovery"]["video_archived"] is True
     assert manager_timeline["audio"]["path"] == (
         manager_timeline["video"]["path"])
-    assert (root / "h3_chains" / "timeline-consumers" /
-            "source_timeline.json").is_file()
+    assert pathlib.Path(chain._absolute_output_path(
+        "h3_chains/timeline-consumers/source_timeline.json")).is_file()
 
     promoted_plan = make_plan(
         "timeline-promoted-source-track", "generated_audio")
@@ -235,9 +235,8 @@ with tempfile.TemporaryDirectory() as temporary:
     assert manifest["source_timeline"]["fingerprints"] == (
         timeline["fingerprints"])
 
-    segment_path = (
-        root / "h3_chains" / "timeline-consumers" / "segments" /
-        "clip_0001.mp4")
+    segment_path = pathlib.Path(chain._absolute_output_path(
+        "h3_chains/timeline-consumers/segments/clip_0001.mp4"))
     segment_path.parent.mkdir(parents=True, exist_ok=True)
     segment_path.write_bytes(b"fake segment")
     assembly_manifest = dict(manifest)
@@ -337,7 +336,8 @@ with tempfile.TemporaryDirectory() as temporary:
     # Checkpoint Manager must prefer the descriptor persisted with the
     # selected revision, because Run Manager archived the user-facing Plan
     # before Loop Start saw and materialized the legacy AUDIO wire.
-    manager_plan_path = root / "h3_chains" / "legacy-audio-promoted" / "plan.json"
+    manager_plan_path = pathlib.Path(chain._absolute_output_path(
+        "h3_chains/legacy-audio-promoted/plan.json"))
     manager_plan_path.write_text(json.dumps({
         "plan_hash": legacy_prepared["plan_hash"],
         "shots": [{"id": "one"}, {"id": "two"}],

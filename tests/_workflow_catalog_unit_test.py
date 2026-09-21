@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from pathlib import Path
 
 
@@ -31,12 +32,10 @@ WORKFLOWS = {
     "Masked Video Inpaint - MiniMax H3 0.6.json",
     "Ref2V Basic - MiniMax H3 0.6.json",
     "Ref2V Masked Video Inpaint - MiniMax H3 0.6.json",
-    "Ref2V Sequential Motion - EXPERIMENTAL - MiniMax H3 0.6.json",
+    "tagged/Ref2V Sequential Motion - EXPERIMENTAL - MiniMax H3 0.6.json",
     "Ref2V Studio - MiniMax H3 0.6.json",
-    "Ref2V Studio SelfLift - EXPERIMENTAL - MiniMax H3 0.6.json",
-    "Ref2V Studio Source Audio - MiniMax H3 0.6.json",
-    "Ref2V Tagged - MiniMax H3 0.6.json",
-    "Ref2V Tagged Source Audio - MiniMax H3 0.6.json",
+    "tagged/Ref2V Tagged - MiniMax H3 0.6.json",
+    "tagged/Ref2V Tagged Source Audio - MiniMax H3 0.6.json",
     "T2V Normal - MiniMax H3 0.6.json",
     "T2V Studio - MiniMax H3 0.6.json",
 }
@@ -236,9 +235,7 @@ def validate_modern_authoring(workflow: dict, path: Path) -> None:
         "Ref2V Basic - MiniMax H3 0.6.json",
         "Ref2V Tagged - MiniMax H3 0.6.json",
         "Ref2V Studio - MiniMax H3 0.6.json",
-        "Ref2V Studio SelfLift - EXPERIMENTAL - MiniMax H3 0.6.json",
         "Ref2V Studio SelfLift Seed Hunt - EXPERIMENTAL - MiniMax H3 0.6.json",
-        "Ref2V Studio Source Audio - MiniMax H3 0.6.json",
         "Ref2V Tagged Source Audio - MiniMax H3 0.6.json",
     }
     if path.name in inherited_examples:
@@ -294,16 +291,16 @@ def validate_studio(workflow: dict, path: Path) -> None:
         assert not nodes(workflow, "MiniMaxH3TaggedPictureReference")
         wrapper = one(workflow, "MiniMaxH3TaggedReferenceToVideo")
         assert origin(workflow, wrapper, "references") == carousel
-    if "Source Audio" in path.name:
+    if path.name == "Ref2V Studio - MiniMax H3 0.6.json":
         note = one(workflow, "Note")
         instructions = note["widgets_values"][0]
-        for required in ("IMPORT YOUR SOUNDTRACK HERE", "Project Asset Carousel",
+        for required in ("OPTIONAL SOURCE AUDIO", "Project Asset Carousel",
                          "Audio use → Project timeline source", "Lip-sync to source audio",
                          "preset alone does not load an audio file", "Carousel.project_assets"):
             assert required in instructions, f"Missing source-audio setup note: {required}"
         assert note["size"][1] >= 70 + 20 * len(instructions.splitlines())
         profile = one(workflow, "MiniMaxH3GenerationProfile")
-        assert profile["widgets_values"][1] == "Lip-sync to source audio"
+        assert profile["widgets_values"][1] == "Generate audio"
         assert not nodes(workflow, "LoadAudio")
         assert not nodes(workflow, "MiniMaxH3SourceTimeline")
         context = one(workflow, "MiniMaxH3ChainContext")
@@ -368,7 +365,7 @@ def validate_assets() -> None:
 
 
 def validate_independent_source_audio() -> None:
-    workflow = load(EXAMPLES / "Ref2V Tagged Source Audio - MiniMax H3 0.6.json")
+    workflow = load(EXAMPLES / "tagged/Ref2V Tagged Source Audio - MiniMax H3 0.6.json")
     assert not nodes(workflow, "MiniMaxH3ProjectAssetManager")
     audio = one(workflow, "LoadAudio")
     timeline = one(workflow, "MiniMaxH3SourceTimeline")
@@ -384,7 +381,7 @@ def validate_independent_source_audio() -> None:
     context = one(workflow, "MiniMaxH3ChainContext")
     assert origin(workflow, context, "audio_vae") == origin(
         workflow, conditioner, "audio_vae"), "Lip-sync context needs the audio VAE"
-    recipe = load(ROOT / "tools" / "v06" / "recipes" /
+    recipe = load(ROOT / "tools" / "v06" / "recipes" / "tagged" /
                   "Ref2V Tagged Source Audio - MiniMax H3 0.6.json")
     assert one(recipe, "MiniMaxH3ChainContext")["inputs"]["audio_vae"] == (
         one(recipe, "MiniMaxH3TaggedReferenceToVideo")["inputs"]["audio_vae"])
@@ -407,18 +404,23 @@ def validate_independent_source_audio() -> None:
                  if key not in resolved and parents <= resolved}
         assert ready, "Independent source-audio graph has a dependency cycle"
         resolved.update(ready)
-    for name in ("Ref2V Tagged", "Ref2V Studio"):
+    for name in ("tagged/Ref2V Tagged", "Ref2V Studio"):
         base = load(EXAMPLES / (name + " - MiniMax H3 0.6.json"))
         assert origin(base, one(base, "MiniMaxH3TaggedReferenceToVideo"),
                       "state") == one(base, "MiniMaxH3ChainCurrent")
 
 
 def main() -> None:
-    paths = sorted(EXAMPLES.glob("*.json"))
-    assert {path.name for path in paths} == WORKFLOWS
+    paths = sorted(EXAMPLES.rglob("*.json"))
+    assert {path.relative_to(EXAMPLES).as_posix() for path in paths} == WORKFLOWS
     assert all("MiniMax H3 0.6.json" in path.name for path in paths)
     assert not (LEGACY_NAMES & {path.name for path in paths})
     assert not list((EXAMPLES / "Archive").rglob("*.json"))
+    recipe_root = ROOT / "tools/v06/recipes"
+    assert {p.relative_to(recipe_root).as_posix() for p in recipe_root.rglob("*.json")} == WORKFLOWS
+    basic = load(EXAMPLES / "Ref2V Basic - MiniMax H3 0.6.json")
+    assert nodes(basic, "LoadImage") and nodes(basic, "MiniMaxH3ReferenceToVideo")
+    assert not nodes(basic, "MiniMaxH3ProjectAssetManager"), "Basic stays a direct-image graph"
     uuids = set()
     for path in paths:
         workflow = load(path)
@@ -430,8 +432,13 @@ def main() -> None:
         validate_execution_regressions(workflow, path)
         note = one(workflow, "Note")
         assert note["title"] == "START HERE • NIGHTLY"
-        guide = (EXAMPLES / "guides" / path.with_suffix(".md").name).read_text()
+        guide = (path.parent / "guides" / path.with_suffix(".md").name).read_text()
         assert "nightly" in guide and "not nightly" not in guide
+        assert ("example_workflows/" + path.relative_to(EXAMPLES).parent.joinpath(
+            "guides", path.with_suffix(".md").name).as_posix()) in note["widgets_values"][0]
+        # Relocation must not invalidate saved workflow ownership identities.
+        assert workflow["id"] == str(uuid.uuid5(
+            uuid.UUID("aedf0e28-4e77-4ec8-98d8-7662561e4cf4"), path.name))
         uuids.add(workflow["id"])
         pixel = bool(nodes(workflow, "MiniMaxH3ChainUpscalePixelConditioning")
                      or nodes(workflow, "CATH3UpscaleVideoConditioning"))
@@ -460,12 +467,12 @@ def main() -> None:
         "h3_v06_courier_greenhouse_arrival.png",
         "h3_v06_courier_greenhouse_delivery.png",
     }
-    tagged = load(EXAMPLES / "Ref2V Tagged - MiniMax H3 0.6.json")
+    tagged = load(EXAMPLES / "tagged/Ref2V Tagged - MiniMax H3 0.6.json")
     assert {node["widgets_values"][0]
             for node in nodes(tagged, "MiniMaxH3TaggedPictureReference")} == {
         "courier_arrival", "greenhouse_delivery"}
     sequential = load(
-        EXAMPLES / "Ref2V Sequential Motion - EXPERIMENTAL - MiniMax H3 0.6.json")
+        EXAMPLES / "tagged/Ref2V Sequential Motion - EXPERIMENTAL - MiniMax H3 0.6.json")
     video_ref = one(sequential, "MiniMaxH3TaggedVideoReference")
     assert video_ref["widgets_values"] == [
         "courier_motion", "courier_motion_audio", "sequential"]

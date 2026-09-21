@@ -1,12 +1,12 @@
 import {app} from "/scripts/app.js";
 import {api} from "/scripts/api.js";
-import {parsePlanJson, planToJson, randomSceneSeed} from "./h3_chain_plan_core.mjs?v=0.7.8";
+import {parsePlanJson, planToJson, randomSceneSeed} from "./h3_chain_plan_core.mjs?v=0.7.11";
 import {
     activeSceneFromOutput,
     applySceneReroll,
     resumeSelection,
-} from "./h3_chain_cancel_reroll_core.mjs?v=0.7.11";
-import {refreshRestoredPlanEditors} from "./h3_plan_restore_core.mjs?v=0.7.9";
+} from "./h3_chain_cancel_reroll_core.mjs?v=0.7.12";
+import {refreshRestoredPlanEditors} from "./h3_plan_restore_core.mjs?v=0.7.20";
 
 // The compact scene expands Current Shot internally. ComfyUI routes that
 // internal node's active-scene event to the compact node's display id.

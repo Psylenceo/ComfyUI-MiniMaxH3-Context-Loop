@@ -14,6 +14,10 @@ connections; it contains no UI widget arrays, node dimensions, link-slot numbers
 or frontend metadata. Existing example prompts and intended connections were
 reviewed as reference material. The old archive-based builder is no longer used.
 The pre-0.6 example archive was retired in 0.7; this builder uses only recipes.
+Manual Tagged recipes live under `recipes/tagged/`; the builder mirrors that
+subfolder in `example_workflows/` and places their guides in `tagged/guides/`.
+Recipe basenames remain unique and define stable workflow UUIDs, so moving
+an example does not change its workflow identity.
 
 From this checkout, run:
 
@@ -31,7 +35,7 @@ offline schema environment. Run it in its own Python process, not inside a
 running ComfyUI server. The normal package dependencies, including torch, must
 be available; no model weights or GPU inference are used.
 
-Use repeatable `--workflow '<exact recipe filename>.json'` to build or check
+Use repeatable `--workflow '<relative recipe path>.json'` (or its unique basename) to build or check
 only the recipes being edited. This avoids rewriting unrelated generated
 workflows. The De-Rope-only base/fast recipes and combined LBH recipe are checked
 for source-canvas preservation, range/guard order, actual sigma-step reporting,

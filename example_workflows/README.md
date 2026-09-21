@@ -9,10 +9,21 @@ to switch branches. This checkout's examples are intended for **nightly**.
 For installation and first-run setup, see
 [Getting started](../docs/GETTING_STARTED.md).
 
-Need separate image/audio loaders without the Carousel? Use
-[Ref2V Tagged Source Audio](<Ref2V Tagged Source Audio - MiniMax H3 0.6.json>).
-Select your full soundtrack in **Load Audio**; Source Timeline and per-scene
-state are already wired. See its [wiring guide](<guides/Ref2V Tagged Source Audio - MiniMax H3 0.6.md>).
+## Start here: Basic or Carousel
+
+| Start with | What you get |
+|---|---|
+| [Basic](<Ref2V Basic - MiniMax H3 0.6.json>) | Direct image loaders, a Plan and scene prompts. No Carousel setup. |
+| [Carousel / Studio](<Ref2V Studio - MiniMax H3 0.6.json>) | Import and tag project assets in the Carousel; edit the timeline in Plan Studio and manage takes in Checkpoint Manager. Optional source audio is already wired. |
+
+For experimental low-to-high generation, use the single
+[SelfLift Seed Hunt workflow](<Ref2V Studio SelfLift Seed Hunt - EXPERIMENTAL - MiniMax H3 0.6.json>):
+review candidates or set `review_enabled=false` for automatic sampling.
+See its [guide](<guides/Ref2V Studio SelfLift Seed Hunt - EXPERIMENTAL - MiniMax H3 0.6.md>).
+
+Manual Tagged loaders are kept separately in [`tagged/`](tagged/README.md).
+They are alternatives for explicit image/video/audio wiring, not extra setup
+required by Basic or Carousel. Other task-specific examples are listed below.
 
 **Sampler steps:** the Plan settings control the default; a scene's **Steps
 override** takes precedence. Clear a scene override to inherit the default.
@@ -21,7 +32,8 @@ Changing the default in Production Plan or Plan Studio updates that saved
 default too; it does not overwrite deliberate scene overrides.
 
 Each workflow has a compact **START HERE** note. The longer setup and wiring
-instructions are in its matching Markdown file under [`guides/`](guides/),
+instructions are in its matching Markdown file under [`guides/`](guides/)
+(or `tagged/guides/` for manual Tagged examples),
 so they no longer take up large empty canvas panels. Titles and preview sizes
 come from the layouts checked in ComfyUI for the 0.6 release. Nightly's
 additional sockets and controls are included in its layout checks.
@@ -38,7 +50,7 @@ put diffusion weights in `models/diffusion_models/`, the Qwen3-VL encoder in
 `models/text_encoders/`, and both VAEs in `models/vae/`. The workflows do not
 assume a custom model subfolder.
 
-## Choose a starting point
+## Other generation and editing tasks
 
 | Input or task | Recommended workflow |
 |---|---|
@@ -47,12 +59,6 @@ assume a custom model subfolder.
 | One opening image | [I2V Normal](<I2V Normal - MiniMax H3 0.6.json>) |
 | Image-led timeline, takes, and trims | [I2V Studio](<I2V Studio - MiniMax H3 0.6.json>) |
 | First and last images | [FL2V Normal](<FL2V Normal - MiniMax H3 0.6.json>) |
-| A few global Ref2VA pictures | [Ref2V Basic](<Ref2V Basic - MiniMax H3 0.6.json>) |
-| Prompt-selected `@tag` references | [Ref2V Tagged](<Ref2V Tagged - MiniMax H3 0.6.json>) |
-| Tagged references with full project authoring | [Ref2V Studio](<Ref2V Studio - MiniMax H3 0.6.json>) |
-| Experimental low-to-high generation, project On/Off switch | [Ref2V Studio SelfLift](<Ref2V Studio SelfLift - EXPERIMENTAL - MiniMax H3 0.6.json>) — [guide](<guides/Ref2V Studio SelfLift - EXPERIMENTAL - MiniMax H3 0.6.md>) |
-| Low-pass seed hunting with tiny previews and restart-safe handoffs | [SelfLift Seed Hunt](<Ref2V Studio SelfLift Seed Hunt - EXPERIMENTAL - MiniMax H3 0.6.json>) — [guide](<guides/Ref2V Studio SelfLift Seed Hunt - EXPERIMENTAL - MiniMax H3 0.6.md>) |
-| Project references plus exact source audio | [Ref2V Studio Source Audio](<Ref2V Studio Source Audio - MiniMax H3 0.6.json>) |
 | Video inpainting | [Masked Video Inpaint](<Masked Video Inpaint - MiniMax H3 0.6.json>) |
 | Ref2VA-guided video inpainting | [Ref2V Masked Video Inpaint](<Ref2V Masked Video Inpaint - MiniMax H3 0.6.json>) |
 | Continue existing video | [Masked AV Extension — Single Clip](<Masked AV Extension - Single Clip - MiniMax H3 0.6.json>) |
@@ -75,9 +81,10 @@ To initialize a Studio reference project:
 1. Copy or import the two 0.6 courier images from [`assets/`](assets/).
 2. In Project Asset Carousel, tag the arrival image `courier_arrival` and the
    delivery image `greenhouse_delivery`; assign both the **Picture** role.
-3. In the Source Audio workflow, also import one audio file and assign
-   **Source track**. Generation Profile is already set to
-   **Lip-sync to source audio**.
+3. For an optional source soundtrack, import one audio file and select
+   **Audio use → Project timeline source**. In Generation Profile, select
+   **Lip-sync to source audio** (and **Visual continuity** to match the former
+   Source Audio preset). Otherwise leave **Generate audio** selected.
 4. Edit the example scenes and queue the workflow.
 
 For vocal-only lip-sync, import aligned full-length stems and assign them under
@@ -99,10 +106,13 @@ Every maintained recursive workflow uses:
   begins after the inherited boundary rather than being cut short;
 - a muted manifest/assembly recovery path where appropriate.
 
-Nightly's Context controls start at `visual_cond_noise_aug = 0.999` and
-`future_end_anchor = false`; experimental endpoint guidance is not enabled.
-Carousel ownership proofs are blank in these templates. Existing project locks
-still apply: claim ownership explicitly when editing a protected run.
+The retired degradation-experiment controls are no longer present; see
+[0.7 migration notes](../docs/MIGRATING_TO_0_7.md). The original Plan remains supported.
+Carousel ownership proofs are blank in these templates. Workflow ownership
+locking defaults to on: claim ownership explicitly when editing a protected
+run. It can be disabled server-wide under **Settings → MiniMax H3 Context Loop
+→ Project safety → Workflow ownership locking**. This does not disable file
+transaction locks or deletion safeguards.
 Pending Review and Chapter Delivery remain available as optional nightly nodes;
 these baseline examples do not enable them automatically.
 

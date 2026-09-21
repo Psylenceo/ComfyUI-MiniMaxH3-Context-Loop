@@ -1,4 +1,4 @@
-import {contextMaskGrid, normalizeContextMask, paintContextMask, MASK_LEVELS} from "./h3_context_mask_core.mjs";
+import {contextMaskGrid, normalizeContextMask, paintContextMask, MASK_LEVELS} from "./h3_context_mask_core.mjs?v=0.7.1";
 
 // The video remains the preview: only the small fixed mask is drawn to canvas.
 export function contextMaskEditor(video, initialMask, {enabled, onChange}) {

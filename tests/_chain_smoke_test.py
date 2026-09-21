@@ -1218,7 +1218,8 @@ def main():
             chain._atomic_text(str(exact_text_path), "line one\nline two")
             assert exact_text_path.read_bytes() == b"line one\nline two"
 
-            legacy_prompt_path = run_dir / "legacy-windows.prompt.txt"
+            legacy_prompt_path = pathlib.Path(chain._absolute_output_path(
+                "h3_chains/smoke/legacy-windows.prompt.txt"))
             legacy_prompt_path.write_bytes(b"line one\r\nline two")
             legacy_segment = dict(segment1)
             legacy_segment["prompt_file"] = chain._relative_output_path(
@@ -1236,11 +1237,14 @@ def main():
                 raise AssertionError("changed legacy prompt sidecar was accepted")
 
             archived_plan = json.loads(
-                (run_dir / "plan.json").read_text(encoding="utf-8"))
+                pathlib.Path(chain._absolute_output_path(
+                    "h3_chains/smoke/plan.json")).read_text(encoding="utf-8"))
             archived_api = json.loads(
-                (run_dir / "api_prompt.json").read_text(encoding="utf-8"))
+                pathlib.Path(chain._absolute_output_path(
+                    "h3_chains/smoke/api_prompt.json")).read_text(encoding="utf-8"))
             archived_workflow = json.loads(
-                (run_dir / "workflow.json").read_text(encoding="utf-8"))
+                pathlib.Path(chain._absolute_output_path(
+                    "h3_chains/smoke/workflow.json")).read_text(encoding="utf-8"))
             assert archived_plan["format"] == "h3_chain_plan_archive_v1"
             assert archived_plan["shots"][0]["prompt"] == "first"
             assert json.loads(
@@ -1273,9 +1277,8 @@ def main():
             assert interrupted_manifest[0]["planned_clip_count"] == 2
             assert "partial manifest through clip 1/2" in (
                 interrupted_manifest[2])
-            assert pathlib.Path(
-                tempdir, "h3_chains", "smoke", "partial",
-                "through_clip_0001.manifest.json").is_file()
+            assert pathlib.Path(chain._absolute_output_path(
+                "h3_chains/smoke/partial/through_clip_0001.manifest.json")).is_file()
             print("manifest load: interrupted run restored through scene 1")
 
             segment1_path = pathlib.Path(
@@ -1676,9 +1679,8 @@ def main():
                     chain.PromptServer = original_server
 
             asyncio.run(stop_with_partial_review())
-            partial_manifest = pathlib.Path(
-                tempdir, "h3_chains", "smoke", "partial",
-                "through_clip_0002.manifest.json")
+            partial_manifest = pathlib.Path(chain._absolute_output_path(
+                "h3_chains/smoke/partial/through_clip_0002.manifest.json"))
             assert partial_manifest.is_file()
             partial_data = json.loads(partial_manifest.read_text())
             assert partial_data["format"] == "h3_chain_partial_manifest_v3"
@@ -1709,8 +1711,8 @@ def main():
                 plan, source)[0]
             assert loaded_manifest["plan_hash"] == manifest["plan_hash"]
             assert len(loaded_manifest["segments"]) == 2
-            assert pathlib.Path(tempdir, "h3_chains", "smoke",
-                                "manifest.json").is_file()
+            assert pathlib.Path(chain._absolute_output_path(
+                "h3_chains/smoke/manifest.json")).is_file()
             manifest = loaded_manifest
             print("manifest load: completed chain restored without rerender")
 

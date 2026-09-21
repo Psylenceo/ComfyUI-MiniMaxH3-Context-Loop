@@ -1,18 +1,18 @@
 import {app} from "/scripts/app.js";
-import {bindNodeWheel} from "./h3_dom_wheel.mjs";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs?v=0.7.1";
 import {api} from "/scripts/api.js";
-import {coalescedRefresh} from "./h3_coalesced_refresh.mjs";
-import {normalizeSceneLipSyncSource, sceneLipSyncPlayback} from "./h3_scene_lip_sync.mjs";
+import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.7.1";
+import {normalizeSceneLipSyncSource, sceneLipSyncPlayback} from "./h3_scene_lip_sync.mjs?v=0.7.2";
 import {
     studioChapterGroups, studioChapterViewKey, studioChapterView,
     studioChapterEntries, studioChapterLayout, studioChapterPixel, studioChapterSecond,
     studioChapterPlayback, studioChapterLocalSecond, studioChapterGlobalSecond,
-} from "./h3_studio_chapters.mjs";
-import {CONTEXT_MASK_MODES} from "./h3_context_mask_core.mjs";
-import {contextMaskEditor} from "./h3_context_mask_editor.mjs";
-import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId} from "./h3_working_branches.mjs?v=0.7.24";
+} from "./h3_studio_chapters.mjs?v=0.7.1";
+import {CONTEXT_MASK_MODES} from "./h3_context_mask_core.mjs?v=0.7.1";
+import {contextMaskEditor} from "./h3_context_mask_editor.mjs?v=0.7.2";
+import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId} from "./h3_working_branches.mjs?v=0.7.25";
 import {browserBranchRecoveryStorage} from "./h3_branch_recovery_storage.mjs?v=0.7.23";
-import {branchPolicyNodes, captureBranchPolicyInputs, restoreBranchPolicyInputs} from "./h3_plan_restore_core.mjs?v=0.7.19";
+import {branchPolicyNodes, captureBranchPolicyInputs, restoreBranchPolicyInputs} from "./h3_plan_restore_core.mjs?v=0.7.20";
 import {
     CONTINUATION_MODES,
     FPS,
@@ -66,7 +66,7 @@ import {
     visualContextDefaultPartition,
     visualContextMaximumBlocks,
     visualContextPartitionFromBoundaries,
-} from "./h3_chain_plan_core.mjs?v=context-mask-1";
+} from "./h3_chain_plan_core.mjs?v=0.7.11";
 import {
     promptRevisionHelp,
     promptRevisionLabel,
@@ -88,12 +88,12 @@ import {
     sceneAudioPolicy,
     sceneTransitionPreset,
     transitionPresetLabel,
-} from "./h3_policy_core.mjs?v=0.7.9";
+} from "./h3_policy_core.mjs?v=0.7.10";
 import {
     resolveAudioContextLength,
     resolveAudioPolicy,
     resolveTransitionPolicy,
-} from "./h3_socket_presentation_core.mjs?v=0.7.9";
+} from "./h3_socket_presentation_core.mjs?v=0.7.10";
 import {
     availableLoRARoutes,
     loraRouteLabel,
@@ -128,7 +128,7 @@ import {
     studioRulerTicks,
     studioWaveformIntervalSamples,
     timedLyricAtSecond,
-} from "./h3_chain_plan_studio_core.mjs?v=editorial-rename-1";
+} from "./h3_chain_plan_studio_core.mjs?v=0.7.2";
 import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.26";
 import {
     projectMutationOptions, subscribeProjectOwnership, isProjectReadOnlyError,

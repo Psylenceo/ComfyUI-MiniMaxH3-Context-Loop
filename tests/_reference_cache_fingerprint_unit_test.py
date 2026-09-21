@@ -164,7 +164,7 @@ def main():
         segment = save_segment()
         assert segment["reference_cache"]["reference_fingerprint"] == wrapped
         assert segment["reference_cache"]["metadata"].startswith(
-            "h3_chains/semantic_saved/reference_cache/")
+            "h3_chains/semantic_saved/.h3/reference_cache/")
         chain._load_reference_cache_descriptor(segment["reference_cache"])
         # An ambiguous cache must not prevent saving the generated video itself.
         save_cache(alternate, "picture_storyboard", "source", scene=1, scene_count=1)

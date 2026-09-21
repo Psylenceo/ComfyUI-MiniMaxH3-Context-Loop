@@ -34,6 +34,10 @@ def main():
         metadata = json.loads(one(recipe, "MiniMaxH3ChainUpscaleAdapter")
                               ["settings"]["recipe_json"])
         assert metadata["scale_multiplier"] == 2.0, name
+        if name == NAMES[0]:
+            schedule = one(recipe, "BasicScheduler")["settings"]
+            assert metadata["pass2_steps"] == schedule["steps"] == 20
+            assert metadata["denoise"] == schedule["denoise"] == 0.24
         assert "target_megapixels" not in metadata, name
         adapter = one(workflow, "MiniMaxH3ChainUpscaleAdapter")
         assert any(isinstance(value, str) and value.startswith("{")

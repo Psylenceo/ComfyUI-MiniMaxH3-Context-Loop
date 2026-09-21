@@ -27,7 +27,7 @@ read the implementation references to run a normal workflow.
 | Inpaint, outpaint, extend, or bridge video | [Masked editing](MASKED_EDITING.md) |
 | Extend an existing video or use special context | [Advanced workflows](ADVANCED_WORKFLOWS.md) |
 | Fix a missing-node or runtime compatibility problem | [Compatibility](COMPATIBILITY.md) |
-| Move an older workflow to the current contract | [Migrating to 0.5](MIGRATING_TO_0_5.md) |
+| Move an older workflow to the current contract | [Migrating to 0.7](MIGRATING_TO_0_7.md); [older 0.5 migration](MIGRATING_TO_0_5.md) |
 
 ## Reference material
 
@@ -48,6 +48,7 @@ explanation.
 ## Project information
 
 - [Changelog](../CHANGELOG.md)
+- [0.7 release validation and remaining gates](RELEASING_0_7.md)
 - [Third-party credits and licenses](../THIRD_PARTY_NOTICES.md)
 - [Contributing](../CONTRIBUTING.md)
 - [Example asset licenses](../example_workflows/assets/README.md)

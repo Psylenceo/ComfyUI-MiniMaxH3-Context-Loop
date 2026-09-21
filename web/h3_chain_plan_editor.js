@@ -1,7 +1,7 @@
 import {app} from "/scripts/app.js";
-import {bindNodeWheel} from "./h3_dom_wheel.mjs";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs?v=0.7.1";
 import {api} from "/scripts/api.js";
-import {coalescedRefresh} from "./h3_coalesced_refresh.mjs";
+import {coalescedRefresh} from "./h3_coalesced_refresh.mjs?v=0.7.1";
 import {
     H3_CONTEXT_LENGTHS,
     MAX_SHOTS,
@@ -36,7 +36,7 @@ import {
     shotLengthMode,
     sharedPrompt,
     visualContextCompositions,
-} from "./h3_chain_plan_core.mjs?v=0.7.9";
+} from "./h3_chain_plan_core.mjs?v=0.7.11";
 import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.7.27";
 import {
     applySceneAudioOverride,
@@ -48,12 +48,12 @@ import {
     sceneAudioPolicy,
     sceneTransitionPreset,
     transitionPresetLabel,
-} from "./h3_policy_core.mjs?v=0.7.9";
+} from "./h3_policy_core.mjs?v=0.7.10";
 import {
     resolveAudioContextLength,
     resolveAudioPolicy,
     resolveTransitionPolicy,
-} from "./h3_socket_presentation_core.mjs?v=0.7.9";
+} from "./h3_socket_presentation_core.mjs?v=0.7.10";
 import {
     availableLoRARoutes,
     loraRouteLabel,

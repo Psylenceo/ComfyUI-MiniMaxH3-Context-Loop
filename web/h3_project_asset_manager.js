@@ -1,5 +1,5 @@
 import {app} from "/scripts/app.js";
-import {bindNodeWheel} from "./h3_dom_wheel.mjs";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs?v=0.7.1";
 import {api} from "/scripts/api.js";
 import {
     coupledOutputDimensions,

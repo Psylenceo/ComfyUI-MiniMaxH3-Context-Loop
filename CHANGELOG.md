@@ -2,7 +2,43 @@
 
 Newest first. This file keeps release history out of the onboarding README.
 
-## Unreleased — Deferred checkpoint upscaling
+## 0.7.0 — Unreleased
+
+Release scope: harden the existing workflow, review, recovery and cleanup paths;
+optional companion features are not prerequisites. See the
+[migration guide](docs/MIGRATING_TO_0_7.md) and
+[release validation checklist](docs/RELEASING_0_7.md).
+
+- Fix browser duration rounding to match the Python H3 frame grid, including
+  the issue reported in PR #60. Seconds-based previews no longer undershoot
+  execution lengths; authored exact-frame values remain unchanged. Add
+  cross-language regression coverage for 7,829 durations and compiled Plans.
+- Refresh browser helper cache keys, including their importing helpers, so
+  upgraded clients load the matching duration, review and recovery code.
+- Report a clear containment error for Windows cross-drive output paths;
+  paths outside the configured output directory remain rejected.
+- Workflow ownership locking is now optional in ComfyUI settings and remains
+  enabled by default. Disabling it does not remove transaction locks,
+  dependency checks or deletion safeguards.
+- SelfLift Seed Hunt supports optional lift previews and multiple marked takes
+  with one main. Optional high-resolution denoising tiling stays off by
+  default. SelfLift and alternate lifters remain experimental; localized
+  learned-upscale artifacts are a known unresolved quality limitation.
+- Retire the obsolete authoring nodes, pre-0.6 example archive and discarded
+  degradation experiments listed in the migration guide. **Keep the original
+  Context Loop Plan**. The maintained 0.6-named workflow catalog remains valid.
+- Add a repeatable CPU release-check runner and repair stale test fixtures for
+  organized storage and real browser imports, without weakening deletion or
+  recovery protections.
+- Present Basic and Carousel / Studio as the two reference-generation starting
+  points; move manual Tagged examples and guides into `tagged/` with stable IDs.
+  Fold Studio Source Audio into Studio and use one SelfLift Seed Hunt example
+  for automatic or reviewed sampling. No runtime nodes or user workflows are removed.
+- Correct LBH recipe metadata and instructions to match its existing 20-step
+  scheduler. Refresh SelfLift instructions and its optional tiling socket
+  (unconnected by default); validate the catalog recursively against recipes.
+
+### Earlier development notes
 
 - Nightly: add opt-in `cleanup_between_stages` on SelfLift Project. Retire a
   distinct low checkpoint and the successful learned upscaler through ComfyUI's

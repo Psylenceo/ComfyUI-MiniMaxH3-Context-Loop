@@ -24,14 +24,16 @@ audio VAE. They are not included in this repository.
 
 | Your starting material | Recommended first workflow |
 |---|---|
+| Reference pictures, simple setup | [Ref2V Basic](<../example_workflows/Ref2V Basic - MiniMax H3 0.6.json>) — direct image loaders |
+| Project references, timeline and optional soundtrack | [Carousel / Studio](<../example_workflows/Ref2V Studio - MiniMax H3 0.6.json>) |
 | Text only | [T2V Normal](<../example_workflows/T2V Normal - MiniMax H3 0.6.json>) |
 | One opening image | [I2V Normal](<../example_workflows/I2V Normal - MiniMax H3 0.6.json>) |
 | First and last images | [FL2V Normal](<../example_workflows/FL2V Normal - MiniMax H3 0.6.json>) |
-| Prompt-selected references | [Ref2V Tagged](<../example_workflows/Ref2V Tagged - MiniMax H3 0.6.json>) |
 | Existing video | [Masked AV Extension — Single Clip](<../example_workflows/Masked AV Extension - Single Clip - MiniMax H3 0.6.json>) |
 
-Open or drag the JSON into ComfyUI. Start with a **Normal** workflow. Studio is
-an optional editorial interface, not a simpler sampler.
+Open or drag the JSON into ComfyUI. **Basic** (or a matching **Normal** workflow)
+keeps setup small; **Carousel / Studio** adds asset and timeline management.
+Manual Tagged wiring examples are separate in [tagged/](../example_workflows/tagged/README.md).
 
 Some examples use bundled media. Copy those files from
 [`example_workflows/assets/`](../example_workflows/assets/) to `ComfyUI/input/`

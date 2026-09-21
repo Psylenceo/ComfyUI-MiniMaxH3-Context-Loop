@@ -23,6 +23,27 @@ The pre-0.6 example archive and the old 0.5 workflow migration tool were removed
 They remain available in Git history. The current 0.6-named examples are the
 maintained catalog, rebuilt against this checkout's schemas.
 
+## Consolidated example workflows
+
+Start with [Basic or Carousel / Studio](../example_workflows/README.md#start-here-basic-or-carousel).
+The manual Tagged, Tagged Source Audio and Sequential Motion examples moved
+to [`example_workflows/tagged/`](../example_workflows/tagged/README.md); their
+workflow IDs and wiring are unchanged.
+
+- **Ref2V Studio Source Audio** is folded into **Ref2V Studio**. Import the
+  soundtrack in Carousel, assign Project timeline source, and select Lip-sync
+  to source audio in Generation Profile. Both context VAEs are already wired;
+  Generate audio remains the default. Select Visual continuity to match the
+  former source-audio preset.
+- **Ref2V Studio SelfLift** is folded into **SelfLift Seed Hunt**. Disable
+  `review_enabled` for automatic sampling, or enable it for candidate previews
+  and selection. SelfLift Project stays off by default. The original Chain
+  SelfLift Sampler node remains available for existing workflows.
+
+Only the redundant example JSONs, recipes and guides are removed; Git history
+retains them. Saved user workflows, projects and runtime node support are not
+changed by this catalog consolidation.
+
 ## Retired controls
 
 - `reference_schedule` on Plan Studio, Preflight and Loop Start. Connect

@@ -1,5 +1,5 @@
 import {app} from "/scripts/app.js";
-import {bindNodeWheel} from "./h3_dom_wheel.mjs";
+import {bindNodeWheel} from "./h3_dom_wheel.mjs?v=0.7.1";
 import {api} from "/scripts/api.js";
 import {
     canCaptureFrame, captureCarousels, captureTargetProject, carouselProject,
@@ -8,12 +8,12 @@ import {
     parsePlanJson,
     planToJson,
     promptValueToText,
-} from "./h3_chain_plan_core.mjs?v=0.7.8";
+} from "./h3_chain_plan_core.mjs?v=0.7.11";
 import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.26";
 import {
     refreshRestoredPlanEditors,
     restoreConnectedPolicyInputs,
-} from "./h3_plan_restore_core.mjs?v=0.7.9";
+} from "./h3_plan_restore_core.mjs?v=0.7.20";
 import {
     acceptedPreviewDisposition,
     applyCheckpointRevisionSet,
@@ -26,9 +26,9 @@ import {
     reviewLocalDeadline,
     reviewPlanScenePrompt,
     reviewSeed,
-} from "./h3_chain_review_core.mjs?v=0.7.26";
+} from "./h3_chain_review_core.mjs?v=0.7.27";
 import {projectMutationOptions} from "./h3_project_ownership.mjs?v=0.7.5";
-import {appendedReviewPrompts, appendedReviewScene, continueAppendedReview} from "./h3_chain_review_append.mjs?v=1";
+import {appendedReviewPrompts, appendedReviewScene, continueAppendedReview} from "./h3_chain_review_append.mjs?v=0.7.1";
 import {submitWithPromptIdentity} from "./h3_chain_top_level_requeue_coordinator.mjs?v=0.7.26";
 
 const NODE_NAME = "MiniMaxH3ChainReview";

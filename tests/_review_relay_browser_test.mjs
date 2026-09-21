@@ -14,8 +14,6 @@ const generated = spawnSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f
     "color=c=steelblue:s=160x90:r=24:d=3", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p",
     "-movflags", "+faststart", movie]);
 assert.equal(generated.status, 0, generated.stderr?.toString());
-const code = fs.readFileSync(new URL("../web/h3_review_relay.js", import.meta.url), "utf8")
-    .replace(/^import .*;\n/gm, "");
 const candidates = Array.from({length:10}, (_, index) => ({number:index+1,
     revision:String(index+1).padStart(32, "0"), seed:(2n**64n-BigInt(index+1)).toString(),
     scene_prompt:`Saved candidate ${index+1}. A blue test card.`, raw_frames:73,
@@ -25,6 +23,15 @@ const summary = {token:"browser-test",run_name:"synthetic",branch_id:"main",node
     shot_id:"test_scene",candidate_count:10,generated_count:10,actionable:true};
 const server = http.createServer(async (req,res) => {
     const url = new URL(req.url,"http://localhost");
+    if (["/scripts/app.js", "/scripts/api.js"].includes(url.pathname)) {
+        res.setHeader("Content-Type", "text/javascript");
+        const name = path.basename(url.pathname, ".js");
+        res.end(`export const ${name} = window.${name};`); return;
+    }
+    if (/^\/web\/[\w.-]+\.(mjs|js)$/.test(url.pathname)) {
+        res.setHeader("Content-Type", "text/javascript");
+        res.end(fs.readFileSync(new URL(".." + url.pathname, import.meta.url))); return;
+    }
     if (url.pathname === "/view") {
         mediaRequests++;
         const data=fs.readFileSync(movie), range=req.headers.range?.match(/bytes=(\d+)-(\d*)/);
@@ -44,11 +51,11 @@ const server = http.createServer(async (req,res) => {
             ? {...summary,candidates,candidate} : null})); return;
     }
     res.setHeader("Content-Type","text/html; charset=utf-8");
-    res.end(`<!doctype html><html><body style="margin:20px;background:#17191c"><script>
+    res.end(`<!doctype html><html><body style="margin:20px;background:#17191c"><script type="module">
         window.app={configuringGraph:false,registerExtension:value=>window.extension=value,
             queuePrompt:()=>{throw Error('Must never queue');}};
         window.api={fetchApi:(url,options)=>fetch(url,options),apiURL:url=>url};
-        ${code}
+        await import('/web/h3_review_relay.js');
         class TestNode {
             constructor(){this.graph={};this.size=[620,760];}
             setSize(size){this.size=size;}

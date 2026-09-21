@@ -275,7 +275,7 @@ async def check():
         preview = chain.CheckpointGraphManager(temporary).deletion_preview(
             "alternate_test", 1, alternate_one)
         assert preview["allowed"] is False
-        assert "selected in the final cut" in " ".join(preview["blockers"])
+        assert "selected in this branch's final cut" in " ".join(preview["blockers"])
 
         try:
             chain._checkpoint_selection_manifest({

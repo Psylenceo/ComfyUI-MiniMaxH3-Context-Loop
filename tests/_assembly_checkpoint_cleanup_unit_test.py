@@ -284,7 +284,7 @@ class AssembleTests(Fixture, unittest.TestCase):
         self.assertIs(spec[1]["default"], False)
         self.assertIn(name, schema["input"]["optional"])
         checked = 0
-        for path in sorted((ROOT / "example_workflows").glob("*.json")):
+        for path in sorted((ROOT / "example_workflows").rglob("*.json")):
             for node in json.loads(path.read_text())["nodes"]:
                 if node["type"] != "MiniMaxH3ChainAssemble":
                     continue
@@ -295,7 +295,7 @@ class AssembleTests(Fixture, unittest.TestCase):
                 self.assertIs(values[-1], False, path.name)
                 checked += 1
         self.assertGreater(checked, 0)
-        for path in sorted((ROOT / "tools/v06/recipes").glob("*.json")):
+        for path in sorted((ROOT / "tools/v06/recipes").rglob("*.json")):
             for node in json.loads(path.read_text())["nodes"]:
                 if node["type"] == "MiniMaxH3ChainAssemble":
                     self.assertIs(node["settings"][name], False, path.name)

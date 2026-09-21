@@ -12,9 +12,9 @@ import {
     sceneVisualContextLeadSource,
     sceneVisualContextSource,
     sharedPrompt,
-} from "./h3_chain_plan_core.mjs?v=context-mask-1";
-import {normalizeContextMask} from "./h3_context_mask_core.mjs";
-import {normalizeSceneLipSyncSource} from "./h3_scene_lip_sync.mjs";
+} from "./h3_chain_plan_core.mjs?v=0.7.11";
+import {normalizeContextMask} from "./h3_context_mask_core.mjs?v=0.7.1";
+import {normalizeSceneLipSyncSource} from "./h3_scene_lip_sync.mjs?v=0.7.2";
 
 const FPS = 24;
 const MAX_H3_FRAMES = 3592;

@@ -189,6 +189,9 @@ def layout(nodes,links):
 
 
 def build(recipe,filename,schemas):
+    relative=Path(filename)
+    filename=relative.name  # Moving a recipe must not change its workflow UUID.
+    guide_path=(Path('example_workflows')/relative.parent/'guides'/relative.with_suffix('.md').name).as_posix()
     recipe=copy.deepcopy(recipe)
     guides=[n['settings']['text'] for n in recipe['nodes'] if n['type']=='Note']
     records=[n for n in recipe['nodes'] if n['type']!='Note']
@@ -227,7 +230,7 @@ def build(recipe,filename,schemas):
     note_text=('NIGHTLY • 0.6 BASELINE • '+filename.removesuffix(' - MiniMax H3 0.6.json')+'\n\n'
         +setup_steps+'\n\n'
         +recovery_note+
-        'Workflow-specific setup and detailed wiring notes:\nexample_workflows/guides/'+filename.removesuffix('.json')+'.md')
+        'Workflow-specific setup and detailed wiring notes:\n'+guide_path)
     note_size=[SIZES['Note'][0],max(SIZES['Note'][1],70+20*len(note_text.splitlines()))]
     nodes.append(dict(id=len(nodes)+1,type='Note',pos=[0,0],size=note_size,flags={},order=len(nodes),mode=0,
         inputs=[],outputs=[],title='START HERE • NIGHTLY',properties={'Node name for S&R':'Note'},widgets_values=[note_text]))
@@ -247,22 +250,26 @@ def main():
     parser.add_argument('--check',action='store_true')
     parser.add_argument('--output-dir',type=Path,default=EXAMPLES)
     parser.add_argument('--workflow',action='append',default=[],
-                        help='Build/check only this recipe filename (repeatable).')
+                        help='Build/check a relative recipe path or unique filename (repeatable).')
     args=parser.parse_args();schemas=load_schemas()
-    paths=sorted((DATA/'recipes').glob('*.json'))
+    recipe_root=DATA/'recipes'
+    paths=sorted(recipe_root.rglob('*.json'))
+    assert len({p.name for p in paths})==len(paths), 'Recipe basenames must be unique for stable workflow IDs'
     if args.workflow:
-        unknown=set(args.workflow)-{p.name for p in paths}
+        known={p.name for p in paths}|{p.relative_to(recipe_root).as_posix() for p in paths}
+        unknown=set(args.workflow)-known
         if unknown:parser.error('Unknown recipes: '+', '.join(sorted(unknown)))
-        paths=[p for p in paths if p.name in args.workflow]
+        paths=[p for p in paths if p.name in args.workflow or p.relative_to(recipe_root).as_posix() in args.workflow]
     for path in paths:
-        workflow,guide=build(json.loads(path.read_text()),path.name,schemas)
-        outputs={args.output_dir/path.name:json.dumps(workflow,ensure_ascii=False,indent=2)+'\n',
-                 args.output_dir/'guides'/path.with_suffix('.md').name:guide}
+        relative=path.relative_to(recipe_root)
+        workflow,guide=build(json.loads(path.read_text()),relative.as_posix(),schemas)
+        outputs={args.output_dir/relative:json.dumps(workflow,ensure_ascii=False,indent=2)+'\n',
+                 args.output_dir/relative.parent/'guides'/path.with_suffix('.md').name:guide}
         for target,content in outputs.items():
             if args.check:assert target.read_text()==content, f'Stale generated file: {target}'
             else:
                 target.parent.mkdir(parents=True,exist_ok=True);target.write_text(content,encoding='utf-8')
-        print(path.name)
+        print(relative.as_posix())
 
 
 if __name__=='__main__':main()

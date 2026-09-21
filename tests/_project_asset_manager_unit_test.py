@@ -2,6 +2,7 @@
 """Project Asset Manager registry, lazy picture, and Plan integration checks."""
 
 import importlib.util
+import inspect
 import copy
 import json
 import pathlib
@@ -50,7 +51,11 @@ def main():
     tree = chain.CHAIN_NODE_CLASS_MAPPINGS["MiniMaxH3ProjectAssetTree"]
     assert tree is chain.MiniMaxH3ProjectAssetTree
     assert tree.INPUT_TYPES() == chain.MiniMaxH3ProjectAssetManager.INPUT_TYPES()
-    assert tree.build is chain.MiniMaxH3ProjectAssetManager.build
+    # Branch scoping may wrap inherited methods separately depending on class
+    # registration order. Both must still execute the same implementation.
+    assert inspect.unwrap(tree.build) is inspect.unwrap(chain.MiniMaxH3ProjectAssetManager.build)
+    assert tree.build._h3_branch_scoped
+    assert chain.MiniMaxH3ProjectAssetManager.build._h3_branch_scoped
     assert tree.RETURN_TYPES == chain.MiniMaxH3ProjectAssetManager.RETURN_TYPES
     assert chain.CHAIN_NODE_DISPLAY_NAME_MAPPINGS["MiniMaxH3ProjectAssetTree"] == (
         "MiniMax H3 Project Asset Carousel (Tree)")

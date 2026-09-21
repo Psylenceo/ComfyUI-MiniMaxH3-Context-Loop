@@ -16,6 +16,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import asset_store  # noqa: E402
+import branch_scope  # noqa: E402
+import chain_layout  # noqa: E402
 import checkpoint_manager  # noqa: E402
 import project_assets  # noqa: E402
 import run_manager  # noqa: E402
@@ -30,8 +32,19 @@ def chain_paths(os_module, output_root, input_root):
     source = ast.parse((ROOT / "chain_nodes.py").read_text(encoding="utf-8"))
     functions = [node for node in source.body
                  if isinstance(node, ast.FunctionDef) and node.name in names]
+    def layout_output_path(root, address):
+        # The production wrapper now delegates to chain_layout. Use its real
+        # resolver with Windows lexical paths; these are legacy (marker-free)
+        # fixtures, not actual Windows files on the Linux test host.
+        with (patch.object(chain_layout, "os", os_module),
+              patch.object(chain_layout, "Path", pathlib.PureWindowsPath
+                           if os_module.sep == "\\" else pathlib.Path),
+              patch.object(chain_layout, "_layout", return_value=None)):
+            return chain_layout.output_path(root, address)
+
     namespace = {
         "os": os_module,
+        "layout_output_path": layout_output_path,
         "folder_paths": types.SimpleNamespace(
             get_output_directory=lambda: output_root,
             get_input_directory=lambda: input_root),
@@ -112,8 +125,10 @@ def windows_checks():
 
         with contextlib.ExitStack() as stack:
             for module in (asset_store, run_manager, project_assets,
-                           checkpoint_manager):
+                           checkpoint_manager, branch_scope, chain_layout):
                 stack.enter_context(patch.object(module, "os", win))
+            stack.enter_context(patch.object(chain_layout, "Path", pathlib.PureWindowsPath))
+            stack.enter_context(patch.object(chain_layout, "_layout", return_value=None))
             assets = asset_store.RunAssetStore(output, inputs)
             runs = run_manager.RunArchiveManager(output, inputs)
             carousel = project_assets.ProjectAssetStore(inputs, output)
