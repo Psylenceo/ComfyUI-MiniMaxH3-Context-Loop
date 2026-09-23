@@ -383,7 +383,13 @@ does not delete saved takes or flush ComfyUI's model/output caches.
 Both paths keep normal scene videos, checkpoints, project assets and other
 hunts. Cleanup cannot be undone: that batch can no longer resume or provide
 another version without rerunning its low passes. Cleanup errors leave the
-saved scene successful and are reported in the log/manual button response.
+saved scene successful and are reported in the log and the saved hunt's gate.
+Use **Clean saved takes** to retry removing the remaining temporary files; a
+failed cleanup may already have removed part of the scratch/recovery set.
+Loaded bundle tensors own their CPU memory rather than holding temporary files
+memory-mapped, allowing cleanup while ComfyUI retains downstream outputs on
+SMB/Windows too. After upgrading, restart ComfyUI to release mappings made by
+the old loader before retrying cleanup of previously affected hunts.
 The auto-clean choice does not change the hunt's identity; switching it on
 can reuse an existing saved hunt with otherwise matching settings.
 

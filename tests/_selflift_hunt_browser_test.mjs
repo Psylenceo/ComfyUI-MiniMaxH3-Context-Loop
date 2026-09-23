@@ -148,6 +148,13 @@ async function browserChecks() {
             "Keyboard browsing remains available while upscale selection is locked");
         check(root.querySelector('button[data-ordinal="2"]').dataset.chosen === "true",
             "Chosen marker does not follow browsing");
+        batch.cleanup_error = "[Errno 5] Input/output error: source.safetensors";
+        node._h3SelfLiftHunt.render();
+        const cleanupWarning = root.querySelector('.h3sh-cleanup-warning');
+        check(cleanupWarning.checkVisibility() && cleanupWarning.textContent.includes('Clean saved takes to retry'),
+            "Persistent cleanup failure is visible and explains retrying without regeneration");
+        delete batch.cleanup_error; node._h3SelfLiftHunt.render();
+        check(!cleanupWarning.checkVisibility(), "Healthy batch has no stale cleanup warning");
         // The drag grip uses layout pixels, not canvas-zoomed screen pixels.
         node.host.style.transformOrigin = "top left"; node.host.style.transform = "scale(.5)";
         const grip = root.querySelector('.h3sh-grip');

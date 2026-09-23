@@ -103,20 +103,34 @@ def save_bundle(path, value):
 
 
 def load_bundle(path):
+    """Restore owned CPU tensors, not file-backed views kept by execution caches.
+
+    A safetensors tensor can keep its mapping after safe_open exits. In
+    particular, SMB/Windows may refuse to delete that still-mapped file when
+    Segment Save cleans the hunt. Copy each distinct tensor once; aliases in
+    conditioning/nested AV streams share the copy, not another allocation.
+    """
     from safetensors import safe_open
     with safe_open(str(path), framework="pt", device="cpu") as handle:
         meta = handle.metadata() or {}
         if meta.get("format") != "h3_selflift_bundle_v1":
             raise ValueError("Not a SelfLift middle-pass bundle.")
 
+        tensors = {}
+
         def decode(item):
             kind = item["kind"]
             if kind == "tensor":
-                return handle.get_tensor(item["key"])
+                key = item["key"]
+                if key not in tensors:
+                    tensors[key] = handle.get_tensor(key).clone()
+                return tensors[key]
             if kind == "value":
                 return item["value"]
             if kind == "dict":
                 return {decode(k): decode(v) for k, v in item["items"]}
+            if kind not in ("tuple", "list", "nested"):
+                raise ValueError("Invalid SelfLift bundle tree.")
             values = [decode(v) for v in item["items"]]
             if kind == "tuple":
                 return tuple(values)
@@ -125,8 +139,13 @@ def load_bundle(path):
             if kind == "nested":
                 from comfy.nested_tensor import NestedTensor
                 return NestedTensor(values)
-            raise ValueError("Invalid SelfLift bundle tree.")
-        return decode(json.loads(meta["tree"]))
+        try:
+            return decode(json.loads(meta["tree"]))
+        finally:
+            # Break the recursive decoder's cycle so it cannot retain its
+            # handle/copy table until a later cyclic GC, including on errors.
+            tensors.clear()
+            decode = None
 
 
 class HuntStore:

@@ -1,5 +1,6 @@
 """Bounded cleanup on disposable projects only; no real video/model required."""
 import asyncio
+import errno
 import json
 from pathlib import Path
 import sys
@@ -8,7 +9,7 @@ import types
 import unittest
 from unittest.mock import patch
 
-from _selflift_hunt_unit_test import HuntStore, hunt, layout, folder_paths, store_module
+from _selflift_hunt_unit_test import HuntStore, hunt, layout, folder_paths, store_module, torch
 
 
 class CleanupTests(unittest.TestCase):
@@ -121,6 +122,50 @@ class CleanupTests(unittest.TestCase):
         self.assertNotIn(record["id"], hunt._CLEANING)
         self.assertGreater(hunt.clean_saved_hunt(self.store, record["id"])["files"], 0)
 
+    def test_partial_io_failure_is_persisted_and_remaining_files_can_be_retried(self):
+        record, folder, preview = self.batch()
+        target = folder / "take_0002.safetensors"
+        original_unlink = Path.unlink
+
+        def delete(path, *args, **kwargs):
+            if path == target:
+                raise OSError(errno.EIO, "Input/output error", str(path))
+            return original_unlink(path, *args, **kwargs)
+
+        with patch.object(Path, "unlink", delete):
+            with self.assertRaises(OSError):
+                hunt.clean_saved_hunt(self.store, record["id"], {"created_at": record["created_at"]})
+        saved = HuntStore(self.root).read(record["id"])
+        self.assertEqual(saved["phase"], "finished")
+        self.assertIn("Input/output error", saved["cleanup_error"])
+        self.assertIn("take_0002.safetensors", saved["cleanup_error"])
+        self.assertTrue(target.exists())
+        self.assertNotIn(record["id"], hunt._CLEANING)
+        self.assertGreater(hunt.clean_saved_hunt(self.store, record["id"])["files"], 0)
+        self.assertFalse(folder.exists())
+        self.assertFalse(preview.exists())
+        self.assertEqual(self.store.list(), [])
+
+    @unittest.skipUnless(Path("/proc/self/maps").is_file(), "Linux mapping inspection")
+    def test_cleanup_can_delete_bundles_while_downstream_tensors_remain_cached(self):
+        record, folder, _ = self.batch()
+        target = folder / "source.safetensors"
+        expected = torch.arange(24, dtype=torch.float32)
+        store_module.save_bundle(target, {"samples": expected})
+        cached_output = store_module.load_bundle(target)
+        original_unlink = Path.unlink
+
+        def refuse_mapped_file(path, *args, **kwargs):
+            # Simulate a share that refuses unlink on an open memory mapping.
+            if path == target and str(path) in Path("/proc/self/maps").read_text():
+                raise OSError(errno.EIO, "Input/output error", str(path))
+            return original_unlink(path, *args, **kwargs)
+
+        with patch.object(Path, "unlink", refuse_mapped_file):
+            self.assertGreater(hunt.clean_saved_hunt(self.store, record["id"])["files"], 0)
+        self.assertFalse(folder.exists())
+        torch.testing.assert_close(cached_output["samples"], expected, rtol=0, atol=0)
+
     def test_mark_routes_persist_drafts_fence_stale_tabs_and_hide_published_metadata(self):
         record, folder, preview = self.batch()
         self.store.update(record["id"], lambda r: r.update(candidates=[
@@ -162,6 +207,7 @@ class CleanupTests(unittest.TestCase):
                 (folder / "take_0002.safetensors").write_bytes(b"restored fixture")
                 self.assertEqual((await choose(Request(selection))).status, 200)
                 self.assertEqual(self.store.read(record["id"])["selected_ordinals"], [1, 2])
+                self.store.update(record["id"], lambda r: r.update(cleanup_error="Input/output error"))
                 response = await handlers["/h3/selflift/hunts"](Request({}))
                 public = json.loads(response.body)["batches"][0]
                 self.assertEqual(public["marked"], [1, 2])
@@ -169,6 +215,7 @@ class CleanupTests(unittest.TestCase):
                 self.assertEqual(public["max_marked"], 20)
                 self.assertNotIn("published", public["candidates"][0])
                 self.assertTrue(public["candidates"][0]["saved"])
+                self.assertEqual(public["cleanup_error"], "Input/output error")
         asyncio.run(run())
 
     def test_clean_route_requires_confirmation_and_matching_batch(self):

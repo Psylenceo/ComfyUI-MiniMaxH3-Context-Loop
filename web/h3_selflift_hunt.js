@@ -207,6 +207,9 @@ function mount(node) {
     const cleanupStatus = text("p", "", "h3sh-notice");
     cleanupStatus.hidden = true;
     cleanupStatus.setAttribute("role", "status");
+    const cleanupWarning = text("p", "", "h3sh-notice h3sh-cleanup-warning");
+    cleanupWarning.hidden = true;
+    cleanupWarning.setAttribute("role", "status");
     const gateNotice = text("p", "Review gate off for the next queue: upscale the saved choice, or run just the first seed automatically. Middle-pass recovery stays enabled. This does not bypass the final Review Gate.", "h3sh-notice h3sh-gate-notice");
     gateNotice.hidden = true;
     const help = text("details", "", "h3sh-help");
@@ -216,7 +219,7 @@ function mount(node) {
         text("p", "Mark several takes for upscale and choose one main take. Finish marked saves the alternates first and the main last, then shows all finished choices in Review Gate. Only the accepted main continues the scene chain."),
         text("p", "After OOM/restart, keep batch name, seed and settings fixed and queue the matching workflow in resume mode. Saved low/high passes and completed clips are reused. Selection changes are shared across tabs; cleanup waits until every marked take is saved."), recover);
     toolbar.append(select, reload, clean);
-    root.append(head, gateNotice, toolbar, player, empty, mediaStatus, candidates, status, cleanupStatus, help);
+    root.append(head, gateNotice, toolbar, player, empty, mediaStatus, candidates, status, cleanupWarning, cleanupStatus, help);
     let optionsKey = "";
     let dotsKey = "";
     let previewKey = "";
@@ -255,6 +258,10 @@ function mount(node) {
         select.value = key;
         const batch = batches.find(b => b.id === key);
         currentBatch = batch;
+        cleanupWarning.hidden = !batch?.cleanup_error;
+        cleanupWarning.textContent = batch?.cleanup_error
+            ? `Temporary-file cleanup failed: ${batch.cleanup_error}\nSaved scene files are not affected. Use Clean saved takes to retry removing the remaining temporary files.`
+            : "";
         clean.disabled = cleaning || choosing || requesting || marking || !batch || batch.active
             || batch.phase === "awaiting_save";
         select.disabled = cleaning || choosing || requesting || marking;

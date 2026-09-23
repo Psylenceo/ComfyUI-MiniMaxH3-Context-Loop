@@ -373,6 +373,18 @@ class HuntTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(hunt.cleanup_after_segment_save(result["result"][2], self.root,
                     logging.getLogger("cleanup-test")))
         self.assertEqual(self.store.list()[0]["phase"], "finished")
+        self.assertEqual(self.store.list()[0]["cleanup_error"], "read-only disk")
+        self.assertEqual(hunt._CLEANING, set())
+
+    async def test_cleanup_warning_write_failure_does_not_fail_the_saved_scene(self):
+        result = await self.select_when_ready(asyncio.create_task(self.run_node(1, auto_remove_saved_takes=True)))
+        with patch.object(HuntStore, "remove", side_effect=OSError("read-only disk")), \
+                patch.object(HuntStore, "update", side_effect=OSError("cannot write warning")):
+            with self.assertLogs("cleanup-test", level="WARNING") as logs:
+                self.assertIsNone(hunt.cleanup_after_segment_save(result["result"][2], self.root,
+                    logging.getLogger("cleanup-test")))
+            self.assertIn("read-only disk", logs.output[0])
+        self.assertEqual(self.store.list()[0]["phase"], "finished")
         self.assertEqual(hunt._CLEANING, set())
 
     async def test_recovery_omits_runtime_cache_fingerprints_and_reuses_saved_batch(self):

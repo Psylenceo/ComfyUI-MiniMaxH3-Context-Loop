@@ -160,6 +160,20 @@ def clean_saved_hunt(store, key, expected=None):
         _CLEANING.add(key)
     try:
         return store.remove(key, expected)
+    except OSError as exc:
+        # Preserve the original failure, but make it durable and visible in
+        # every gate/tab. A failed delete can already have removed some scratch
+        # files; do not claim the remaining batch is an intact recovery set.
+        message = str(exc)
+        def remember_failure(record):
+            if expected and any(record.get(k) != v for k, v in expected.items()):
+                return  # Never annotate a recreated/stale selection.
+            record["cleanup_error"] = message
+        try:
+            store.update(key, remember_failure)
+        except (OSError, ValueError, KeyError):
+            pass  # A storage outage may also prevent writing the warning.
+        raise
     finally:
         with _ACTIVE_LOCK:
             _CLEANING.discard(key)
@@ -588,7 +602,7 @@ def register_routes():
         # No prompts/conditioning, media probing, or tensor reads on UI requests.
         fields = ("id", "run_name", "branch_id", "scene", "scene_name", "batch_name", "created_at",
                   "phase", "current", "selected", "candidates", "error", "low_steps", "high_steps", "review_enabled",
-                  "upscale_request", "marked", "main", "selected_ordinals", "selection_version")
+                  "upscale_request", "marked", "main", "selected_ordinals", "selection_version", "cleanup_error")
         batches = []
         for row in rows:
             public = dict({k: row.get(k) for k in fields}, active=row["id"] in _ACTIVE,

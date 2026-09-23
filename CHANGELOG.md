@@ -9,6 +9,10 @@ optional companion features are not prerequisites. See the
 [migration guide](docs/MIGRATING_TO_0_7.md) and
 [release validation checklist](docs/RELEASING_0_7.md).
 
+- Fix SelfLift temporary bundles remaining file-mapped by cached tensors, which
+  can block cleanup on network/Windows storage after a successful scene save.
+  Keep tensor aliases without duplicate copies and show cleanup I/O failures in
+  the gate, with manual retry; unfinished takes and final scene files stay protected.
 - Fix Carousel/Tree project switches leaving Modern Plan, legacy Run Manager
   and linked Studio on a stale run name. Resolve the connected project-assets
   source across Map links, reroutes and subgraphs, resync on reload/reconnect,
