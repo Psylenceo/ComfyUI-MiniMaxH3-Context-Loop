@@ -69,6 +69,10 @@
         "plan": [
           "n36",
           "plan"
+        ],
+        "tagged_references": [
+          "n40",
+          "references"
         ]
       },
       "label": "MiniMax H3 Context Loop Start — LOOP START / RESUME"
@@ -642,6 +646,6 @@
       "label": "MiniMax H3 Checkpoint Manager — BRANCHES / PREVIEWS / RESTORE"
     }
   ],
-  "compatibility_note": "Adapted for **nightly** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against nightly.",
+  "compatibility_note": "Maintained for **0.7** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against this checkout.",
   "setup_steps": "1. CAROUSEL / STUDIO: set a unique run name in Project Asset Carousel.\n2. Import the supplied courier images; tag them courier_arrival and greenhouse_delivery (Picture).\n3. Edit scenes in Production Plan or Plan Studio. Generate audio is the default.\n4. OPTIONAL SOURCE AUDIO: import a soundtrack in Project Asset Carousel.\n   Audio use → Project timeline source; Generation Profile → Lip-sync to source audio.\n   The preset alone does not load an audio file; Carousel.project_assets carries your track.\n5. Queue; review takes and manage saved scenes in Checkpoint Manager.\n\nInstall models and packs as described in example_workflows/README.md."
 }

@@ -54,7 +54,7 @@ workflow contract.
 
 Loop-only capabilities currently remain internal: direct saved-video-latent
 Guide reuse, audio-only continuation, a timeline-audio window longer than the
-visual Guide, future end anchors, and the guarded pre-native-core fallback.
+visual Guide, and the guarded pre-native-core fallback.
 The adapter also resolves carried-head keyframe collisions and restores exact
 latent-audio placement after the upstream call.
 
@@ -71,6 +71,25 @@ If an older compatible copy owns the process first, wire **MiniMax H3 Patch
 Priority** before Context Loop Context. It can replace only a recognized sibling
 implementation. Unknown wrappers fail with an ownership explanation rather
 than being overwritten.
+
+## Tagged reference preflight warnings
+
+`reference_registry_not_connected` means that a preflight path sees prompt
+`@tags` or `#semantic` references but has no registry to validate them against.
+It is a warning, not by itself a generation failure. The conditioning node
+receiving references does not automatically supply them to every validator.
+
+Connect the same active Tagged/Carousel registry to **Tagged Ref2VA →
+references** and **Loop Start → tagged_references**, plus **Preflight** or
+**Plan Studio → tagged_references** when present. The maintained Tagged/Studio
+examples include these connections. Existing user graphs need the missing
+wire added explicitly; prompts and Plan JSON do not need rewriting.
+
+Keep registered tag names in the prompts; do not replace them with positional
+`<Picture 1>` tokens or remove intended references just to silence the warning.
+If execution actually fails, include the workflow JSON, pack/ComfyUI versions,
+and full preflight error in the report. Duplication, source-audio policy errors,
+and a missing-registry warning are not necessarily the same fault.
 
 ## Native MiniMax H3 tokenizer tokens
 

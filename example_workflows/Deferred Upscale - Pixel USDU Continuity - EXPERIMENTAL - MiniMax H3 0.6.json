@@ -1328,12 +1328,12 @@
       "mode": 0,
       "inputs": [],
       "outputs": [],
-      "title": "START HERE • NIGHTLY",
+      "title": "START HERE • 0.7",
       "properties": {
         "Node name for S&R": "Note"
       },
       "widgets_values": [
-        "NIGHTLY • 0.6 BASELINE • Deferred Upscale - Pixel USDU Continuity - EXPERIMENTAL\n\n1. Install DLSS5, the H3 USDU Guider fork and ContextAnchoredTile-videopath (VIDEO transport only).\n2. Select your saved output branch in Checkpoint Manager. Preview each continuing scene and tick Continue previous shot (pixel upscale). Leave hard cuts off.\n3. Choose installed models and a NEW upscale profile. Start before the first marked boundary, or resume the same profile with a saved previous HQ scene.\n4. Keep disk canvas storage. Queue a short range first; compare the join. Tone strength 0 disables tone correction.\n5. Optional: enable Boundary Experiment BEFORE a new upscale profile. Its separate final export tests a short joint USDU window; leave it OFF for the existing path.\n6. Use the guide for resume, recipe changes and limitations. Source generation and audio are preserved.\n\nWorkflow-specific setup and detailed wiring notes:\nexample_workflows/guides/Deferred Upscale - Pixel USDU Continuity - EXPERIMENTAL - MiniMax H3 0.6.md"
+        "0.7 • 0.6 CATALOG • Deferred Upscale - Pixel USDU Continuity - EXPERIMENTAL\n\n1. Install DLSS5, the H3 USDU Guider fork and ContextAnchoredTile-videopath (VIDEO transport only).\n2. Select your saved output branch in Checkpoint Manager. Preview each continuing scene and tick Continue previous shot (pixel upscale). Leave hard cuts off.\n3. Choose installed models and a NEW upscale profile. Start before the first marked boundary, or resume the same profile with a saved previous HQ scene.\n4. Keep disk canvas storage. Queue a short range first; compare the join. Tone strength 0 disables tone correction.\n5. Optional: enable Boundary Experiment BEFORE a new upscale profile. Its separate final export tests a short joint USDU window; leave it OFF for the existing path.\n6. Use the guide for resume, recipe changes and limitations. Source generation and audio are preserved.\n\nWorkflow-specific setup and detailed wiring notes:\nexample_workflows/guides/Deferred Upscale - Pixel USDU Continuity - EXPERIMENTAL - MiniMax H3 0.6.md"
       ]
     }
   ],

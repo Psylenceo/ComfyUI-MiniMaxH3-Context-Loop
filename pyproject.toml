@@ -35,9 +35,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ethanfel/ComfyUI-MiniMaxH3-Contex-Loop"
-Repository = "https://github.com/ethanfel/ComfyUI-MiniMaxH3-Contex-Loop"
-Issues = "https://github.com/ethanfel/ComfyUI-MiniMaxH3-Contex-Loop/issues"
+Homepage = "https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop"
+Repository = "https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop"
+Issues = "https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop/issues"
 Upstream = "https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context"
 MotionContextProvider = "https://github.com/seitanism/ComfyUI-H3-Motion-Context-MultiRef"
 

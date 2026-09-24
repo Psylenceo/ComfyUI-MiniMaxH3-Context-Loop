@@ -1,6 +1,6 @@
 # Deferred Upscale - Pixel DLSS5 + USDU - EXPERIMENTAL - MiniMax H3 0.6
 
-Adapted from the released **0.6 workflow catalog**. Validated against **nightly's node definitions**; external DLSS5 + USDU GPU refinement still needs testing.
+Maintained for **0.7** from the released **0.6 workflow catalog**. Validated against this checkout's node definitions; external DLSS5 + USDU GPU refinement still needs testing.
 
 Setup controls come first, followed by numbered generation columns.
 
@@ -25,7 +25,7 @@ Save and Loop End both receive the final RAW images. They trim the repeated pref
 
 No Pass-2 AV Prepare, latent Conditioning Sync, or upscaled_latent connection is needed. With backend=pixel, a parent Drift-Control boundary no longer demands an HQ latent; pixel refinement does not freeze/splice latent prefixes. This changes the refinement continuity strategy, not the original generation or its checkpoints. Inspect transitions before accepting a final.
 
-Each completed scene is saved under output/h3_chains/<run>/upscaled/<profile>/. To resume, retain the same selection/profile/settings and set start_clip to the first unfinished scene. A changed source branch or recorded recipe refuses reuse of the prior HQ prefix. recipe_json documents the recipe but does not automatically track every external node edit: choose a new profile when changing upscaler/model/settings to avoid mixing passes. Final assembly is under that child profile's final/ directory. A selected generated branch can stop before ungenerated Plan scenes.
+Each completed scene is saved under processing/<scope>/<profile>/ in new-layout projects, with technical state under .h3/. Legacy runs retain their saved paths. To resume, retain the same selection/profile/settings and set start_clip to the first unfinished scene. A changed source branch or recorded recipe refuses reuse of the prior HQ prefix. recipe_json documents the recipe but does not automatically track every external node edit: choose a new profile when changing upscaler/model/settings to avoid mixing passes. Final assembly is under that child profile's final/ directory. A selected generated branch can stop before ungenerated Plan scenes.
 
 DEPENDENCIES
 

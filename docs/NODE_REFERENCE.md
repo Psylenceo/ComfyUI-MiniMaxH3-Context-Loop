@@ -141,7 +141,7 @@ upscale Loop End. The de-rope example adds Guard, Freeze Mask, Continuity, and
 Recovered AV nodes. These nodes are designed to be used as a supplied group,
 not assembled one at a time from this short reference.
 
-Start from a [deferred-upscale example](../example_workflows/README.md#deferred-upscale)
+Start from a [deferred-upscale example](../example_workflows/README.md#deferred-de-rope-and-upscale)
 and use [Runs and recovery](RUNS_AND_RECOVERY.md#whole-chain-seedvr2-finishing)
 for the detailed contracts.
 

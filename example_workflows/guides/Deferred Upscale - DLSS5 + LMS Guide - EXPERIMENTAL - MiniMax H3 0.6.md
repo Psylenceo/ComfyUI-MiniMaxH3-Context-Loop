@@ -1,6 +1,6 @@
 # Deferred Upscale - DLSS5 + LMS Guide - EXPERIMENTAL - MiniMax H3 0.6
 
-New **nightly-only experiment**, based on Alissonerdx's LMS guide workflow. CPU contract/wiring checks are not a GPU quality or memory validation.
+Experimental **0.7** example, based on Alissonerdx's LMS guide workflow. CPU contract/wiring checks are not a GPU quality or memory validation.
 
 Setup controls come first, followed by numbered generation columns.
 

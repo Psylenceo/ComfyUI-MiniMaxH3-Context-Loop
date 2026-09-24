@@ -1,4 +1,4 @@
-# Working branches (nightly)
+# Working branches
 
 Plan Studio can keep several working versions of one project. A working branch
 owns its clip selection, Plan snapshot, editorial data and processing outputs.
@@ -179,6 +179,7 @@ Deletion protects revisions selected by another retained working branch,
 including its editorial selections and sealed chapter snapshots. Processing
 cleanup uses exact saved addresses, including branch-local PNG exports.
 
-Existing projects/workflows need no migration. Named working-branch workflows
-require this nightly implementation: do not run them in an older build that
-does not understand branch identity. Main is unchanged by this nightly feature.
+Adding a working branch does not require converting existing project files.
+Named working-branch workflows require a branch-aware build such as 0.7 RC;
+do not execute them in an older build that does not understand branch identity.
+Other removed-node/input changes still require [0.7 migration](MIGRATING_TO_0_7.md).

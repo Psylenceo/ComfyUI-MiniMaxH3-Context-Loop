@@ -43,11 +43,9 @@ the default height.
 When a Scene Prompt Editor or Rich Scene Prompt Editor is bound to the same
 Plan, Review Gate selects the scene under review there automatically. Editor
 changes are used by **Retry prompt / seed** or **Reroll seed** through the live
-Plan prompt. In 0.5, Review Gate's own prompt field is disabled by default.
-Restore it under **Settings → MiniMax H3 Context Loop → Interface → Review Gate
-→ Enable prompt editing inside Review Gate**. When enabled, text explicitly
-typed in that field wins for the submitted retry and is synchronized back to
-the Plan and connected editor after the server accepts it.
+Plan prompt. In 0.7, Review Gate's own prompt field and its enabling setting
+are removed. Edit in Scene Prompt Editor or Rich Scene Prompt Editor, then
+retry or reroll; there is no separate Gate prompt to synchronize.
 
 During sampling, the optional floating **Cancel & reroll scene N** control
 targets only the active H3 prompt. It waits for confirmed interruption, writes a

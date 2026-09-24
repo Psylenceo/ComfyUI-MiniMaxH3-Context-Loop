@@ -24,7 +24,7 @@ The [complete format guide](../H3_CHAIN_FORMAT_GUIDE.md) documents every Plan
 and per-scene field, raw versus delivered length, prompt structure, seeds, and
 timing.
 
-## Chapter resolution (nightly)
+## Chapter resolution
 
 Click the chapter marker in **Plan Studio** to choose **Inherit from Plan** or
 **Chapter resolution**, with Width and Height in multiples of 32. Each chapter
@@ -135,7 +135,7 @@ backported from the standalone
 nodes retain Motion Context Plan synchronization, revisions, `@tags`,
 semantic anchors, and optimizer integration.
 
-### Nightly editor interactions
+### Editor interactions
 
 Click a Subject, speaker, dialogue, lyrics, caption or flow token to replace
 or remove it. Pasted tokens become interactive immediately. Connected media

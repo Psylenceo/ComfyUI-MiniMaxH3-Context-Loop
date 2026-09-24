@@ -1,12 +1,12 @@
 # Deferred Upscale - Pixel USDU Continuity - EXPERIMENTAL - MiniMax H3 0.6
 
-For **nightly**: experimental file-backed USDU continuity. Mark only direct continuations in Checkpoint Manager; hard cuts remain independent.
+For **0.7**: experimental file-backed USDU continuity. Mark only direct continuations in Checkpoint Manager; hard cuts remain independent.
 
 Local validation (2026-09-17): real USDU GPU runs on a duplicated masked-AV dog continuation reduced the boundary frame-difference metric by about 16%. This is not a perceptual quality score. The 2-scene save/assembly loop retained all 209 delivered frames and bit-identical checkpoint audio. Fresh DLSS worker startup stalled locally, including after releasing H3 models; the successful loop used saved DLSS outputs from the earlier research. Fresh DLSS-through-assembly execution is therefore NOT validated. See [test notes](../../docs/pixel-continuity-research.md) and the limits below.
 
 Setup controls come first, followed by numbered generation columns.
 
-PIXEL CONTINUITY — NIGHTLY EXPERIMENTAL
+PIXEL CONTINUITY — 0.7 EXPERIMENTAL
 
 Choose the complete saved branch in Checkpoint Manager. In the Original scene inspector, tick “Continue previous shot (pixel upscale)” on each incoming continuous-shot boundary. This is a workflow-local export choice, saved with selection_json. It does not change generation, the Plan, audio, or project files. Both adjacent revision identities must still match. Picture-only ALTs do not inherit a base take's mark. Unmarked shots use independent USDU even when they were generated with masked AV context.
 

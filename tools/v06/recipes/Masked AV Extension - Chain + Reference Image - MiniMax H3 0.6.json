@@ -73,6 +73,10 @@
         "external_context": [
           "n40",
           "external_context"
+        ],
+        "tagged_references": [
+          "n42",
+          "references"
         ]
       },
       "label": "MiniMax H3 Context Loop Start — LOOP START / RESUME"
@@ -687,5 +691,5 @@
       "inputs": {}
     }
   ],
-  "compatibility_note": "Adapted for **nightly** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against nightly."
+  "compatibility_note": "Maintained for **0.7** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against this checkout."
 }

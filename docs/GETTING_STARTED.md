@@ -1,7 +1,9 @@
 # Getting started
 
 This guide takes the shortest path from a clean install to one reviewed,
-assembled video.
+assembled video. This branch is the **0.7 release candidate**, not a published
+stable release. Read [migration notes](MIGRATING_TO_0_7.md) before updating an
+older custom workflow, and back up your workflow and run folder first.
 
 ## 1. Install the packs
 
@@ -9,8 +11,8 @@ From `ComfyUI/custom_nodes`:
 
 ```bash
 git clone https://github.com/seitanism/ComfyUI-H3-Motion-Context-MultiRef.git
-git clone --branch nightly \
-  https://github.com/ethanfel/ComfyUI-MiniMaxH3-Contex-Loop.git
+git clone --branch 0.7-rc \
+  https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop.git
 ```
 
 Restart ComfyUI. Use a current ComfyUI build with native **Add Guide for
@@ -55,7 +57,7 @@ the MultiRef companion pack and restart. If it reports missing native H3 nodes,
 update ComfyUI.
 
 Deferred-upscale examples need extra packs. Their requirements are listed in
-the [workflow catalog](../example_workflows/README.md#deferred-upscale).
+the [workflow catalog](../example_workflows/README.md#deferred-de-rope-and-upscale).
 
 ## 4. Edit only the first-run controls
 
@@ -129,7 +131,8 @@ for the notation used throughout these docs.
 
 ## 6. Queue and review
 
-Queue the workflow normally.
+Queue the workflow normally. Examples use recursive execution by default;
+[top-level requeue](MAINTAINED_WORKFLOW.md) is a separate opt-in mode.
 
 1. **Preflight** validates timing, references, media, and resume compatibility
    before the large models load.
@@ -153,19 +156,23 @@ node creates the final MP4.
 
 ## 7. Find the result
 
-One run is stored under:
+New runs use this layout:
 
 ```text
 ComfyUI/output/h3_chains/<run_name>/
-├── checkpoints/     saved continuation state and revision data
-├── segments/        reviewed scene media
-├── final/           assembled MP4 and optional audio/subtitle sidecars
-└── ...              manifests, previews, and recovery metadata
+├── generation/
+│   ├── clips/       reviewed scene video and prompt snapshots
+│   └── audio/       generated scene audio
+├── processing/      derived clips and audio, grouped by scope and pass
+├── exports/         assembled videos and export sidecars
+└── .h3/             checkpoints, manifests, branches and recovery state
 ```
 
-Exact subfolders can grow as review branches, project assets, or upscale
-profiles are added. Use **Run Manager** or **Checkpoint Manager** instead of
-manually changing active revision files.
+The hidden `.h3/` directory is essential project state, **not a disposable
+cache**. Existing runs retain their legacy layout; updating does not move their
+files automatically. See [storage layout](SIMPLE_CHAIN_LAYOUT.md). Use **Run
+Manager** or **Checkpoint Manager** instead of manually changing active
+revision files.
 
 ## Assemble later without rendering
 
@@ -188,6 +195,7 @@ sampler body.
 | Recovery nodes render unexpectedly | Mute the recovery Load Manifest and Assemble pair. |
 | Audio or preview tools fail | Install `ffmpeg`, or confirm ComfyUI's PyAV installation works. |
 | A source-audio profile fails preflight | Connect a Source Timeline containing enough audio for the plan. |
+| `reference_registry_not_connected` warning | Connect the active registry to each preflight path, including Loop Start; see [Tagged reference checks](COMPATIBILITY.md#tagged-reference-preflight-warnings). |
 
 For deeper diagnosis, use [Compatibility](COMPATIBILITY.md), [Audio and
 continuity](AUDIO_AND_CONTINUITY.md), or [Runs and recovery](RUNS_AND_RECOVERY.md).

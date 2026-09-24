@@ -1,10 +1,10 @@
-# MiniMax H3 nightly example workflows — 0.6 baseline
+# MiniMax H3 0.7 RC example workflows — 0.6 catalog
 
-These are the released 0.6 workflows adapted to nightly's node definitions.
+These are the maintained 0.6-named workflows rebuilt for 0.7's node definitions.
 They use fresh node serialization, the organized **Production Plan**, explicit
 **Generation Profile**, and numbered, non-overlapping project/generation columns. Pre-0.6 examples were retired in 0.7; Git history retains them.
 The **0.6** filenames identify the shared catalog baseline, not a requirement
-to switch branches. This checkout's examples are intended for **nightly**.
+to switch branches. This checkout's examples are intended for **0.7 RC**.
 
 For installation and first-run setup, see
 [Getting started](../docs/GETTING_STARTED.md).
@@ -35,12 +35,12 @@ Each workflow has a compact **START HERE** note. The longer setup and wiring
 instructions are in its matching Markdown file under [`guides/`](guides/)
 (or `tagged/guides/` for manual Tagged examples),
 so they no longer take up large empty canvas panels. Titles and preview sizes
-come from the layouts checked in ComfyUI for the 0.6 release. Nightly's
-additional sockets and controls are included in its layout checks.
+come from the layouts checked in ComfyUI for the 0.6 release. Current 0.7
+sockets and controls are included in the layout checks.
 
 The catalog is compiled from [named recipes](../tools/v06/README.md), **not**
 archived workflow JSON. All H3 sockets, widget positions, and values are checked
-against this **nightly checkout**. Model files, source tracks, and extra packs still
+against this **0.7 checkout**. Model files, source tracks, and extra packs still
 need to be installed/selected as described below; schema validation does not
 replace a GPU render test.
 
@@ -113,7 +113,7 @@ locking defaults to on: claim ownership explicitly when editing a protected
 run. It can be disabled server-wide under **Settings → MiniMax H3 Context Loop
 → Project safety → Workflow ownership locking**. This does not disable file
 transaction locks or deletion safeguards.
-Pending Review and Chapter Delivery remain available as optional nightly nodes;
+Pending Review and Chapter Delivery remain available as optional nodes;
 these baseline examples do not enable them automatically.
 
 In I2V workflows, do not bypass **Frame Gate**. It prevents the opening picture
@@ -147,15 +147,18 @@ are not first-install tests.
 | [De-Rope Only — Fast Turbo](<Deferred De-Rope Only - Fast Turbo - MiniMax H3 0.6.json>) | MAINodes v1.1.3+ and LightX2V 4-step v1.0 768p ComfyUI bf16 LoRA; [recipe and limits](<guides/Deferred De-Rope Only - Fast Turbo - MiniMax H3 0.6.md>) |
 | [SeedVR2 Full Chain](<Deferred Upscale - SeedVR2 Full Chain - MiniMax H3 0.6.json>) | [ethanfel SeedVR2 fork](https://github.com/ethanfel/ComfyUI-SeedVR2_VideoUpscaler) |
 | [H3 LBH 3D](<Deferred Upscale - H3 LBH 3D - MiniMax H3 0.6.json>) | [LBH H3 latent upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler) |
-| [H3 LBH 3D Split — Experimental, nightly](<Deferred Upscale - H3 LBH 3D Split - EXPERIMENTAL - MiniMax H3 0.6.json>) | LBH pack with **MMH3 Split Upscale** (August 28+); temporal/spatial refinement, source audio retained. **No locked previous-HQ scene prefix**; starts with one scene. [Settings, safeguards and limits](<guides/Deferred Upscale - H3 LBH 3D Split - EXPERIMENTAL - MiniMax H3 0.6.md>) |
+| [H3 LBH 3D Split — Experimental](<Deferred Upscale - H3 LBH 3D Split - EXPERIMENTAL - MiniMax H3 0.6.json>) | LBH pack with **MMH3 Split Upscale** (August 28+); temporal/spatial refinement, source audio retained. **No locked previous-HQ scene prefix**; starts with one scene. [Settings, safeguards and limits](<guides/Deferred Upscale - H3 LBH 3D Split - EXPERIMENTAL - MiniMax H3 0.6.md>) |
 | [H3 LBH 3D + De-Rope](<Deferred Upscale + De-Rope - H3 LBH 3D - MiniMax H3 0.6.json>) | LBH pack plus [ComfyUI-MAINodes](https://github.com/matlowai/ComfyUI-MAINodes) |
 | [Pixel DLSS5 + USDU — Experimental](<Deferred Upscale - Pixel DLSS5 + USDU - EXPERIMENTAL - MiniMax H3 0.6.json>) | [DLSS5](https://github.com/Blueforcer/ComfyUI-DLSS5-Enhancer), [H3 USDU Guider fork](https://github.com/lisitskyaa/ComfyUI_UltimateSDUpscaleGuider_H3), and Turbo v4 LoRA; [setup and testing limits](<guides/Deferred Upscale - Pixel DLSS5 + USDU - EXPERIMENTAL - MiniMax H3 0.6.md>) |
 | [Pixel USDU Continuity — Experimental](<Deferred Upscale - Pixel USDU Continuity - EXPERIMENTAL - MiniMax H3 0.6.json>) | Same models/DLSS5/USDU plus file-backed `ComfyUI-ContextAnchoredTile-videopath` transport (no CAT refinement). Checkpoint Manager per-scene **Continue previous shot** toggle; hard cuts bypass protection. [Setup, resume and limitations](<guides/Deferred Upscale - Pixel USDU Continuity - EXPERIMENTAL - MiniMax H3 0.6.md>) |
-| [DLSS5 + LMS Guide — Experimental, nightly](<Deferred Upscale - DLSS5 + LMS Guide - EXPERIMENTAL - MiniMax H3 0.6.json>) | [LMS](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI), Ref2V Turbo 4step v0.1, and [DLSS5](https://github.com/Blueforcer/ComfyUI-DLSS5-Enhancer). Full-scene guide refinement, fresh target, original audio; [setup and memory limits](<guides/Deferred Upscale - DLSS5 + LMS Guide - EXPERIMENTAL - MiniMax H3 0.6.md>) |
+| [DLSS5 + LMS Guide — Experimental](<Deferred Upscale - DLSS5 + LMS Guide - EXPERIMENTAL - MiniMax H3 0.6.json>) | [LMS](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI), Ref2V Turbo 4step v0.1, and [DLSS5](https://github.com/Blueforcer/ComfyUI-DLSS5-Enhancer). Full-scene guide refinement, fresh target, original audio; [setup and memory limits](<guides/Deferred Upscale - DLSS5 + LMS Guide - EXPERIMENTAL - MiniMax H3 0.6.md>) |
 
-Upscaled variants are saved below
-`output/h3_chains/<run>/upscaled/<profile>/` and never replace source
-checkpoints. See [Runs and recovery](../docs/RUNS_AND_RECOVERY.md).
+Upscaled variants never replace source checkpoints. New projects save media
+under `output/h3_chains/<run>/processing/<scope>/<profile>/` and assembled
+videos under `exports/videos/<scope>/pass-<profile>/`; technical manifests and
+latents stay in `.h3/`. Existing projects retain their legacy paths. See
+[storage layout](../docs/SIMPLE_CHAIN_LAYOUT.md) and
+[Runs and recovery](../docs/RUNS_AND_RECOVERY.md).
 
 **Assemble an already-saved upscale**
 
@@ -164,12 +167,13 @@ Add **MiniMax H3 Upscale Manifest Load**, paste the path to the saved
 **H3 Chain Assemble**. This bypasses the upscale loop entirely: no scene needs
 to be regenerated, and no source Plan or model loaders are required.
 
-For a project-wide run the file is
-`output/h3_chains/<run>/upscaled/<profile>/upscale_manifest.json`.
-Chapter-scoped runs keep it under
-`output/h3_chains/<run>/chapters/<chapter>/upscaled/<profile>/`
-(inside the working branch directory when applicable). An unfinished run can
-use its saved `partial/through_clip_NNNN.manifest.json` instead; it stays partial.
+For a new-layout, unchaptered Original run the file is
+`output/h3_chains/<run>/.h3/upscaled/<profile>/upscale_manifest.json`.
+Chapter/working-branch processing state lives below `.h3/chapters/` or
+`.h3/branches/`. Legacy runs use the same internal trees without the `.h3/`
+prefix. Use the actual saved manifest, not a guessed path for another scope.
+An unfinished run can use its saved `partial/through_clip_NNNN.manifest.json`
+instead; it stays partial.
 The node accepts an absolute path or one relative to ComfyUI's output folder.
 It reads and verifies only when queued, without scanning or rewriting projects.
 Keep the saved upscale's media and checkpoints; loading does not reconstruct

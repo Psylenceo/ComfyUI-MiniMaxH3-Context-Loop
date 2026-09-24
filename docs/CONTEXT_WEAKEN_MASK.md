@@ -1,4 +1,4 @@
-# Fixed context masks (nightly)
+# Fixed context masks
 
 In **Plan Studio → Context → Picture**, select an earlier scene's picture
 block. With **Masked AV**, **Feathered AV** or **Audio Feather AV** selected,

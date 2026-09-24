@@ -1,35 +1,44 @@
-# Maintained workflow
+# Execution modes
 
-This repository's maintained 0.6.2 workflow pattern keeps the current Plan and
-creative model stack intact while changing only the job boundary behavior.
+The maintained examples use **recursive** execution by default. Top-level
+requeue is an optional job-boundary mode, not a different Plan or model stack.
 
-## What changes
+| Mode | Between accepted scenes | Requirements |
+|---|---|---|
+| `recursive` (default) | Continue inside the same top-level prompt | Normal Loop Start / Loop End wiring |
+| `top_level_requeue` | Finish the prompt, then queue the next scene separately | Loop End mode plus the frontend setting below |
 
-- Loop End uses the top-level requeue path instead of recursive heavyweight
-  continuation.
-- The durable handoff lives in `output/h3_chains/<run_name>/orchestration/`.
-- The frontend waits for the post-job cleanup delay, claims the handoff once,
-  and queues the next scene as a brand-new top-level prompt.
-- Review Gate can collect multiple candidates before approval, but the Plan
-  JSON itself stays frozen.
+## Enable top-level requeue
 
-## What does not change
+1. Set Loop End's `execution_mode` to `top_level_requeue`.
+2. Under **Settings → MiniMax H3 Context Loop → Interface → Top-level requeue**,
+   enable **Auto requeue next scene as a new top-level prompt**.
+3. Keep the workflow open. After the accepted scene and downstream outputs
+   finish successfully, the frontend waits for safe-queue/cleanup checks,
+   claims the durable handoff once, and submits the next scene.
 
-- prompt `@tags`
-- scene prompts and seeds
-- the creative model stack
-- checkpoint/recovery semantics
-- the JSON Plan schema
+The cleanup delay is adjustable with **Requeue cleanup interval (ms)** in the
+adjacent **Top-level requeue cleanup** category. Turning off automatic requeue
+does not turn a top-level Loop End into recursive execution; it leaves
+continuation manual.
 
-## When to use it
+This boundary is **between accepted scenes only**. Candidate generation,
+retries and review decisions still happen within the live prompt. Splitting
+jobs can reduce between-scene executor retention; it is not a guarantee
+against out-of-memory errors within one scene or a candidate batch.
 
-Use the maintained workflow whenever you want the proven memory-safe scene to
-scene lifecycle:
+## What stays the same
 
-1. finish the current scene;
-2. wait for the normal cleanup delay;
-3. queue the next heavy scene as a new prompt;
-4. continue with the same saved Plan and run name.
+Prompts, seeds, the creative model stack, the Plan schema and saved checkpoint
+semantics are unchanged. Handoffs live in the run's orchestration state
+(`.h3/orchestration/` for new-layout runs; `orchestration/` for legacy runs).
+See [storage layout](SIMPLE_CHAIN_LAYOUT.md).
 
-If you are resuming after a crash or restart, use the saved orchestration state
-rather than reauthoring the Plan.
+The handoff is bound to the workflow, working branch and committed predecessor.
+Cancelling, changing branches or disabling the setting invalidates waiting
+automatic work. A stale handoff after refresh/restart is recovery history,
+not permission to submit another job: inspect the saved scene and resume
+manually. See [top-level recovery details](RUNS_AND_RECOVERY.md#top-level-prompt-lifecycle).
+
+On WSL2, `--disable-pinned-memory` is a separate host-pinning workaround. It
+does not enable this execution mode or fix every memory failure.

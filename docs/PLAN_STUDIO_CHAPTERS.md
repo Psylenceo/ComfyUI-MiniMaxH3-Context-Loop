@@ -1,4 +1,4 @@
-# Plan Studio chapter folding (nightly)
+# Plan Studio chapter folding
 
 Click **▾** beside a chapter title on the Generated track to fold its scenes
 into one compact block showing the title, scene count and used duration.

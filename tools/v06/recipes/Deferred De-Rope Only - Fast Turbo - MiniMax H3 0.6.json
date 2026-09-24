@@ -768,6 +768,6 @@
       }
     }
   ],
-  "compatibility_note": "Adapted for **nightly** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against nightly.",
+  "compatibility_note": "Maintained for **0.7** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against this checkout.",
   "setup_steps": "1. Install ComfyUI-MAINodes v1.1.3+ and the LightX2V 4-step v1.0 768p ComfyUI bf16 LoRA.\n   Select the H3 model, text encoder and VAEs; this is the FAST/TURBO repair variant.\n2. In Checkpoint Manager choose the Original branch to repair. No Plan or source render is required.\n3. Set a NEW De-Rope profile and the Adapter scene range. Source resolution is preserved.\n4. Leave manual ranges blank for automatic repair; use a single scene for a targeted range.\n5. Review the budget and final-frame reports. Full recovered latents are saved for later upscaling."
 }

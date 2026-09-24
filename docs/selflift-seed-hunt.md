@@ -1,4 +1,4 @@
-# SelfLift Seed Hunt (nightly, experimental)
+# SelfLift Seed Hunt (experimental)
 
 Use **MiniMax H3 SelfLift Seed Hunt** in place of the Chain SelfLift Sampler,
 or open the **Ref2V Studio SelfLift Seed Hunt** example. It is now the one

@@ -1,6 +1,6 @@
 # Deferred Upscale - H3 LBH 3D - MiniMax H3 0.6
 
-Adapted for **nightly** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against nightly.
+Maintained for **0.7** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against this checkout.
 
 Setup controls come first, followed by numbered generation columns.
 
@@ -10,7 +10,7 @@ STANDALONE H3 CHECKPOINT UPSCALE
 2. The selected_manifest cable is the complete parent-chain contract. No Plan, Source Timeline, source audio, or external context enters the upscale loop. Original reference media is unnecessary unless you deliberately connect a new Tagged Ref line to the override node.
 3. Choose a unique profile in Upscale Adapter. start_clip=1/end_clip=0 processes every generated scene in the selection.
 4. Keep LBH on scale by multiplier = 2.0 (2x width and height), with grid-32 alignment.
-5. Queue. Each HQ scene is saved before the loop advances; Assemble writes under output/h3_chains/<run>/upscaled/<profile>/final/.
+5. Queue. Each HQ scene is saved before the loop advances; Assemble writes the processing export under exports/videos/<scope>/pass-<profile>/ in new-layout projects; legacy runs retain their saved paths.
 
 save_latent is OFF by default. Enable it only when you need to reopen the complete HQ latent later. Drift-Control compatibility still saves only the small 12-step HQ context tail needed by the following scene and by interrupted-run resume.
 

@@ -706,6 +706,6 @@
       "inputs": {}
     }
   ],
-  "compatibility_note": "Adapted for **nightly** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against nightly.",
+  "compatibility_note": "Maintained for **0.7** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against this checkout.",
   "setup_steps": "1. Copy the supplied courier/greenhouse images into ComfyUI/input or replace both Load Image selections.\n2. REQUIRED: upload/select your full soundtrack in Load Audio. No Project Asset Carousel is used.\n3. Set the Production Plan run name and scene lengths to fit your track. Lip-sync to source audio is already selected.\n4. Preflight checks the audio before sampling. Keep Current Scene.state wired to Tagged Ref2VA.state."
 }

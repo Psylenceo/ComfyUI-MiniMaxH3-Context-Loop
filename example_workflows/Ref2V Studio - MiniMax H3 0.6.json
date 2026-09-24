@@ -2,7 +2,7 @@
   "id": "158840d8-7fc5-5e78-8fd8-64c8b310f7cd",
   "revision": 0,
   "last_node_id": 31,
-  "last_link_id": 61,
+  "last_link_id": 62,
   "nodes": [
     {
       "id": 1,
@@ -24,7 +24,7 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            45
+            46
           ]
         }
       ],
@@ -57,7 +57,7 @@
           "name": "CLIP",
           "type": "CLIP",
           "links": [
-            5
+            6
           ]
         }
       ],
@@ -91,7 +91,7 @@
           "name": "SAMPLER",
           "type": "SAMPLER",
           "links": [
-            28
+            29
           ]
         }
       ],
@@ -123,9 +123,9 @@
           "name": "VAE",
           "type": "VAE",
           "links": [
-            6,
-            18,
-            32
+            7,
+            19,
+            33
           ]
         }
       ],
@@ -157,9 +157,9 @@
           "name": "VAE",
           "type": "VAE",
           "links": [
-            7,
-            20,
-            34
+            8,
+            21,
+            35
           ]
         }
       ],
@@ -204,7 +204,7 @@
         {
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
-          "link": null
+          "link": 2
         }
       ],
       "outputs": [
@@ -212,14 +212,14 @@
           "name": "flow",
           "type": "H3_CHAIN_FLOW",
           "links": [
-            50
+            51
           ]
         },
         {
           "name": "state",
           "type": "H3_CHAIN_STATE",
           "links": [
-            2
+            3
           ]
         },
         {
@@ -256,7 +256,7 @@
         {
           "name": "state",
           "type": "H3_CHAIN_STATE",
-          "link": 2
+          "link": 3
         }
       ],
       "outputs": [
@@ -264,26 +264,26 @@
           "name": "state",
           "type": "H3_CHAIN_STATE",
           "links": [
-            15,
             16,
-            38,
+            17,
             39,
-            47,
-            51
+            40,
+            48,
+            52
           ]
         },
         {
           "name": "clip_index",
           "type": "INT",
           "links": [
-            9
+            10
           ]
         },
         {
           "name": "clip_count",
           "type": "INT",
           "links": [
-            10
+            11
           ]
         },
         {
@@ -295,42 +295,42 @@
           "name": "prompt",
           "type": "STRING",
           "links": [
-            11
+            12
           ]
         },
         {
           "name": "noise_seed",
           "type": "INT",
           "links": [
-            4
+            5
           ]
         },
         {
           "name": "length",
           "type": "INT",
           "links": [
-            14
+            15
           ]
         },
         {
           "name": "steps",
           "type": "INT",
           "links": [
-            25
+            26
           ]
         },
         {
           "name": "width",
           "type": "INT",
           "links": [
-            12
+            13
           ]
         },
         {
           "name": "height",
           "type": "INT",
           "links": [
-            13
+            14
           ]
         },
         {
@@ -385,7 +385,7 @@
         {
           "name": "manifest",
           "type": "H3_CHAIN_MANIFEST",
-          "link": 3
+          "link": 4
         },
         {
           "name": "source_timeline",
@@ -439,7 +439,7 @@
         {
           "name": "noise_seed",
           "type": "INT",
-          "link": 4,
+          "link": 5,
           "widget": {
             "name": "noise_seed"
           }
@@ -450,7 +450,7 @@
           "name": "NOISE",
           "type": "NOISE",
           "links": [
-            26
+            27
           ]
         }
       ],
@@ -481,27 +481,27 @@
         {
           "name": "clip",
           "type": "CLIP",
-          "link": 5
+          "link": 6
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 6
+          "link": 7
         },
         {
           "name": "audio_vae",
           "type": "VAE",
-          "link": 7
+          "link": 8
         },
         {
           "name": "references",
           "type": "H3_TAGGED_REFERENCES",
-          "link": 8
+          "link": 9
         },
         {
           "name": "clip_index",
           "type": "INT",
-          "link": 9,
+          "link": 10,
           "widget": {
             "name": "clip_index"
           }
@@ -509,7 +509,7 @@
         {
           "name": "clip_count",
           "type": "INT",
-          "link": 10,
+          "link": 11,
           "widget": {
             "name": "clip_count"
           }
@@ -517,7 +517,7 @@
         {
           "name": "prompt",
           "type": "STRING",
-          "link": 11,
+          "link": 12,
           "widget": {
             "name": "prompt"
           }
@@ -525,7 +525,7 @@
         {
           "name": "width",
           "type": "INT",
-          "link": 12,
+          "link": 13,
           "widget": {
             "name": "width"
           }
@@ -533,7 +533,7 @@
         {
           "name": "height",
           "type": "INT",
-          "link": 13,
+          "link": 14,
           "widget": {
             "name": "height"
           }
@@ -541,7 +541,7 @@
         {
           "name": "length",
           "type": "INT",
-          "link": 14,
+          "link": 15,
           "widget": {
             "name": "length"
           }
@@ -549,7 +549,7 @@
         {
           "name": "state",
           "type": "H3_CHAIN_STATE",
-          "link": 15
+          "link": 16
         }
       ],
       "outputs": [
@@ -557,14 +557,14 @@
           "name": "positive",
           "type": "CONDITIONING",
           "links": [
-            17
+            18
           ]
         },
         {
           "name": "latent",
           "type": "LATENT",
           "links": [
-            19
+            20
           ]
         },
         {
@@ -625,27 +625,27 @@
         {
           "name": "state",
           "type": "H3_CHAIN_STATE",
-          "link": 16
+          "link": 17
         },
         {
           "name": "conditioning",
           "type": "CONDITIONING",
-          "link": 17
+          "link": 18
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 18
+          "link": 19
         },
         {
           "name": "latent",
           "type": "LATENT",
-          "link": 19
+          "link": 20
         },
         {
           "name": "audio_vae",
           "type": "VAE",
-          "link": 20
+          "link": 21
         },
         {
           "name": "model",
@@ -668,14 +668,14 @@
           "name": "conditioning",
           "type": "CONDITIONING",
           "links": [
-            23
+            24
           ]
         },
         {
           "name": "trim_frames",
           "type": "INT",
           "links": [
-            37
+            38
           ]
         },
         {
@@ -687,7 +687,7 @@
           "name": "latent",
           "type": "LATENT",
           "links": [
-            30
+            31
           ]
         },
         {
@@ -720,7 +720,7 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 21
+          "link": 22
         }
       ],
       "outputs": [
@@ -728,8 +728,8 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            22,
-            24
+            23,
+            25
           ]
         }
       ],
@@ -760,12 +760,12 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 22
+          "link": 23
         },
         {
           "name": "conditioning",
           "type": "CONDITIONING",
-          "link": 23
+          "link": 24
         }
       ],
       "outputs": [
@@ -773,7 +773,7 @@
           "name": "GUIDER",
           "type": "GUIDER",
           "links": [
-            27
+            28
           ]
         }
       ],
@@ -801,12 +801,12 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 24
+          "link": 25
         },
         {
           "name": "steps",
           "type": "INT",
-          "link": 25,
+          "link": 26,
           "widget": {
             "name": "steps"
           }
@@ -817,7 +817,7 @@
           "name": "SIGMAS",
           "type": "SIGMAS",
           "links": [
-            29
+            30
           ]
         }
       ],
@@ -849,27 +849,27 @@
         {
           "name": "noise",
           "type": "NOISE",
-          "link": 26
+          "link": 27
         },
         {
           "name": "guider",
           "type": "GUIDER",
-          "link": 27
+          "link": 28
         },
         {
           "name": "sampler",
           "type": "SAMPLER",
-          "link": 28
+          "link": 29
         },
         {
           "name": "sigmas",
           "type": "SIGMAS",
-          "link": 29
+          "link": 30
         },
         {
           "name": "latent_image",
           "type": "LATENT",
-          "link": 30
+          "link": 31
         }
       ],
       "outputs": [
@@ -877,10 +877,10 @@
           "name": "output",
           "type": "LATENT",
           "links": [
-            31,
-            33,
-            41,
-            53
+            32,
+            34,
+            42,
+            54
           ]
         },
         {
@@ -913,12 +913,12 @@
         {
           "name": "samples",
           "type": "LATENT",
-          "link": 31
+          "link": 32
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 32
+          "link": 33
         }
       ],
       "outputs": [
@@ -926,7 +926,7 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            35
+            36
           ]
         }
       ],
@@ -954,12 +954,12 @@
         {
           "name": "samples",
           "type": "LATENT",
-          "link": 33
+          "link": 34
         },
         {
           "name": "vae",
           "type": "VAE",
-          "link": 34
+          "link": 35
         }
       ],
       "outputs": [
@@ -967,7 +967,7 @@
           "name": "AUDIO",
           "type": "AUDIO",
           "links": [
-            36
+            37
           ]
         }
       ],
@@ -995,12 +995,12 @@
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 35
+          "link": 36
         },
         {
           "name": "trim_frames",
           "type": "INT",
-          "link": 37,
+          "link": 38,
           "widget": {
             "name": "trim_frames"
           }
@@ -1008,12 +1008,12 @@
         {
           "name": "audio",
           "type": "AUDIO",
-          "link": 36
+          "link": 37
         },
         {
           "name": "state",
           "type": "H3_CHAIN_STATE",
-          "link": 38
+          "link": 39
         }
       ],
       "outputs": [
@@ -1021,23 +1021,23 @@
           "name": "images",
           "type": "IMAGE",
           "links": [
-            40,
-            52
+            41,
+            53
           ]
         },
         {
           "name": "audio",
           "type": "AUDIO",
           "links": [
-            42,
-            49
+            43,
+            50
           ]
         },
         {
           "name": "images_with_overlap",
           "type": "IMAGE",
           "links": [
-            43
+            44
           ]
         },
         {
@@ -1074,27 +1074,27 @@
         {
           "name": "state",
           "type": "H3_CHAIN_STATE",
-          "link": 39
+          "link": 40
         },
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 40
+          "link": 41
         },
         {
           "name": "sampled_latent",
           "type": "LATENT",
-          "link": 41
+          "link": 42
         },
         {
           "name": "audio",
           "type": "AUDIO",
-          "link": 42
+          "link": 43
         },
         {
           "name": "images_with_overlap",
           "type": "IMAGE",
-          "link": 43
+          "link": 44
         },
         {
           "name": "denoised_latent",
@@ -1107,7 +1107,7 @@
           "name": "segment",
           "type": "H3_CHAIN_SEGMENT",
           "links": [
-            48
+            49
           ]
         },
         {
@@ -1140,7 +1140,7 @@
         {
           "name": "manifest",
           "type": "H3_CHAIN_MANIFEST",
-          "link": 44
+          "link": 45
         },
         {
           "name": "source_timeline",
@@ -1194,7 +1194,7 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 45
+          "link": 46
         }
       ],
       "outputs": [
@@ -1202,7 +1202,7 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            21
+            22
           ]
         }
       ],
@@ -1232,7 +1232,7 @@
         {
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
-          "link": 46
+          "link": 47
         },
         {
           "name": "external_context",
@@ -1250,7 +1250,7 @@
           "name": "manifest",
           "type": "H3_CHAIN_MANIFEST",
           "links": [
-            3
+            4
           ]
         },
         {
@@ -1288,17 +1288,17 @@
         {
           "name": "state",
           "type": "H3_CHAIN_STATE",
-          "link": 47
+          "link": 48
         },
         {
           "name": "segment",
           "type": "H3_CHAIN_SEGMENT",
-          "link": 48
+          "link": 49
         },
         {
           "name": "audio",
           "type": "AUDIO",
-          "link": 49
+          "link": 50
         },
         {
           "name": "pending_review",
@@ -1311,7 +1311,7 @@
           "name": "segment",
           "type": "H3_CHAIN_SEGMENT",
           "links": [
-            54
+            55
           ]
         },
         {
@@ -1353,27 +1353,27 @@
         {
           "name": "flow",
           "type": "H3_CHAIN_FLOW",
-          "link": 50
+          "link": 51
         },
         {
           "name": "state",
           "type": "H3_CHAIN_STATE",
-          "link": 51
+          "link": 52
         },
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 52
+          "link": 53
         },
         {
           "name": "sampled_latent",
           "type": "LATENT",
-          "link": 53
+          "link": 54
         },
         {
           "name": "segment",
           "type": "H3_CHAIN_SEGMENT",
-          "link": 54
+          "link": 55
         }
       ],
       "outputs": [
@@ -1381,7 +1381,7 @@
           "name": "manifest",
           "type": "H3_CHAIN_MANIFEST",
           "links": [
-            44
+            45
           ]
         },
         {
@@ -1427,7 +1427,7 @@
         {
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
-          "link": 55
+          "link": 56
         },
         {
           "name": "source_timeline",
@@ -1437,7 +1437,7 @@
         {
           "name": "tagged_references",
           "type": "H3_TAGGED_REFERENCES",
-          "link": 56
+          "link": 57
         },
         {
           "name": "chain_policy",
@@ -1447,7 +1447,7 @@
         {
           "name": "project_assets",
           "type": "H3_PROJECT_ASSETS",
-          "link": 57
+          "link": 58
         }
       ],
       "outputs": [
@@ -1456,9 +1456,9 @@
           "type": "H3_CHAIN_PLAN",
           "links": [
             1,
-            46,
-            58,
-            61
+            47,
+            59,
+            62
           ]
         },
         {
@@ -1554,7 +1554,7 @@
         {
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
-          "link": 58
+          "link": 59
         }
       ],
       "outputs": [
@@ -1588,7 +1588,7 @@
         {
           "name": "chain_policy",
           "type": "H3_CHAIN_POLICY",
-          "link": 59
+          "link": 60
         },
         {
           "name": "plan_json_input",
@@ -1598,7 +1598,7 @@
         {
           "name": "project_assets",
           "type": "H3_PROJECT_ASSETS",
-          "link": 60
+          "link": 61
         }
       ],
       "outputs": [
@@ -1606,7 +1606,7 @@
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
           "links": [
-            55
+            56
           ]
         },
         {
@@ -1680,7 +1680,7 @@
           "name": "chain_policy",
           "type": "H3_CHAIN_POLICY",
           "links": [
-            59
+            60
           ]
         },
         {
@@ -1729,16 +1729,17 @@
           "name": "project_assets",
           "type": "H3_PROJECT_ASSETS",
           "links": [
-            57,
-            60
+            58,
+            61
           ]
         },
         {
           "name": "references",
           "type": "H3_TAGGED_REFERENCES",
           "links": [
-            8,
-            56
+            2,
+            9,
+            57
           ]
         },
         {
@@ -1788,7 +1789,7 @@
         {
           "name": "plan",
           "type": "H3_CHAIN_PLAN",
-          "link": 61
+          "link": 62
         }
       ],
       "outputs": [
@@ -1822,12 +1823,12 @@
       "mode": 0,
       "inputs": [],
       "outputs": [],
-      "title": "START HERE • NIGHTLY",
+      "title": "START HERE • 0.7",
       "properties": {
         "Node name for S&R": "Note"
       },
       "widgets_values": [
-        "NIGHTLY • 0.6 BASELINE • Ref2V Studio\n\n1. CAROUSEL / STUDIO: set a unique run name in Project Asset Carousel.\n2. Import the supplied courier images; tag them courier_arrival and greenhouse_delivery (Picture).\n3. Edit scenes in Production Plan or Plan Studio. Generate audio is the default.\n4. OPTIONAL SOURCE AUDIO: import a soundtrack in Project Asset Carousel.\n   Audio use → Project timeline source; Generation Profile → Lip-sync to source audio.\n   The preset alone does not load an audio file; Carousel.project_assets carries your track.\n5. Queue; review takes and manage saved scenes in Checkpoint Manager.\n\nInstall models and packs as described in example_workflows/README.md.\n\nRecovery is disabled by default. Enable it only to assemble saved clips without sampling.\nWorkflow-specific setup and detailed wiring notes:\nexample_workflows/guides/Ref2V Studio - MiniMax H3 0.6.md"
+        "0.7 • 0.6 CATALOG • Ref2V Studio\n\n1. CAROUSEL / STUDIO: set a unique run name in Project Asset Carousel.\n2. Import the supplied courier images; tag them courier_arrival and greenhouse_delivery (Picture).\n3. Edit scenes in Production Plan or Plan Studio. Generate audio is the default.\n4. OPTIONAL SOURCE AUDIO: import a soundtrack in Project Asset Carousel.\n   Audio use → Project timeline source; Generation Profile → Lip-sync to source audio.\n   The preset alone does not load an audio file; Carousel.project_assets carries your track.\n5. Queue; review takes and manage saved scenes in Checkpoint Manager.\n\nInstall models and packs as described in example_workflows/README.md.\n\nRecovery is disabled by default. Enable it only to assemble saved clips without sampling.\nWorkflow-specific setup and detailed wiring notes:\nexample_workflows/guides/Ref2V Studio - MiniMax H3 0.6.md"
       ]
     }
   ],
@@ -1842,6 +1843,14 @@
     ],
     [
       2,
+      29,
+      1,
+      6,
+      3,
+      "H3_TAGGED_REFERENCES"
+    ],
+    [
+      3,
       6,
       1,
       7,
@@ -1849,7 +1858,7 @@
       "H3_CHAIN_STATE"
     ],
     [
-      3,
+      4,
       22,
       0,
       8,
@@ -1857,7 +1866,7 @@
       "H3_CHAIN_MANIFEST"
     ],
     [
-      4,
+      5,
       7,
       5,
       9,
@@ -1865,7 +1874,7 @@
       "INT"
     ],
     [
-      5,
+      6,
       2,
       0,
       10,
@@ -1873,7 +1882,7 @@
       "CLIP"
     ],
     [
-      6,
+      7,
       4,
       0,
       10,
@@ -1881,7 +1890,7 @@
       "VAE"
     ],
     [
-      7,
+      8,
       5,
       0,
       10,
@@ -1889,7 +1898,7 @@
       "VAE"
     ],
     [
-      8,
+      9,
       29,
       1,
       10,
@@ -1897,7 +1906,7 @@
       "H3_TAGGED_REFERENCES"
     ],
     [
-      9,
+      10,
       7,
       1,
       10,
@@ -1905,7 +1914,7 @@
       "INT"
     ],
     [
-      10,
+      11,
       7,
       2,
       10,
@@ -1913,7 +1922,7 @@
       "INT"
     ],
     [
-      11,
+      12,
       7,
       4,
       10,
@@ -1921,7 +1930,7 @@
       "STRING"
     ],
     [
-      12,
+      13,
       7,
       8,
       10,
@@ -1929,7 +1938,7 @@
       "INT"
     ],
     [
-      13,
+      14,
       7,
       9,
       10,
@@ -1937,7 +1946,7 @@
       "INT"
     ],
     [
-      14,
+      15,
       7,
       6,
       10,
@@ -1945,7 +1954,7 @@
       "INT"
     ],
     [
-      15,
+      16,
       7,
       0,
       10,
@@ -1953,7 +1962,7 @@
       "H3_CHAIN_STATE"
     ],
     [
-      16,
+      17,
       7,
       0,
       11,
@@ -1961,7 +1970,7 @@
       "H3_CHAIN_STATE"
     ],
     [
-      17,
+      18,
       10,
       0,
       11,
@@ -1969,7 +1978,7 @@
       "CONDITIONING"
     ],
     [
-      18,
+      19,
       4,
       0,
       11,
@@ -1977,7 +1986,7 @@
       "VAE"
     ],
     [
-      19,
+      20,
       10,
       1,
       11,
@@ -1985,7 +1994,7 @@
       "LATENT"
     ],
     [
-      20,
+      21,
       5,
       0,
       11,
@@ -1993,7 +2002,7 @@
       "VAE"
     ],
     [
-      21,
+      22,
       21,
       0,
       12,
@@ -2001,7 +2010,7 @@
       "MODEL"
     ],
     [
-      22,
+      23,
       12,
       0,
       13,
@@ -2009,7 +2018,7 @@
       "MODEL"
     ],
     [
-      23,
+      24,
       11,
       0,
       13,
@@ -2017,7 +2026,7 @@
       "CONDITIONING"
     ],
     [
-      24,
+      25,
       12,
       0,
       14,
@@ -2025,7 +2034,7 @@
       "MODEL"
     ],
     [
-      25,
+      26,
       7,
       7,
       14,
@@ -2033,7 +2042,7 @@
       "INT"
     ],
     [
-      26,
+      27,
       9,
       0,
       15,
@@ -2041,7 +2050,7 @@
       "NOISE"
     ],
     [
-      27,
+      28,
       13,
       0,
       15,
@@ -2049,7 +2058,7 @@
       "GUIDER"
     ],
     [
-      28,
+      29,
       3,
       0,
       15,
@@ -2057,7 +2066,7 @@
       "SAMPLER"
     ],
     [
-      29,
+      30,
       14,
       0,
       15,
@@ -2065,7 +2074,7 @@
       "SIGMAS"
     ],
     [
-      30,
+      31,
       11,
       3,
       15,
@@ -2073,7 +2082,7 @@
       "LATENT"
     ],
     [
-      31,
+      32,
       15,
       0,
       16,
@@ -2081,7 +2090,7 @@
       "LATENT"
     ],
     [
-      32,
+      33,
       4,
       0,
       16,
@@ -2089,7 +2098,7 @@
       "VAE"
     ],
     [
-      33,
+      34,
       15,
       0,
       17,
@@ -2097,7 +2106,7 @@
       "LATENT"
     ],
     [
-      34,
+      35,
       5,
       0,
       17,
@@ -2105,7 +2114,7 @@
       "VAE"
     ],
     [
-      35,
+      36,
       16,
       0,
       18,
@@ -2113,7 +2122,7 @@
       "IMAGE"
     ],
     [
-      36,
+      37,
       17,
       0,
       18,
@@ -2121,7 +2130,7 @@
       "AUDIO"
     ],
     [
-      37,
+      38,
       11,
       1,
       18,
@@ -2129,7 +2138,7 @@
       "INT"
     ],
     [
-      38,
+      39,
       7,
       0,
       18,
@@ -2137,7 +2146,7 @@
       "H3_CHAIN_STATE"
     ],
     [
-      39,
+      40,
       7,
       0,
       19,
@@ -2145,7 +2154,7 @@
       "H3_CHAIN_STATE"
     ],
     [
-      40,
+      41,
       18,
       0,
       19,
@@ -2153,7 +2162,7 @@
       "IMAGE"
     ],
     [
-      41,
+      42,
       15,
       0,
       19,
@@ -2161,7 +2170,7 @@
       "LATENT"
     ],
     [
-      42,
+      43,
       18,
       1,
       19,
@@ -2169,7 +2178,7 @@
       "AUDIO"
     ],
     [
-      43,
+      44,
       18,
       2,
       19,
@@ -2177,7 +2186,7 @@
       "IMAGE"
     ],
     [
-      44,
+      45,
       24,
       0,
       20,
@@ -2185,7 +2194,7 @@
       "H3_CHAIN_MANIFEST"
     ],
     [
-      45,
+      46,
       1,
       0,
       21,
@@ -2193,7 +2202,7 @@
       "MODEL"
     ],
     [
-      46,
+      47,
       25,
       0,
       22,
@@ -2201,7 +2210,7 @@
       "H3_CHAIN_PLAN"
     ],
     [
-      47,
+      48,
       7,
       0,
       23,
@@ -2209,7 +2218,7 @@
       "H3_CHAIN_STATE"
     ],
     [
-      48,
+      49,
       19,
       0,
       23,
@@ -2217,7 +2226,7 @@
       "H3_CHAIN_SEGMENT"
     ],
     [
-      49,
+      50,
       18,
       1,
       23,
@@ -2225,7 +2234,7 @@
       "AUDIO"
     ],
     [
-      50,
+      51,
       6,
       0,
       24,
@@ -2233,7 +2242,7 @@
       "H3_CHAIN_FLOW"
     ],
     [
-      51,
+      52,
       7,
       0,
       24,
@@ -2241,7 +2250,7 @@
       "H3_CHAIN_STATE"
     ],
     [
-      52,
+      53,
       18,
       0,
       24,
@@ -2249,7 +2258,7 @@
       "IMAGE"
     ],
     [
-      53,
+      54,
       15,
       0,
       24,
@@ -2257,7 +2266,7 @@
       "LATENT"
     ],
     [
-      54,
+      55,
       23,
       0,
       24,
@@ -2265,7 +2274,7 @@
       "H3_CHAIN_SEGMENT"
     ],
     [
-      55,
+      56,
       27,
       0,
       25,
@@ -2273,7 +2282,7 @@
       "H3_CHAIN_PLAN"
     ],
     [
-      56,
+      57,
       29,
       1,
       25,
@@ -2281,7 +2290,7 @@
       "H3_TAGGED_REFERENCES"
     ],
     [
-      57,
+      58,
       29,
       0,
       25,
@@ -2289,7 +2298,7 @@
       "H3_PROJECT_ASSETS"
     ],
     [
-      58,
+      59,
       25,
       0,
       26,
@@ -2297,7 +2306,7 @@
       "H3_CHAIN_PLAN"
     ],
     [
-      59,
+      60,
       28,
       0,
       27,
@@ -2305,7 +2314,7 @@
       "H3_CHAIN_POLICY"
     ],
     [
-      60,
+      61,
       29,
       0,
       27,
@@ -2313,7 +2322,7 @@
       "H3_PROJECT_ASSETS"
     ],
     [
-      61,
+      62,
       25,
       0,
       30,

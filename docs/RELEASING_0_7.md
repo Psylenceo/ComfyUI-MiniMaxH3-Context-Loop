@@ -37,7 +37,27 @@ Node's VM module support. Each script has a 120-second timeout; adjust
 `--timeout` or `--jobs` for slower machines. Any failure returns a nonzero exit
 status. Browser and GPU checks are deliberately separate.
 
-The September 21 pass covers **229 CPU regression scripts**, including:
+### September 24 RC documentation and wiring pass
+
+On `0.7-rc`, the following checks passed in the ComfyUI Python 3.13 environment:
+
+- **236 CPU regression scripts; zero failures**, using the release runner above
+  with `--jobs 4`, including the real-ComfyUI chain smoke test.
+- Deterministic rebuild/check of all **25 maintained workflows**.
+- Local file and heading links in **73 shipped Markdown documents**.
+- Tagged conditioning and every preflight path share the same registry in all
+  six applicable workflows; the test also rejects a disconnected Loop Start.
+- Comparison against the pre-cleanup catalog preserves all workflow UUIDs,
+  non-note widget values, node layouts and modes. Only four missing Loop Start
+  registry edges were added; generated link numbers are regenerated normally.
+
+Browser, GPU, native Windows and fresh-install tests were **not rerun** in
+this pass. The results below remain dated historical evidence, not validation
+of every production workflow on the final candidate.
+
+### September 21 hardening baseline
+
+The September 21 pass covered **229 CPU regression scripts**, including:
 
 - Save, interruption, resume, checkpoint integrity and final assembly. The
   chain smoke test imports real ComfyUI modules and encodes/assembles tiny
@@ -83,7 +103,8 @@ Coverage includes checkpoint controls/selection, both prompt editors, Plan
 collapse, asset layout, non-refreshing prompt edits, chapter navigation,
 SelfLift selection, relay approval/seek, context-mask editing, wheel routing
 and browser-storage recovery/conflicts. All eleven browser scripts passed in
-the September 21 run. These are isolated browser checks,
+the September 21 run; the command list above now includes an additional
+project-run synchronization regression. These are isolated browser checks,
 not an exhaustive end-to-end run of every workflow in ComfyUI's canvas.
 
 ### GPU integration
@@ -101,7 +122,31 @@ masks, locked audio, high-pass-only wrappers and bit-identical disabled path.
 It uses no pretrained weights and establishes **runtime correctness, not
 image quality or production-resolution memory requirements**.
 
+## Release branch parity
+
+Prepare release fixes, documentation and final version/branding changes on
+`nightly`, then fast-forward `0.7-rc` to the same tested commit. At publication,
+the two branches must match exactly: code, examples, documentation, defaults
+and package metadata. Do not make RC-only release edits or selectively omit
+nightly changes without revisiting the agreed release scope.
+
+Before publication, fetch the remote refs and verify a clean working tree,
+identical `origin/nightly` and `origin/0.7-rc` commit IDs, and an empty diff:
+
+```bash
+git status --short
+git rev-parse origin/nightly origin/0.7-rc
+git diff --exit-code origin/nightly origin/0.7-rc
+```
+
+If the branches diverge, reconcile and revalidate them before publishing;
+do not silently overwrite either history. Freeze the agreed commit through
+publication so a later nightly change cannot slip into the release untested.
+
 ## Remaining gates before publishing
+
+These are stable-release gates. The RC documentation deliberately identifies
+the candidate and its limits; a passing local suite is not publication approval.
 
 - [ ] Clean-install smoke run using the intended release's ComfyUI and
   companion-pack versions; open a maintained Normal workflow and verify the
@@ -113,12 +158,39 @@ image quality or production-resolution memory requirements**.
 - [ ] Native Windows smoke test. Path, cross-drive, descriptor and locking
   regressions are covered on Linux with modeled Windows semantics; this is
   not a full Windows installation/render validation.
-- [ ] Review the exact main/nightly diff and choose what ships; preserve
+- [ ] Review the exact main/0.7-rc diff and choose what ships; preserve
   explicit experimental labels rather than silently changing defaults.
+- [ ] Confirm nightly and 0.7-rc point to the same tested, pushed commit,
+  including the final release documentation and metadata changes.
+- [ ] At the approved stable-release cut, replace RC install/branding text,
+  finalize the changelog date and release notes, and verify the intended
+  Registry version. Do not mark an unreleased candidate as already published.
 - [ ] Explicit approval for merge/tag/publish. Updating `pyproject.toml` on
   main can trigger `.github/workflows/publish_action.yml`; do not use a
-  version-file push as a harmless release rehearsal.
+  version-file push as a harmless release rehearsal. The workflow also permits
+  manual dispatch; do not dispatch it from the RC as a validation step.
 
 Companion feature requests are not release blockers merely because they are
 open. Recheck GitHub reports against the candidate before publishing; do not
 close issues or merge draft PRs based only on this checklist.
+
+## Open compatibility reports reviewed for the candidate
+
+As of September 24, 2026:
+
+- [#95 — reference/preflight behavior](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop/issues/95):
+  four maintained Tagged/Studio recipes omitted Loop Start's registry input
+  even though conditioning and Studio/Preflight were connected. The RC now
+  supplies the same registry to all validators, with a disconnected-input
+  regression. Existing user graphs need the missing wire added manually.
+  The broader duplication and audio-policy symptoms remain unconfirmed
+  without the reporter's workflow; do not close the entire report on this basis.
+- [#96 — color shift](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop/issues/96):
+  remains a reported quality issue; this documentation/wiring pass does not
+  establish its cause or resolve it.
+- [#97 — AudioRefine joins](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop/issues/97):
+  diagnostic workflow requested. Keep the possible refiner/assembly interaction
+  separate from ordinary generated-audio regression coverage; no fix is claimed.
+
+Recheck these reports and record a fix, documented limitation or explicit
+deferral decision before the stable release.

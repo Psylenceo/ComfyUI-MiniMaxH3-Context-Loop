@@ -1,4 +1,4 @@
-# Review Gate Relay (nightly)
+# Review Gate Relay
 
 Use **MiniMax H3 Review Gate Relay** when you reconnect remotely and cannot
 access the canvas that started a candidate batch.

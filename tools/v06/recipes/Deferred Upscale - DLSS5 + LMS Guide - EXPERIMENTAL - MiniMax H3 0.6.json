@@ -1,5 +1,5 @@
 {
-  "compatibility_note": "New **nightly-only experiment**, based on Alissonerdx's LMS guide workflow. CPU contract/wiring checks are not a GPU quality or memory validation.",
+  "compatibility_note": "Experimental **0.7** example, based on Alissonerdx's LMS guide workflow. CPU contract/wiring checks are not a GPU quality or memory validation.",
   "setup_steps": "1. Install Ref2VA H3, its Qwen encoder/video VAE, Ref2V Turbo 4step v0.1, LMS v1.0 r64, and DLSS5.\n2. Select a saved source lineage in Checkpoint Manager and a NEW upscale profile.\n3. First test ONE short scene (start_clip=1/end_clip=1); full-scene guide sampling is memory-heavy.\n4. Confirm the actual upscale canvas is /32; follow the sampler/decode/save columns.\n5. Read the companion guide before changing the recipe or expanding the range.",
   "nodes": [
     {

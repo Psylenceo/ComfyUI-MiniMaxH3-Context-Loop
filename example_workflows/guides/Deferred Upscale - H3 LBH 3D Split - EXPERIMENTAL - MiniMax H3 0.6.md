@@ -1,6 +1,6 @@
 # Deferred Upscale - H3 LBH 3D Split - EXPERIMENTAL - MiniMax H3 0.6
 
-Experimental alternate for **nightly**. The ordinary LBH 3D workflow is unchanged. Offline contracts and wiring are checked; this example has not been GPU-render validated.
+Experimental alternate for **0.7**. The ordinary LBH 3D workflow is unchanged. Offline contracts and wiring are checked; this example has not been GPU-render validated.
 
 Setup controls come first, followed by numbered generation columns.
 

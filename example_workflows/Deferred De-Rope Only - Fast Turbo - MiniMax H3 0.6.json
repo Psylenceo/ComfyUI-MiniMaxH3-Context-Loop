@@ -2274,12 +2274,12 @@
       "mode": 0,
       "inputs": [],
       "outputs": [],
-      "title": "START HERE • NIGHTLY",
+      "title": "START HERE • 0.7",
       "properties": {
         "Node name for S&R": "Note"
       },
       "widgets_values": [
-        "NIGHTLY • 0.6 BASELINE • Deferred De-Rope Only - Fast Turbo\n\n1. Install ComfyUI-MAINodes v1.1.3+ and the LightX2V 4-step v1.0 768p ComfyUI bf16 LoRA.\n   Select the H3 model, text encoder and VAEs; this is the FAST/TURBO repair variant.\n2. In Checkpoint Manager choose the Original branch to repair. No Plan or source render is required.\n3. Set a NEW De-Rope profile and the Adapter scene range. Source resolution is preserved.\n4. Leave manual ranges blank for automatic repair; use a single scene for a targeted range.\n5. Review the budget and final-frame reports. Full recovered latents are saved for later upscaling.\n\nWorkflow-specific setup and detailed wiring notes:\nexample_workflows/guides/Deferred De-Rope Only - Fast Turbo - MiniMax H3 0.6.md"
+        "0.7 • 0.6 CATALOG • Deferred De-Rope Only - Fast Turbo\n\n1. Install ComfyUI-MAINodes v1.1.3+ and the LightX2V 4-step v1.0 768p ComfyUI bf16 LoRA.\n   Select the H3 model, text encoder and VAEs; this is the FAST/TURBO repair variant.\n2. In Checkpoint Manager choose the Original branch to repair. No Plan or source render is required.\n3. Set a NEW De-Rope profile and the Adapter scene range. Source resolution is preserved.\n4. Leave manual ranges blank for automatic repair; use a single scene for a targeted range.\n5. Review the budget and final-frame reports. Full recovered latents are saved for later upscaling.\n\nWorkflow-specific setup and detailed wiring notes:\nexample_workflows/guides/Deferred De-Rope Only - Fast Turbo - MiniMax H3 0.6.md"
       ]
     }
   ],

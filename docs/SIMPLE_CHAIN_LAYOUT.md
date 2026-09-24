@@ -115,7 +115,7 @@ branch/ALT selection, independent processing ranges, source audio and DeRoPE
 reuse, export numbering, and dependency-protected deletion. Tests use temporary
 fixtures/CPU checkpoints, not the live user project or a GPU generation job.
 
-## Nightly integration checks
+## Integration checks
 
 The integration also covers durable Gate recovery on Original and named branches,
 post-assembly checkpoint cleanup, and obsolete-path removal after scene

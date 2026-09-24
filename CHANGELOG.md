@@ -9,6 +9,17 @@ optional companion features are not prerequisites. See the
 [migration guide](docs/MIGRATING_TO_0_7.md) and
 [release validation checklist](docs/RELEASING_0_7.md).
 
+For the short candidate overview, see [0.7 RC release notes](RELEASE_NOTES_0_7.md).
+
+- Prepare RC onboarding, installation, storage and migration documentation;
+  distinguish recursive defaults from optional top-level requeue and retain
+  explicit experimental/testing limits. Keep 0.6 catalog filenames and UUIDs.
+- Connect the active Tagged registry to Loop Start in four maintained
+  Tagged/Studio examples, matching conditioning and Studio/Preflight. Add a
+  catalog regression for all independent reference-validation paths. This
+  addresses missing-registry warnings in those graphs, not every reported
+  duplication or source-audio policy problem.
+
 - Fix SelfLift temporary bundles remaining file-mapped by cached tensors, which
   can block cleanup on network/Windows storage after a successful scene save.
   Keep tensor aliases without duplicate copies and show cleanup I/O failures in

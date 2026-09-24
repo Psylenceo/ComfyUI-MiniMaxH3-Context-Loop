@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release-level checks for nightly's clean 0.6 workflow baseline."""
+"""Release-level checks for the maintained 0.7 (0.6-named) workflow catalog."""
 
 from __future__ import annotations
 
@@ -351,6 +351,21 @@ def validate_execution_regressions(workflow: dict, path: Path) -> None:
                        for field in ("audio1", "audio2"))
 
 
+def validate_reference_preflight(workflow: dict) -> None:
+    """Conditioning and each independent preflight must see the same registry."""
+    conditioners = nodes(workflow, "MiniMaxH3TaggedReferenceToVideo")
+    if not conditioners:
+        return
+    conditioner = one(workflow, "MiniMaxH3TaggedReferenceToVideo")
+    reference_link = link(workflow, input_socket(conditioner, "references")["link"])
+    for kind in ("MiniMaxH3ChainLoopStart", "MiniMaxH3ChainPreflight", "MiniMaxH3ChainPlanStudio"):
+        for validator in nodes(workflow, kind):
+            socket = input_socket(validator, "tagged_references")
+            assert socket.get("link") is not None, (kind, "missing reference registry")
+            linked = link(workflow, socket["link"])
+            assert linked[1:3] == reference_link[1:3], (kind, "different reference registry")
+
+
 def validate_assets() -> None:
     assets = EXAMPLES / "assets"
     expected = {
@@ -430,10 +445,28 @@ def main() -> None:
         validate_modern_authoring(workflow, path)
         validate_studio(workflow, path)
         validate_execution_regressions(workflow, path)
+        validate_reference_preflight(workflow)
+        if nodes(workflow, "MiniMaxH3TaggedReferenceToVideo"):
+            # Reproduce the missing Loop Start wire, even when Studio or the
+            # explicit Preflight and the conditioner remain correctly wired.
+            start = one(workflow, "MiniMaxH3ChainLoopStart")
+            registry = input_socket(start, "tagged_references")
+            saved_link = registry["link"]
+            try:
+                registry["link"] = None
+                try:
+                    validate_reference_preflight(workflow)
+                except AssertionError as error:
+                    assert "missing reference registry" in str(error)
+                else:
+                    raise AssertionError("Disconnected Loop Start was not detected")
+            finally:
+                registry["link"] = saved_link
         note = one(workflow, "Note")
-        assert note["title"] == "START HERE • NIGHTLY"
+        assert note["title"] == "START HERE • 0.7"
         guide = (path.parent / "guides" / path.with_suffix(".md").name).read_text()
-        assert "nightly" in guide and "not nightly" not in guide
+        assert "**0.7**" in guide
+        assert "nightly" not in guide.lower()
         assert ("example_workflows/" + path.relative_to(EXAMPLES).parent.joinpath(
             "guides", path.with_suffix(".md").name).as_posix()) in note["widgets_values"][0]
         # Relocation must not invalidate saved workflow ownership identities.
@@ -483,7 +516,7 @@ def main() -> None:
                for shot in sequential_plan["shots"])
     validate_assets()
     validate_independent_source_audio()
-    print(f"H3 nightly 0.6 baseline: {len(paths)} clean UI documents, current Plan/Profile "
+    print(f"H3 0.7 catalog: {len(paths)} clean UI documents, current Plan/Profile "
           "authoring, Studio Carousel + Checkpoint Manager, fresh prompts and "
           "references, valid links, collision-free layouts, and legacy archive pass")
 

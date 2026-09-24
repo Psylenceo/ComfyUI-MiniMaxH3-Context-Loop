@@ -21,9 +21,9 @@ read the implementation references to run a normal workflow.
 | Choose continuity or audio behavior | [Audio and continuity](AUDIO_AND_CONTINUITY.md) |
 | Use image, video, motion, or audio references | [Scheduled references](SCHEDULED_REFERENCES.md) |
 | Review takes, resume, recover, or assemble | [Runs and recovery](RUNS_AND_RECOVERY.md) |
-| Review a live Gate from another canvas or remote session (nightly) | [Review Gate Relay](REVIEW_RELAY.md) |
-| Switch working Plans, fork, or start a fresh set (nightly) | [Working branches](WORKING_BRANCHES.md) |
-| Use the maintained memory-safe top-level prompt lifecycle | [Maintained workflow](MAINTAINED_WORKFLOW.md) |
+| Review a live Gate from another canvas or remote session | [Review Gate Relay](REVIEW_RELAY.md) |
+| Switch working Plans, fork, or start a fresh set | [Working branches](WORKING_BRANCHES.md) |
+| Choose recursive execution or optional top-level requeue | [Execution modes](MAINTAINED_WORKFLOW.md) |
 | Inpaint, outpaint, extend, or bridge video | [Masked editing](MASKED_EDITING.md) |
 | Extend an existing video or use special context | [Advanced workflows](ADVANCED_WORKFLOWS.md) |
 | Fix a missing-node or runtime compatibility problem | [Compatibility](COMPATIBILITY.md) |
@@ -38,7 +38,8 @@ explanation.
 |---|---|
 | [Complete Plan format](../H3_CHAIN_FORMAT_GUIDE.md) | Every Plan and per-scene field, exact timing, prompt syntax, and JSON forms |
 | [Version 0.5 architecture](V0_5_ARCHITECTURE.md) | Frozen Source Timeline, policy, dependency, migration, and preflight contracts |
-| [Chain storage audit](STORAGE_LAYOUT_AUDIT.md) | Current folder ownership, measured storage, path complexity and a staged simplification proposal |
+| [Current storage layout](SIMPLE_CHAIN_LAYOUT.md) | New-project folders, retained legacy layouts and optional copy-only conversion |
+| [Chain storage audit](STORAGE_LAYOUT_AUDIT.md) | September 10 baseline audit and the earlier simplification proposal |
 | [Storage migration plan](STORAGE_MIGRATION_PLAN.md) | Compatibility invariants, feature tests, phased implementation, existing-folder migration and rollback gates |
 | [Storage Inspector](STORAGE_INSPECTOR.md) | Read-only disk inventory, report format, consumer baseline and remaining migration gates |
 | [Reference Video Fade](REFERENCE_VIDEO_FADE.md) | Experimental denoising-time control of Ref2VA video influence |
@@ -48,6 +49,7 @@ explanation.
 ## Project information
 
 - [Changelog](../CHANGELOG.md)
+- [0.7 RC release summary](../RELEASE_NOTES_0_7.md)
 - [0.7 release validation and remaining gates](RELEASING_0_7.md)
 - [Third-party credits and licenses](../THIRD_PARTY_NOTICES.md)
 - [Contributing](../CONTRIBUTING.md)

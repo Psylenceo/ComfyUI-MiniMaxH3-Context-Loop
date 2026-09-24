@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile the 0.6 workflow baseline against nightly's node schemas.
+"""Compile the 0.6-named workflow catalog against this checkout's node schemas.
 
 No archived workflow, widget array, position, or frontend metadata is an input.
 Settings and wires use names. --check detects stale generated documents.
@@ -227,18 +227,18 @@ def build(recipe,filename,schemas):
         '2. Copy the supplied assets to ComfyUI/input; select source media where requested.\n'
         '3. '+project_step+'\n'
         '4. Follow the numbered columns left → right and inspect the saved results.')
-    note_text=('NIGHTLY • 0.6 BASELINE • '+filename.removesuffix(' - MiniMax H3 0.6.json')+'\n\n'
+    note_text=('0.7 • 0.6 CATALOG • '+filename.removesuffix(' - MiniMax H3 0.6.json')+'\n\n'
         +setup_steps+'\n\n'
         +recovery_note+
         'Workflow-specific setup and detailed wiring notes:\n'+guide_path)
     note_size=[SIZES['Note'][0],max(SIZES['Note'][1],70+20*len(note_text.splitlines()))]
     nodes.append(dict(id=len(nodes)+1,type='Note',pos=[0,0],size=note_size,flags={},order=len(nodes),mode=0,
-        inputs=[],outputs=[],title='START HERE • NIGHTLY',properties={'Node name for S&R':'Note'},widgets_values=[note_text]))
+        inputs=[],outputs=[],title='START HERE • 0.7',properties={'Node name for S&R':'Note'},widgets_values=[note_text]))
     identity=str(uuid.uuid5(NAMESPACE,filename))
     workflow=dict(id=identity,revision=0,last_node_id=len(nodes),last_link_id=len(links),nodes=nodes,links=links,
         groups=layout(nodes,links),config={},extra={'ds':{'scale':0.65,'offset':[30,0]},
         'comfyui_mcp':{'workflow_uuid':identity}},version=0.4)
-    compatibility_note=recipe.get('compatibility_note','Adapted from the **0.6 workflow catalog** for **nightly**.')
+    compatibility_note=recipe.get('compatibility_note','Maintained **0.6-named workflow catalog** for **0.7**.')
     guide='# '+filename.removesuffix('.json')+'\n\n'+compatibility_note+'\n\n'
     guide+=('Setup controls come first, followed by numbered generation columns. '+recovery_note).rstrip()+'\n\n'
     guide+='\n\n---\n\n'.join(guides)+'\n'

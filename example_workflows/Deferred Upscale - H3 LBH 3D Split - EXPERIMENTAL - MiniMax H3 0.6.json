@@ -1317,12 +1317,12 @@
       "mode": 0,
       "inputs": [],
       "outputs": [],
-      "title": "START HERE • NIGHTLY",
+      "title": "START HERE • 0.7",
       "properties": {
         "Node name for S&R": "Note"
       },
       "widgets_values": [
-        "NIGHTLY • 0.6 BASELINE • Deferred Upscale - H3 LBH 3D Split - EXPERIMENTAL\n\n1. Requires the LBH pack with MMH3 Split Upscale and both V10 Split Params nodes (August 28+).\n2. Select a saved lineage in Checkpoint Manager; keep a distinct upscale profile.\n3. First test: fresh_range, start_clip=1 / end_clip=1. For scene 5 alone, set BOTH to 5.\n4. EXPERIMENTAL: no locked previous-HQ scene prefix; inspect cuts before processing a range.\n5. Clean latent -> LBH 2x -> temporal/spatial Split Upscale -> restore original audio -> save.\n6. Do not insert Pass-2 AV Prepare / Disable Noise: the split node adds its own noise.\n7. Read the matching guide for parameters, source links, memory limits and continuity caveats.\n\nWorkflow-specific setup and detailed wiring notes:\nexample_workflows/guides/Deferred Upscale - H3 LBH 3D Split - EXPERIMENTAL - MiniMax H3 0.6.md"
+        "0.7 • 0.6 CATALOG • Deferred Upscale - H3 LBH 3D Split - EXPERIMENTAL\n\n1. Requires the LBH pack with MMH3 Split Upscale and both V10 Split Params nodes (August 28+).\n2. Select a saved lineage in Checkpoint Manager; keep a distinct upscale profile.\n3. First test: fresh_range, start_clip=1 / end_clip=1. For scene 5 alone, set BOTH to 5.\n4. EXPERIMENTAL: no locked previous-HQ scene prefix; inspect cuts before processing a range.\n5. Clean latent -> LBH 2x -> temporal/spatial Split Upscale -> restore original audio -> save.\n6. Do not insert Pass-2 AV Prepare / Disable Noise: the split node adds its own noise.\n7. Read the matching guide for parameters, source links, memory limits and continuity caveats.\n\nWorkflow-specific setup and detailed wiring notes:\nexample_workflows/guides/Deferred Upscale - H3 LBH 3D Split - EXPERIMENTAL - MiniMax H3 0.6.md"
       ]
     }
   ],

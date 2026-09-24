@@ -445,6 +445,6 @@
       "label": "SOURCES"
     }
   ],
-  "compatibility_note": "Experimental alternate for **nightly**. The ordinary LBH 3D workflow is unchanged. Offline contracts and wiring are checked; this example has not been GPU-render validated.",
+  "compatibility_note": "Experimental alternate for **0.7**. The ordinary LBH 3D workflow is unchanged. Offline contracts and wiring are checked; this example has not been GPU-render validated.",
   "setup_steps": "1. Requires the LBH pack with MMH3 Split Upscale and both V10 Split Params nodes (August 28+).\n2. Select a saved lineage in Checkpoint Manager; keep a distinct upscale profile.\n3. First test: fresh_range, start_clip=1 / end_clip=1. For scene 5 alone, set BOTH to 5.\n4. EXPERIMENTAL: no locked previous-HQ scene prefix; inspect cuts before processing a range.\n5. Clean latent -> LBH 2x -> temporal/spatial Split Upscale -> restore original audio -> save.\n6. Do not insert Pass-2 AV Prepare / Disable Noise: the split node adds its own noise.\n7. Read the matching guide for parameters, source links, memory limits and continuity caveats."
 }

@@ -1,6 +1,6 @@
 # I2V Studio - MiniMax H3 0.6
 
-Adapted for **nightly** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against nightly.
+Maintained for **0.7** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against this checkout.
 
 Setup controls come first, followed by numbered generation columns. Recovery is disabled by default. Enable it only to assemble saved clips without sampling.
 

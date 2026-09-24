@@ -27,9 +27,9 @@ it through the Carousel as `greenhouse_delivery` with the **Picture** role.
 
 ## Legacy 0.5 reference assets
 
-The following Jigen images remain available because workflows preserved in
-`example_workflows/Archive/pre-0.6-nightly/` still reference them. They are no longer used
-by the maintained 0.6 catalog.
+The following Jigen images remain available for older saved workflows. The
+pre-0.6 workflow archive was removed in 0.7 and is available in Git history;
+these images are not used by the maintained 0.6-named catalog.
 
 ## `jigen_market_garden_doom_opening.png`
 
@@ -43,8 +43,8 @@ I2V prompt used by scene 1:
 SHA-256:
 `7a9993055d71b1e174096f2a2533ae2a0b14a686fdacae0c7bab1faa738ef5f3`
 
-Copy the PNG to `ComfyUI/input/` before loading either I2V workflow or any of
-the Ref2V examples. ComfyUI's Load Image node resolves assets from its
+Copy the PNG to `ComfyUI/input/` before loading an older workflow that names
+it. ComfyUI's Load Image node resolves assets from its
 configured input directories, not from this repository folder.
 
 ## `jigen_market_garden_doom_last.png`

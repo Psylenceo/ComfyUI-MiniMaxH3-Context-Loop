@@ -27,7 +27,7 @@ requested again before deletion.
 
 This is an explicit action, not a startup, polling or automatic storage cleanup.
 
-## Selecting several checkpoints for deletion (nightly)
+## Selecting several checkpoints for deletion
 
 On the Checkpoint Manager's **Original** tab (including its ALT cards):
 

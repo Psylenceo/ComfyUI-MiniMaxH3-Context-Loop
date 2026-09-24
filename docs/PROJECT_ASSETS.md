@@ -119,8 +119,9 @@ the deletable render folder means **Delete complete Run** cannot silently
 unprotect the input-side project assets it intentionally preserves. The actual
 workflow proof is ephemeral browser-session state and is removed from the
 Run's saved workflow, API-prompt, Plan, and deferred-review archives. An older
-project remains compatible and becomes protected the first time the nightly
-Carousel opens it.
+project remains compatible and becomes protected when opened in Carousel with
+workflow ownership locking enabled. The server-wide opt-out leaves file
+transaction locks and deletion safeguards active.
 
 ## Group a song and its stems
 

@@ -4,10 +4,12 @@ Focused fixes, workflow improvements, compatibility updates, and documentation
 corrections are welcome. Open an issue before a large redesign so its runtime
 and saved-workflow compatibility can be discussed first.
 
-## Keep version 0.5 compatible
+## Preserve supported contracts
 
-Version 0.5 preserves saved 0.4 workflows and checkpoints. Unless a change is
-explicitly planned as a breaking release:
+The original Context Loop Plan remains supported in 0.7. Historical checkpoint
+readers are retained, but removed nodes and inputs need explicit migration:
+see [Migrating to 0.7](docs/MIGRATING_TO_0_7.md). Do not promise that every 0.4
+graph still executes unchanged. Unless a change includes a reviewed migration:
 
 - do not reuse or rename an existing public node class ID;
 - do not reorder existing positional inputs or outputs;
@@ -15,9 +17,11 @@ explicitly planned as a breaking release:
 - retain readable legacy widget values and checkpoint formats;
 - keep compatible H3-Multishot, SolAttn, and shared patch markers intact.
 
-The frozen rules are documented in
-[Version 0.5 architecture](docs/V0_5_ARCHITECTURE.md) and enforced by
-`tests/fixtures/v0_4_public_contract.json`.
+The [Version 0.5 architecture](docs/V0_5_ARCHITECTURE.md) and
+`tests/fixtures/v0_4_public_contract.json` record the historical baseline.
+Current contract and removed-node tests distinguish preserved behavior from
+intentional 0.7 retirements; do not restore obsolete inputs just to match an
+old fixture.
 
 ## Document behavior from evidence
 
@@ -43,13 +47,11 @@ describe an adaptation as an original implementation.
 ## Validate a change
 
 Run the focused test for the area you changed. Before release or a broad pull
-request, run at least:
+request, use the ComfyUI Python environment with Node.js and ffmpeg on PATH:
 
 ```bash
-python tests/_node_smoke_test.py
-python tests/_chain_smoke_test.py
-python tests/_workflow_catalog_unit_test.py
-python tests/_v05_contract_unit_test.py
+python tools/check_release.py --comfy-root /path/to/ComfyUI
+python tools/build_v06_workflows.py --check
 ```
 
 Masking, source-timeline, frontend, and migration changes have additional
@@ -60,8 +62,11 @@ example:
 node tests/_plan_editor_js_test.mjs
 ```
 
-Tests intentionally use mock ComfyUI modules where possible. Real generation
-still needs a current ComfyUI installation, H3 models, and appropriate media.
+The runner uses CPU fixtures and disables CUDA in its children. Tests use mock
+ComfyUI modules where possible; the chain smoke test imports real ComfyUI.
+Browser checks, GPU integration, and production acceptance remain separate:
+see [release validation](docs/RELEASING_0_7.md). Passing CPU tests does not prove
+render quality or clean-install compatibility.
 
 ## Keep the README approachable
 

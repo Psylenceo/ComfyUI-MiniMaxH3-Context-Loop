@@ -1,4 +1,4 @@
-"""Author-recipe and checkpoint audio routing for the nightly LMS example."""
+"""Author-recipe and checkpoint audio routing for the experimental LMS example."""
 import json
 from pathlib import Path
 
@@ -57,6 +57,6 @@ assert not {"MiniMaxH3ReferenceToVideo", "MiniMaxH3ChainUpscalePixelConditioning
 assert not any(source == ["split", "audio_latent"] for node in nodes.values()
                for source in node["inputs"].values())
 guide = (ROOT / "example_workflows/guides" / NAME.replace(".json", ".md")).read_text()
-assert "Alissonerdx" in guide and "FULL-SCENE" in guide and "nightly" in guide
+assert "Alissonerdx" in guide and "FULL-SCENE" in guide and "Experimental **0.7**" in guide
 assert "not a GPU quality or memory validation" in guide
 print("LMS workflow: published recipe, fresh-noise path, original audio, full video checkpoint and source attribution pass.")

@@ -1,10 +1,10 @@
 # Ref2V Studio SelfLift Seed Hunt - EXPERIMENTAL - MiniMax H3 0.6
 
-Experimental **nightly** SelfLift example, using Seed Hunt for both automatic and reviewed low-to-high generation. It replaces the separate ordinary SelfLift example, not the sampler node or existing user workflows. KJNodes and taeh3.safetensors in models/vae_approx are needed only for enabled seed-review previews; review_enabled=false does not require them. Tiny previews are approximate, silent inspection aids.
+Experimental **0.7** SelfLift example, using Seed Hunt for both automatic and reviewed low-to-high generation. It replaces the separate ordinary SelfLift example, not the sampler node or existing user workflows. KJNodes and taeh3.safetensors in models/vae_approx are needed only for enabled seed-review previews; review_enabled=false does not require them. Tiny previews are approximate, silent inspection aids.
 
 Setup controls come first, followed by numbered generation columns. Recovery is disabled by default. Enable it only to assemble saved clips without sampling.
 
-EXPERIMENTAL SELFLIFT CHAIN — NIGHTLY ONLY
+EXPERIMENTAL SELFLIFT CHAIN — 0.7
 
 Open this separate workflow; your existing workflows do not need rewiring. It reuses the catalog's neutral courier example and assets. Use a NEW run name or a duplicate project for initial tests.
 

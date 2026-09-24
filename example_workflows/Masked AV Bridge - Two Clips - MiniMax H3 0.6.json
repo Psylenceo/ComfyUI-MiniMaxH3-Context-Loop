@@ -1332,12 +1332,12 @@
       "mode": 0,
       "inputs": [],
       "outputs": [],
-      "title": "START HERE • NIGHTLY",
+      "title": "START HERE • 0.7",
       "properties": {
         "Node name for S&R": "Note"
       },
       "widgets_values": [
-        "NIGHTLY • 0.6 BASELINE • Masked AV Bridge - Two Clips\n\n1. Install models and extra packs listed in example_workflows/README.md.\n2. Copy the supplied assets to ComfyUI/input; select source media where requested.\n3. Check both source intervals and the bridge target length; this standalone graph does not use a Plan.\n4. Follow the numbered columns left → right and inspect the saved results.\n\nWorkflow-specific setup and detailed wiring notes:\nexample_workflows/guides/Masked AV Bridge - Two Clips - MiniMax H3 0.6.md"
+        "0.7 • 0.6 CATALOG • Masked AV Bridge - Two Clips\n\n1. Install models and extra packs listed in example_workflows/README.md.\n2. Copy the supplied assets to ComfyUI/input; select source media where requested.\n3. Check both source intervals and the bridge target length; this standalone graph does not use a Plan.\n4. Follow the numbered columns left → right and inspect the saved results.\n\nWorkflow-specific setup and detailed wiring notes:\nexample_workflows/guides/Masked AV Bridge - Two Clips - MiniMax H3 0.6.md"
       ]
     }
   ],

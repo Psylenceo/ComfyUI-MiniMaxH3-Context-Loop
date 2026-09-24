@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/minimax-h3-context-loop.svg" alt="MiniMax H3 Context Loop nightly — scene plans that survive the render" width="100%">
+  <img src="assets/minimax-h3-context-loop.svg" alt="MiniMax H3 Context Loop 0.7 RC — scene plans that survive the render" width="100%">
 </p>
 
 # ComfyUI MiniMax H3 Context Loop
@@ -12,9 +12,12 @@ scene can be reviewed, retried, checkpointed, resumed, and assembled later.
 **[Choose a workflow](example_workflows/README.md)** ·
 **[All documentation](docs/README.md)**
 
-> The public GitHub repository slug retains its original `Contex-Loop`
-> spelling for compatibility. Package, node, menu, and documentation labels
-> use the correctly spelled **Context Loop** name.
+> **0.7 release candidate:** install `0.7-rc` to test the upcoming release.
+> See the [release summary](RELEASE_NOTES_0_7.md),
+> [migration notes](docs/MIGRATING_TO_0_7.md), and
+> [remaining validation gates](docs/RELEASING_0_7.md#remaining-gates-before-publishing).
+> This is not a stable-release announcement. The Registry package ID retains
+> its historical `contex-loop` spelling for compatibility.
 
 ## What this pack does
 
@@ -35,22 +38,21 @@ Models are not included.
 
 ### Context Loop execution and recovery
 
-- **Nightly context brush.** In Plan Studio → Context → Picture, use
+- **Context brush.** In Plan Studio → Context → Picture, use
   **Weaken context…** to paint fixed regions that may change more under AV Mask.
   [Usage and limits](docs/CONTEXT_WEAKEN_MASK.md).
-- **Maintained workflow path.** The release docs now describe the proven
-  memory-safe top-level prompt lifecycle: keep the same Plan and creative
-  model stack, let Loop End finish, wait through the cleanup delay, then queue
-  the next heavyweight scene as a new top-level prompt.
+- **Optional top-level requeue.** Examples use recursive execution by default.
+  For a separate prompt boundary between accepted scenes, enable top-level
+  requeue in Loop End and ComfyUI settings. See
+  [execution modes](docs/MAINTAINED_WORKFLOW.md) for setup and limits.
 - **Reference propagation fix.** Valid prompt `@tags` again see the connected
   Tagged registry during preflight without rewriting prompt text or storing
   reference data in the Plan.
 - **Crash-safe review and resume.** Review snapshots stay visible after a
   refresh or restart, and durable handoffs/manual resume keep the same Plan
   semantics while avoiding duplicate queues.
-- **Release packaging.** The changelog, compatibility notes, and workflow docs
-  now call out the WSL2 pinned-memory caveat separately from the architectural
-  fix.
+- **Migration guidance.** The original Plan remains supported. Removed legacy
+  nodes and controls are listed in the [0.7 migration guide](docs/MIGRATING_TO_0_7.md).
 
 ## Install
 
@@ -58,8 +60,8 @@ From `ComfyUI/custom_nodes`:
 
 ```bash
 git clone https://github.com/seitanism/ComfyUI-H3-Motion-Context-MultiRef.git
-git clone --branch nightly \
-  https://github.com/ethanfel/ComfyUI-MiniMaxH3-Contex-Loop.git
+git clone --branch 0.7-rc \
+  https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop.git
 ```
 
 Restart ComfyUI after cloning or updating either pack. A current ComfyUI build
@@ -121,10 +123,11 @@ Prefer explicit reference-loader wiring? The [manual Tagged examples](example_wo
 are available separately. For SelfLift, use the [Seed Hunt example](<example_workflows/Ref2V Studio SelfLift Seed Hunt - EXPERIMENTAL - MiniMax H3 0.6.json>)
 with review enabled or disabled.
 
-Nightly now uses the clean **0.6 workflow catalog**, serialized for nightly's
-nodes. Choose **Normal** for Production Plan and Scene Prompt Editor. **Studio**
-adds Plan Studio, Project Asset Carousel, the rich prompt editor, and Checkpoint
-Manager; it does not change the generation graph. Pre-0.6 examples were retired in 0.7 and remain available in Git history.
+The **0.7 RC** uses the maintained **0.6-named workflow catalog**, rebuilt for
+this checkout's nodes. Choose **Normal** for Production Plan and Scene Prompt
+Editor. **Studio** adds Plan Studio, Project Asset Carousel, the rich prompt
+editor, and Checkpoint Manager; it does not change the generation graph.
+Pre-0.6 examples were retired in 0.7 and remain available in Git history.
 See [0.7 migration notes](docs/MIGRATING_TO_0_7.md).
 
 ## How the graph is organized
@@ -170,7 +173,7 @@ See [How disabled nodes are shown](docs/NODE_REFERENCE.md#how-disabled-nodes-are
 The [Node guide](docs/NODE_REFERENCE.md) lists the important sockets, settings,
 reference nodes, recovery tools, masking nodes, and advanced groups.
 
-## Dialogue audio for one scene (nightly)
+## Dialogue audio for one scene
 
 In Plan Studio, select a scene and choose **Lip-sync source · this scene only**.
 Pick an audio file from the Project Asset Carousel (use **Refresh audio** after
@@ -194,12 +197,12 @@ Existing workflows without a scene source keep their previous behavior.
 
 ## Important behavior
 
-- **Nightly: collapsible Studio chapters.** Use **▾** beside a chapter title to
+- **Collapsible Studio chapters.** Use **▾** beside a chapter title to
   fold its scenes into a compact group. Click the group to play/scrub the chapter
   on a local timeline, including trims, ALTs and internal black gaps. Folding is
   saved with the workflow and does not alter generation or exports.
   See [chapter folding and playback](docs/PLAN_STUDIO_CHAPTERS.md).
-- **Nightly: chapter resolution.** Click a chapter marker in Plan Studio, then
+- **Chapter resolution.** Click a chapter marker in Plan Studio, then
   choose **Inherit from Plan** or set its **Width / Height** (multiples of 32).
   Connect **Current Shot** width/height to the H3 conditioning node. A locked
   saved scene pins its entire chapter to its original size; changing the Plan

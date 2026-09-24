@@ -1,13 +1,13 @@
-# Building nightly's 0.6 workflow baseline
+# Building the 0.7 workflow catalog
 
 The recipes and layouts come from the released 0.6 catalog at `1663c42`.
-This branch compiles them against **nightly**, not against a cached 0.6 H3
+This branch compiles them against **this checkout**, not against a cached 0.6 H3
 schema. Filenames keep the shared `0.6` baseline suffix; in-canvas notes and
-guides identify nightly.
+guides identify 0.7. Workflow filenames and UUIDs remain stable.
 
 Carousel recipes keep an empty `ownership_json`; templates never include a
 session's ownership proof. The old Guide-noise and future-anchor experiments
-were retired in 0.7; other nightly-only nodes remain available.
+were retired in 0.7; retained experiments stay explicitly labeled.
 
 `recipes/` is the source of truth. Each recipe names its node settings and
 connections; it contains no UI widget arrays, node dimensions, link-slot numbers,
@@ -43,12 +43,12 @@ the complete turbo model path, and recovered AV checkpoint wiring. MAINodes'
 manual gate schema follows v1.1.3; blank ranges retain the connected oracle.
 
 `external_schemas.json` contains only dependency contracts, with provenance and
-installation-specific file inventories removed. It is not a snapshot of nightly
+installation-specific file inventories removed. It is not a snapshot of local
 H3 nodes. Update these external contracts deliberately when changing the
 documented dependency requirements; do not import an entire server inventory.
 
 `pixel_video_schemas.json` adds the six file-backed transport/USDU contracts
-used only by the nightly continuity example. It contains no model inventory.
+used only by the experimental continuity example. It contains no model inventory.
 The Protect Tail and Finish definitions are read from local H3 code.
 
 ## Serialization rules
@@ -90,7 +90,7 @@ expected checkpoints verified. The unavailable Ref2VA model was substituted with
 FL2VA for these execution tests, and a compatible installed H3 text encoder was
 used. This does not replace full-resolution or genuine Ref2VA quality testing.
 Those results describe the source release, not a GPU execution test of the
-nightly adaptations. Nightly validation checks local schemas, topology, clean
+0.7 adaptations. Offline validation checks local schemas, topology, clean
 serialization, assets, and layout bounds offline.
 
 Maintained media examples now use core Load Video/native VIDEO paths. In the

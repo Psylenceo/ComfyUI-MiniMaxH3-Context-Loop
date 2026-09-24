@@ -774,5 +774,5 @@
       }
     }
   ],
-  "compatibility_note": "Adapted for **nightly** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against nightly."
+  "compatibility_note": "Maintained for **0.7** from the released **0.6 workflow catalog**. H3 settings and sockets are validated against this checkout."
 }
