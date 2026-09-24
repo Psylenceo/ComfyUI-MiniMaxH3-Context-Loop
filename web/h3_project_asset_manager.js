@@ -229,7 +229,7 @@ function injectStyles() {
         .h3pa-root *{box-sizing:border-box}.h3pa-row{display:flex;gap:7px;align-items:center;min-width:0}
         .h3pa-tree-layout>.h3pa-toolbar{grid-area:top}.h3pa-tree-layout>.h3pa-ownership{grid-area:ownership}
         .h3pa-tree-layout>.h3pa-status{grid-area:status}.h3pa-tree-layout>.h3pa-tabs{grid-area:tabs}
-        .h3pa-source-col{grid-area:source;display:flex;flex-direction:column;gap:8px;min-height:0;overflow:hidden}
+        .h3pa-source-col{grid-area:source;display:flex;flex-direction:column;gap:8px;min-height:0;overflow:hidden;outline:none}
         .h3pa-source-col .h3pa-carousel{flex-direction:column;align-items:stretch;overflow-x:hidden;overflow-y:auto}
         .h3pa-source-col .h3pa-folder-card,.h3pa-source-col .h3pa-folder-group,
         .h3pa-source-col .h3pa-tree-node,.h3pa-source-col .h3pa-tree-children{width:100%;flex:0 0 auto}
@@ -421,6 +421,14 @@ function mount(node) {
     root.classList.toggle("h3pa-tree-layout", treeLayout);
     bindNodeWheel(root, node, app);
     const sourceCol = el("div", "h3pa-source-col");
+    // The source-tree list has no focusable descendants of its own, so
+    // bindNodeWheel's "active panel" check (selected node, or focus inside
+    // root) never passes here on hover alone -- every wheel gesture over the
+    // tree was forwarded to zoom the workflow instead of scrolling the list.
+    // Giving the column programmatic focus on hover satisfies that check
+    // without requiring the user to select the graph node first.
+    sourceCol.tabIndex = -1;
+    sourceCol.addEventListener("pointerenter", () => sourceCol.focus({preventScroll: true}));
     const stageCol = el("div", "h3pa-stage-col");
     const top = el("div", "h3pa-row h3pa-toolbar");
     const runNameInput = el("input", "h3pa-project");
