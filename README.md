@@ -19,6 +19,26 @@ scene can be reviewed, retried, checkpointed, resumed, and assembled later.
 > [validation record](docs/RELEASING_0_7.md). Back up workflows and projects before updating.
 > The Registry package ID retains its historical `contex-loop` spelling for compatibility.
 
+## Fork status (Psylenceo)
+
+Branches on this fork with work that isn't in Ethanfel's upstream yet. Update
+this section whenever a branch here is opened as a PR, merged, or dropped.
+`local-active` is rebased onto upstream 0.7.0 plus the items below.
+
+| Branch | What it does | Status |
+| --- | --- | --- |
+| [`fix/prompt-optimizer-settings-visibility`](https://github.com/Psylenceo/ComfyUI-MiniMaxH3-Context-Loop/tree/fix/prompt-optimizer-settings-visibility) | Fixes Direct API settings not appearing in Settings without searching; reorders/widens the Prompt optimizer fields; adds a "Local server preset" picker with documented API endpoints for Ollama, LM Studio, llama.cpp server, vLLM, and Unsloth Studio. | Not yet submitted — PR not opened |
+| [`feature/settings-based-origin-allowlist`](https://github.com/Psylenceo/ComfyUI-MiniMaxH3-Context-Loop/tree/feature/settings-based-origin-allowlist) | Adds a per-user "Additional allowed Direct API origins" setting so local LLM servers can be allow-listed through ComfyUI Settings instead of the `H3_PROMPT_OPTIMIZER_ALLOWED_ORIGINS` environment variable — same request-body-can-never-reach-it trust boundary as Ethanfel's SSRF fix. | Held back until this node pack's pending ComfyUI Manager review resolves — PR not opened |
+
+Also carried locally on top of 0.7.0 (not in upstream): tolerance for lazy
+motion reference clips shorter than a scene window, and the Asset Carousel
+source-tree wheel-scroll fix (if still needed).
+
+Already merged upstream in 0.7.0: Review Gate frame capture, Review Gate
+routing fixes, basic prompt drafts (PR #56), and the Asset Carousel
+lineage/version-tree redesign (PR #71).
+
+
 ## What this pack does
 
 - Groups full mix, vocals and instrumental tracks: vocals drive lip-sync while

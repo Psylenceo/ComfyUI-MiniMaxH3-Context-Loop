@@ -1,0 +1,117 @@
+[
+  {
+    "value": "custom",
+    "label": "Custom / manual",
+    "api_format": null,
+    "default_url": "",
+    "model_list_path": "",
+    "unload_supported": false,
+    "notes": "No auto-fill. Set Direct API format and Direct API URL yourself.",
+    "endpoints": []
+  },
+  {
+    "value": "ollama",
+    "label": "Ollama",
+    "api_format": "openai",
+    "default_url": "http://127.0.0.1:11434",
+    "model_list_path": "/v1/models",
+    "unload_supported": true,
+    "notes": "Exposes both a native /api/* surface and an OpenAI-compatible /v1/* shim (chat/completions, completions, embeddings, models). No /v1/responses. Unloading is a parameter on /api/generate or /api/chat, not a separate endpoint.",
+    "endpoints": [
+      {"method": "POST", "path": "/v1/chat/completions", "description": "OpenAI-compatible chat completions (used by this pack's \"openai\" Direct API format)."},
+      {"method": "POST", "path": "/v1/completions", "description": "OpenAI-compatible text completions."},
+      {"method": "POST", "path": "/v1/embeddings", "description": "OpenAI-compatible embeddings."},
+      {"method": "GET", "path": "/v1/models", "description": "OpenAI-compatible model list."},
+      {"method": "POST", "path": "/api/generate", "description": "Native single-prompt generation. Send {\"keep_alive\": 0} with the model name to unload it immediately after the call."},
+      {"method": "POST", "path": "/api/chat", "description": "Native multi-turn chat. Also accepts {\"keep_alive\": 0} to unload after the call."},
+      {"method": "POST", "path": "/api/embed", "description": "Native embeddings (current)."},
+      {"method": "POST", "path": "/api/embeddings", "description": "Native embeddings (legacy alias of /api/embed)."},
+      {"method": "GET", "path": "/api/tags", "description": "List models available locally."},
+      {"method": "GET", "path": "/api/ps", "description": "List models currently loaded in memory, with VRAM usage."}
+    ]
+  },
+  {
+    "value": "lmstudio",
+    "label": "LM Studio",
+    "api_format": "openai",
+    "default_url": "http://127.0.0.1:1234",
+    "model_list_path": "/v1/models",
+    "unload_supported": true,
+    "notes": "Exposes OpenAI-compatible endpoints (including /v1/responses), an Anthropic-compatible /v1/messages endpoint (not implemented by this pack), and its own /api/v0 (documented) and /api/v1 (used live in earlier testing, not fully documented) REST surfaces for model management.",
+    "endpoints": [
+      {"method": "POST", "path": "/v1/chat/completions", "description": "OpenAI-compatible chat completions."},
+      {"method": "POST", "path": "/v1/completions", "description": "OpenAI-compatible text completions."},
+      {"method": "POST", "path": "/v1/embeddings", "description": "OpenAI-compatible embeddings."},
+      {"method": "GET", "path": "/v1/models", "description": "OpenAI-compatible model list."},
+      {"method": "POST", "path": "/v1/responses", "description": "OpenAI Responses-shaped endpoint (this pack's \"responses\" Direct API format; not the default preset choice here)."},
+      {"method": "POST", "path": "/v1/messages", "description": "Anthropic Messages-compatible endpoint. Not implemented by this pack's request-building code."},
+      {"method": "GET", "path": "/api/v1/models", "description": "Native REST v1 model list, used to find a loaded model's instance_id for unload. Confirmed by live testing, not fully covered in current official docs."},
+      {"method": "POST", "path": "/api/v1/models/unload", "description": "Native REST v1 unload. Body is {\"instance_id\": ...} (NOT {\"model\": ...} - that 400s). Confirmed by live testing, not fully covered in current official docs."}
+    ]
+  },
+  {
+    "value": "llamacpp",
+    "label": "llama.cpp server",
+    "api_format": "openai",
+    "default_url": "http://127.0.0.1:8080",
+    "model_list_path": "/v1/models",
+    "unload_supported": false,
+    "notes": "Exposes OpenAI-compatible endpoints (including /v1/responses, which converts to its chat pipeline internally) plus a native completion/utility surface. No documented model-unload endpoint (a server instance is normally started against one already-loaded model).",
+    "endpoints": [
+      {"method": "POST", "path": "/v1/chat/completions", "description": "OpenAI-compatible chat completions."},
+      {"method": "POST", "path": "/v1/completions", "description": "OpenAI-compatible text completions."},
+      {"method": "POST", "path": "/v1/embeddings", "description": "OpenAI-compatible embeddings."},
+      {"method": "GET", "path": "/v1/models", "description": "OpenAI-compatible model list."},
+      {"method": "POST", "path": "/v1/responses", "description": "OpenAI Responses-shaped endpoint; internally converted to the chat pipeline."},
+      {"method": "POST", "path": "/completion", "description": "Native single-prompt completion (llama.cpp's original endpoint, predates the OpenAI-compatible layer)."},
+      {"method": "POST", "path": "/embedding", "description": "Native embedding endpoint."},
+      {"method": "POST", "path": "/infill", "description": "Code infill using a prefix/suffix prompt."},
+      {"method": "POST", "path": "/tokenize", "description": "Convert text to token IDs."},
+      {"method": "POST", "path": "/detokenize", "description": "Convert token IDs back to text."},
+      {"method": "POST", "path": "/apply-template", "description": "Apply the model's chat template to a messages array without generating."},
+      {"method": "POST", "path": "/reranking", "description": "Reorder documents by relevance to a query."},
+      {"method": "GET", "path": "/health", "description": "Health check; reports whether a model is loaded."},
+      {"method": "GET", "path": "/slots", "description": "Current state of each parallel processing slot."},
+      {"method": "GET", "path": "/metrics", "description": "Prometheus-format performance metrics."},
+      {"method": "GET", "path": "/lora-adapters", "description": "List loaded LoRA adapters and their scales."}
+    ]
+  },
+  {
+    "value": "vllm",
+    "label": "vLLM",
+    "api_format": "openai",
+    "default_url": "http://127.0.0.1:8000",
+    "model_list_path": "/v1/models",
+    "unload_supported": false,
+    "notes": "Exposes OpenAI-compatible endpoints; newer releases also add /v1/responses (stateful, tool-calling), but this preset keeps Chat Completions as the safer default since Responses support varies by version. No standard model-unload endpoint (vLLM is normally deployed against one fixed model).",
+    "endpoints": [
+      {"method": "POST", "path": "/v1/chat/completions", "description": "OpenAI-compatible chat completions - the recommended default."},
+      {"method": "POST", "path": "/v1/completions", "description": "OpenAI-compatible text completions. vLLM's own docs call this endpoint legacy."},
+      {"method": "POST", "path": "/v1/embeddings", "description": "OpenAI-compatible embeddings (embedding models only)."},
+      {"method": "GET", "path": "/v1/models", "description": "OpenAI-compatible model list."},
+      {"method": "POST", "path": "/v1/responses", "description": "Newer, stateful Responses-shaped endpoint with built-in tool support. Availability depends on the vLLM version."},
+      {"method": "POST", "path": "/tokenize", "description": "Tokenize text (any model with a tokenizer)."},
+      {"method": "POST", "path": "/detokenize", "description": "Convert token IDs back to text."},
+      {"method": "POST", "path": "/pooling", "description": "Raw pooling output (pooling models)."},
+      {"method": "POST", "path": "/score", "description": "Relevance scoring (cross-encoder / embedding models)."},
+      {"method": "GET", "path": "/health", "description": "Health check."}
+    ]
+  },
+  {
+    "value": "unsloth_studio",
+    "label": "Unsloth Studio",
+    "api_format": "openai",
+    "default_url": "http://127.0.0.1:8888",
+    "model_list_path": "/v1/models",
+    "unload_supported": true,
+    "notes": "Exposes /v1/chat/completions, an OpenAI Responses-shaped /v1/responses, and an Anthropic-compatible /v1/messages (not implemented by this pack) - all require an Authorization: Bearer sk-unsloth-... key generated in Settings -> API. /v1/load and /v1/unload are reported in Unsloth's own GitHub issues but are not on its primary API docs page; treat them as less certain than the endpoints above. Default port may vary by install -- check your own configuration if this preset's URL doesn't match.",
+    "endpoints": [
+      {"method": "POST", "path": "/v1/chat/completions", "description": "OpenAI-compatible chat completions. Supports streaming, tool calling, and vision."},
+      {"method": "POST", "path": "/v1/responses", "description": "OpenAI Responses-shaped endpoint (this pack's \"responses\" Direct API format)."},
+      {"method": "POST", "path": "/v1/messages", "description": "Anthropic Messages-compatible endpoint, for Claude-Code-style clients. Not implemented by this pack's request-building code."},
+      {"method": "GET", "path": "/v1/models", "description": "List currently loaded models."},
+      {"method": "POST", "path": "/v1/load", "description": "Load a model by model_path. Documented in GitHub issues, not the primary API docs; the request does not respond until loading finishes, which can take minutes for large models."},
+      {"method": "POST", "path": "/v1/unload", "description": "Unload a model by model_path. Same sourcing caveat as /v1/load."}
+    ]
+  }
+]
