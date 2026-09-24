@@ -1,8 +1,9 @@
 # 0.7 release validation
 
-This is a release-candidate checklist, **not a publication announcement**.
-The September 21, 2026 hardening pass was performed on nightly. Do not infer
-main-branch parity or Registry publication from a passing local check.
+Release validation and acceptance record for **0.7.0**, approved September 24,
+2026. The maintainer accepted the release based on sustained real-world use of
+nightly, with identical nightly/RC content promoted to main. A passing local
+check alone does not establish Registry publication; verify the publishing job.
 
 ## Scope and compatibility
 
@@ -36,6 +37,15 @@ The runner limits CPU threads, disables CUDA for its children and enables
 Node's VM module support. Each script has a 120-second timeout; adjust
 `--timeout` or `--jobs` for slower machines. Any failure returns a nonzero exit
 status. Browser and GPU checks are deliberately separate.
+
+### September 24 stable-release cut
+
+After finalizing stable installation instructions, release notes, branding and
+the shareable improvements card, the release runner again passed **236 CPU
+regression scripts with zero failures**. All **25 maintained workflows** passed
+the deterministic rebuild check; local paths and anchors passed in **74 Markdown
+documents**. These release-finalization changes affect documentation and assets,
+not sampling code or workflow defaults.
 
 ### September 24 RC documentation and wiring pass
 
@@ -143,36 +153,40 @@ If the branches diverge, reconcile and revalidate them before publishing;
 do not silently overwrite either history. Freeze the agreed commit through
 publication so a later nightly change cannot slip into the release untested.
 
-## Remaining gates before publishing
+## Stable-release decision and publication checks
 
-These are stable-release gates. The RC documentation deliberately identifies
-the candidate and its limits; a passing local suite is not publication approval.
+On September 24 the maintainer explicitly approved replacing main with the
+complete tested 0.7/nightly content and releasing **0.7.0** (main was 0.6.11).
+The RC already carried version 0.7.0; promoting it supplies the stable version
+bump. Release documentation, installation instructions and branding are
+finalized on nightly, with experimental labels and defaults retained.
 
-- [ ] Clean-install smoke run using the intended release's ComfyUI and
-  companion-pack versions; open a maintained Normal workflow and verify the
-  loaders, one sampled clip, review and export. The current environment's
-  passing import/schema tests are not a fresh-environment installation test.
-- [ ] Representative pretrained-weight, production-resolution visual/audio
-  acceptance run on the final release candidate, including stop/resume and a
-  multi-scene assembly. The synthetic GPU test is not a substitute.
-- [ ] Native Windows smoke test. Path, cross-drive, descriptor and locking
-  regressions are covered on Linux with modeled Windows semantics; this is
-  not a full Windows installation/render validation.
-- [ ] Review the exact main/0.7-rc diff and choose what ships; preserve
-  explicit experimental labels rather than silently changing defaults.
-- [ ] Confirm nightly and 0.7-rc point to the same tested, pushed commit,
-  including the final release documentation and metadata changes.
-- [ ] At the approved stable-release cut, replace RC install/branding text,
-  finalize the changelog date and release notes, and verify the intended
-  Registry version. Do not mark an unreleased candidate as already published.
-- [ ] Explicit approval for merge/tag/publish. Updating `pyproject.toml` on
-  main can trigger `.github/workflows/publish_action.yml`; do not use a
-  version-file push as a harmless release rehearsal. The workflow also permits
-  manual dispatch; do not dispatch it from the RC as a validation step.
+The branches have divergent history. Preserve both histories with a merge
+that keeps the complete 0.7 tree, then fast-forward main and 0.7-rc to that
+commit. Verify the merge adds no content change, all three branches have the
+same tree and commit, and push them together. No force-push is needed.
 
-Companion feature requests are not release blockers merely because they are
-open. Recheck GitHub reports against the candidate before publishing; do not
-close issues or merge draft PRs based only on this checklist.
+Publishing checks remain operational requirements, not assumed test results:
+
+- Rerun the CPU release suite and deterministic workflow check on the final tree.
+- Verify clean worktrees and identical pushed main/nightly/0.7-rc commits.
+- Confirm the main version change triggers `.github/workflows/publish_action.yml`
+  and check its result and the Registry version. Do not dispatch duplicate jobs.
+
+### Validation limits accepted for this cut
+
+- Sustained maintainer use of nightly is the real-world acceptance evidence.
+  No separate, freshly instrumented pretrained-weight production-resolution
+  acceptance run was performed for the final documentation-only changes.
+- Clean-install and native Windows smoke tests were not performed for this
+  cut. Linux path/locking tests with modeled Windows semantics are not a full
+  Windows installation/render validation.
+- The earlier isolated browser and synthetic GPU results remain dated evidence;
+  they are not claims of exhaustive production quality validation.
+
+These limits were accepted for publication, not marked as passing tests.
+Open companion requests and the reports below are outside this release's scope;
+do not close issues or merge draft PRs based only on this release decision.
 
 ## Open compatibility reports reviewed for the candidate
 
@@ -192,5 +206,6 @@ As of September 24, 2026:
   diagnostic workflow requested. Keep the possible refiner/assembly interaction
   separate from ordinary generated-audio regression coverage; no fix is claimed.
 
-Recheck these reports and record a fix, documented limitation or explicit
-deferral decision before the stable release.
+The maintainer explicitly deferred the remaining scope of these reports from
+0.7 publication. They remain open for diagnosis; the release claims no fixes
+beyond the specific reference wiring correction described above.

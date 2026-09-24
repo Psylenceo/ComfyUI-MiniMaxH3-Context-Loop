@@ -2,16 +2,17 @@
 
 Newest first. This file keeps release history out of the onboarding README.
 
-## 0.7.0 — Unreleased
+## 0.7.0 — 2026-09-24
 
 Release scope: harden the existing workflow, review, recovery and cleanup paths;
 optional companion features are not prerequisites. See the
 [migration guide](docs/MIGRATING_TO_0_7.md) and
 [release validation checklist](docs/RELEASING_0_7.md).
 
-For the short candidate overview, see [0.7 RC release notes](RELEASE_NOTES_0_7.md).
+For the short overview, see [0.7 release notes](RELEASE_NOTES_0_7.md) and the
+[shareable improvements table](docs/0.7-major-improvements.md).
 
-- Prepare RC onboarding, installation, storage and migration documentation;
+- Finalize release onboarding, installation, storage and migration documentation;
   distinguish recursive defaults from optional top-level requeue and retain
   explicit experimental/testing limits. Keep 0.6 catalog filenames and UUIDs.
 - Connect the active Tagged registry to Loop Start in four maintained

@@ -1,8 +1,7 @@
 # Getting started
 
 This guide takes the shortest path from a clean install to one reviewed,
-assembled video. This branch is the **0.7 release candidate**, not a published
-stable release. Read [migration notes](MIGRATING_TO_0_7.md) before updating an
+assembled video with **0.7**. Read [migration notes](MIGRATING_TO_0_7.md) before updating an
 older custom workflow, and back up your workflow and run folder first.
 
 ## 1. Install the packs
@@ -11,7 +10,7 @@ From `ComfyUI/custom_nodes`:
 
 ```bash
 git clone https://github.com/seitanism/ComfyUI-H3-Motion-Context-MultiRef.git
-git clone --branch 0.7-rc \
+git clone --branch main \
   https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop.git
 ```
 

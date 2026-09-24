@@ -1,13 +1,13 @@
-# 0.7 release candidate
+# 0.7.0 — September 24, 2026
 
-**Ready for community testing, not a stable-release announcement.** Use the
-`0.7-rc` branch and back up your workflows and project folders before updating.
+**0.7 is available on `main`, with the same content as nightly and 0.7-rc at release.**
+Back up your workflows and project folders before updating.
 Models are not included. Follow [Getting started](docs/GETTING_STARTED.md) for
 installation and required companion packs.
 
 ## Main changes
 
-| Area | 0.7 candidate highlights |
+| Area | 0.7 highlights |
 |---|---|
 | Project and scene authoring | Basic or Carousel / Studio starting points; synchronized project names; collapsible scene/chapter controls. The original Context Loop Plan stays supported. |
 | Takes and working branches | Batch deletion previews, explicit final-cut and continuation selections, and empty-branch management with shared-file/dependency safeguards. |
@@ -20,7 +20,8 @@ installation and required companion packs.
 The maintained files keep their **0.6** suffix and stable workflow identities;
 they are rebuilt for this checkout. Start with
 [Basic or Carousel / Studio](example_workflows/README.md#start-here-basic-or-carousel).
-Detailed history is in the [changelog](CHANGELOG.md).
+Detailed history is in the [changelog](CHANGELOG.md). For sharing, use the
+[improvements table and release card](docs/0.7-major-improvements.md).
 
 ## Before updating
 
@@ -44,16 +45,17 @@ Detailed history is in the [changelog](CHANGELOG.md).
   quality guarantees. See [SelfLift limits](docs/selflift-seed-hunt.md#known-quality-limitation).
 - Examples default to recursive execution. [Top-level requeue](docs/MAINTAINED_WORKFLOW.md)
   is opt-in and separates accepted scenes, not every candidate or retry.
-- Automated fixture checks are separate from real pretrained-weight acceptance,
-  clean-install and native Windows testing. Their recorded results and remaining
-  gates are in [release validation](docs/RELEASING_0_7.md).
+- Release acceptance includes the maintainer's sustained use of nightly.
+  Automated fixture checks are separate from fresh pretrained-weight,
+  clean-install and native Windows testing, which were not rerun for this cut.
+  See the [validation record](docs/RELEASING_0_7.md).
 - Reports being triaged include [reference/preflight behavior (#95)](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop/issues/95),
   [color shift (#96)](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop/issues/96),
   and [AudioRefine joins (#97)](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop/issues/97).
   The example wiring correction addresses one concrete cause of #95's warning;
-  it does not establish that the entire report is fixed.
+  it does not establish that the entire report is fixed. The remaining reports
+  are tracked separately and were explicitly deferred from this release's scope.
 
 For feedback, attach the workflow JSON, ComfyUI/pack versions, steps to reproduce
 and the full error or a small comparison. Remove credentials and private asset
-paths before sharing. Publishing to main/Registry remains a separate, explicitly
-approved step after the remaining gates are reviewed.
+paths before sharing.

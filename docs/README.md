@@ -49,7 +49,8 @@ explanation.
 ## Project information
 
 - [Changelog](../CHANGELOG.md)
-- [0.7 RC release summary](../RELEASE_NOTES_0_7.md)
+- [0.7 release summary](../RELEASE_NOTES_0_7.md)
+- [0.6 → 0.7 shareable improvements table](0.7-major-improvements.md)
 - [0.7 release validation and remaining gates](RELEASING_0_7.md)
 - [Third-party credits and licenses](../THIRD_PARTY_NOTICES.md)
 - [Contributing](../CONTRIBUTING.md)

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/minimax-h3-context-loop.svg" alt="MiniMax H3 Context Loop 0.7 RC — scene plans that survive the render" width="100%">
+  <img src="assets/minimax-h3-context-loop.svg" alt="MiniMax H3 Context Loop 0.7 — scene plans that survive the render" width="100%">
 </p>
 
 # ComfyUI MiniMax H3 Context Loop
@@ -12,12 +12,12 @@ scene can be reviewed, retried, checkpointed, resumed, and assembled later.
 **[Choose a workflow](example_workflows/README.md)** ·
 **[All documentation](docs/README.md)**
 
-> **0.7 release candidate:** install `0.7-rc` to test the upcoming release.
+> **0.7.0:** the tested nightly/RC is now the stable release on `main`.
 > See the [release summary](RELEASE_NOTES_0_7.md),
+> [shareable improvements table](docs/0.7-major-improvements.md),
 > [migration notes](docs/MIGRATING_TO_0_7.md), and
-> [remaining validation gates](docs/RELEASING_0_7.md#remaining-gates-before-publishing).
-> This is not a stable-release announcement. The Registry package ID retains
-> its historical `contex-loop` spelling for compatibility.
+> [validation record](docs/RELEASING_0_7.md). Back up workflows and projects before updating.
+> The Registry package ID retains its historical `contex-loop` spelling for compatibility.
 
 ## What this pack does
 
@@ -60,7 +60,7 @@ From `ComfyUI/custom_nodes`:
 
 ```bash
 git clone https://github.com/seitanism/ComfyUI-H3-Motion-Context-MultiRef.git
-git clone --branch 0.7-rc \
+git clone --branch main \
   https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop.git
 ```
 
@@ -123,7 +123,7 @@ Prefer explicit reference-loader wiring? The [manual Tagged examples](example_wo
 are available separately. For SelfLift, use the [Seed Hunt example](<example_workflows/Ref2V Studio SelfLift Seed Hunt - EXPERIMENTAL - MiniMax H3 0.6.json>)
 with review enabled or disabled.
 
-The **0.7 RC** uses the maintained **0.6-named workflow catalog**, rebuilt for
+The **0.7 release** uses the maintained **0.6-named workflow catalog**, rebuilt for
 this checkout's nodes. Choose **Normal** for Production Plan and Scene Prompt
 Editor. **Studio** adds Plan Studio, Project Asset Carousel, the rich prompt
 editor, and Checkpoint Manager; it does not change the generation graph.

@@ -1,0 +1,72 @@
+Use case: infographic-diagram
+Asset type: a polished shareable release improvements table, PNG, portrait, for GitHub and Discord.
+Primary request: create the next release-overview card for MiniMax H3 Context Loop, comparing 0.6 to 0.7. This is a NEW graphic. The supplied old 0.5-to-0.6 image is a STYLE REFERENCE ONLY, not an edit target. Use none of its old feature claims.
+Style: closely match the reference's restrained technical release table: very dark navy background, thin cyan-to-violet gradient divider, alternating subtly tinted rounded row cards, slim colored left accents, small numbered circles, white bold left labels, light gray descriptive text, and cyan/blue/violet benefit lines. Flat professional typography; no art, photographs, fake controls, icons, or decorative illustrations.
+Composition: portrait approximately 1536x2304 or larger proportional resolution for sharp sharing. Generous outer margins. Header about 15% of height, then two-column table, footer. Left feature-name column around 28%; right copy column around 72%. Exactly 13 rows numbered 01 through 13. Equal-height or carefully balanced rows. Each right cell has the description in light gray on 1–2 lines and the benefit below in its row accent color. Keep every line within its cell, no clipping, no overlapping. Make type comfortably legible at full size. Preserve case and punctuation in the copy below; left labels may be uppercase and wrap into two lines.
+Header text verbatim:
+Small capsule: "RELEASE OVERVIEW"
+Main title: "MiniMax H3 Context Loop"
+Large gradient version line: "0.6 → 0.7"
+Subtitle: "MORE CONTROL • BETTER REVIEW • SMOOTHER RECOVERY"
+Small status badge: "0.7 RC"
+Table header: "AREA" and "WHAT CHANGED / WHY IT MATTERS"
+Table rows EXACT TEXT in order:
+01. LEFT: "Working branches"
+DESCRIPTION: "Fork saved scenes, keep separate Plans and cuts, and remove empty branches."
+BENEFIT: "Explore alternatives within the same project."
+
+02. LEFT: "Any take as context"
+DESCRIPTION: "Choose a saved version for continuation independently of the final cut."
+BENEFIT: "Keep one shot; continue from another."
+
+03. LEFT: "Checkpoint cleanup"
+DESCRIPTION: "Batch deletion, obsolete-path cleanup and clearer confirmation controls."
+BENEFIT: "Remove unwanted takes while protecting shared files."
+
+04. LEFT: "SelfLift seed hunting*"
+DESCRIPTION: "Review low-resolution candidates before running the high-resolution finish."
+BENEFIT: "Spend finishing time on the takes you choose."
+
+05. LEFT: "Upscale inspection*"
+DESCRIPTION: "Preview the latent lift; finish several marked takes with one main. Optional high-pass tiling."
+BENEFIT: "Inspect the upscale before committing to a finish."
+
+06. LEFT: "Chapter authoring"
+DESCRIPTION: "Collapsible chapters, chapter-local playback and per-chapter resolution."
+BENEFIT: "Navigate long projects with less clutter."
+
+07. LEFT: "Editors & Carousel"
+DESCRIPTION: "Separate Tree Carousel, synchronized run names and fewer refreshes while typing."
+BENEFIT: "Keep project selection and prompt editing in sync."
+
+08. LEFT: "Review & recovery"
+DESCRIPTION: "Review Gate Relay across tabs, saved takes and improved interruption recovery."
+BENEFIT: "Reconnect to review and resume saved work."
+
+09. LEFT: "Resume & assembly"
+DESCRIPTION: "Fewer repeated checkpoint reads and hashes; faster branch and assignment handling."
+BENEFIT: "Less overhead as your project grows."
+
+10. LEFT: "Scene-level audio"
+DESCRIPTION: "Choose a lip-sync audio source for an individual scene in Plan Studio."
+BENEFIT: "Give individual scenes their own dialogue."
+
+11. LEFT: "Painted context masks"
+DESCRIPTION: "Paint fixed regions to weaken visual context for the next AV-masked generation."
+BENEFIT: "Allow local changes while retaining surrounding context."
+
+12. LEFT: "Storage & safety"
+DESCRIPTION: "Clear generation, processing and export folders; optional workflow ownership locking."
+BENEFIT: "Organized outputs, with deletion safeguards retained."
+
+13. LEFT: "Simpler release kit"
+DESCRIPTION: "Basic or Carousel / Studio entry points; Tagged examples in their own folder."
+BENEFIT: "Updated docs and examples. Original Plan still supported."
+Footer EXACT TEXT, all visible and readable:
+"* SelfLift and high-pass tiling remain experimental; known lift artifacts are not fixed."
+"236 CPU checks passed • 25 maintained workflows • September 2026"
+"github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop"
+Constraints: render all provided copy accurately, exactly once, no invented claims or added logos. No old 0.5 or 0.6-only feature descriptions copied from reference. Do not claim stable release is already published. Prefer clean breathing room over ornamental styling. All 13 rows and the entire footer must fit. The original Plan support statement must be visible in the final row.
+
+Stable release edit (built-in image-generation tool, September 24, 2026):
+Use case: text-localization. Asset type: stable-release share card. Image 1 is the edit target. Change ONLY the small purple outlined badge near the upper-right corner from "0.7 RC" to "0.7.0". Keep its typography, color, position and outline. Preserve absolutely everything else unchanged: all thirteen table rows and every word, numbers, footnotes, repository URL, heading, colors, layout, dimensions, margins and background. No other edits, no reflow, no added text.
