@@ -23,13 +23,13 @@ import {
     promptSceneKey,
     promptSourceRevision,
 } from "./h3_prompt_assistant_core.mjs?v=0.7.8";
-import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.7.0";
+import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.7.1";
 import {
     promptRevisionHelp,
     promptRevisionLabel,
     promptRevisionNavigation,
     promptRevisionTree,
-} from "./h3_prompt_history_core.mjs?v=0.7.0";
+} from "./h3_prompt_history_core.mjs?v=0.7.1";
 import {
     availableReferenceRecords,
     convertTaggedPictureReference,

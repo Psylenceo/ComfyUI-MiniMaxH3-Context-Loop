@@ -2,8 +2,11 @@
 
 Newest first. This file keeps release history out of the onboarding README.
 
-## Unreleased
+## 0.7.1 — 2026-09-29
 
+- Add a tablet-friendly **Scroll to bottom** button to the sticky scene toolbar
+  in both Plan editors. It scrolls only the current editor without changing scenes
+  or generation settings.
 - Add Chain Audio Refine Sampler to retain original context audio protection
   during an audio-only second pass (#97). Freeze video, preserve hard locks
   and fractional audio masks, and reject conflicting dynamic-mask models.

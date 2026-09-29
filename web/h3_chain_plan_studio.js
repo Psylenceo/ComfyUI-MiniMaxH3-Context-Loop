@@ -73,7 +73,7 @@ import {
     promptRevisionHelp,
     promptRevisionLabel,
     promptRevisionNavigation,
-} from "./h3_prompt_history_core.mjs?v=0.7.0";
+} from "./h3_prompt_history_core.mjs?v=0.7.1";
 import {
     availableReferenceRecords,
     convertTaggedPictureReference,
