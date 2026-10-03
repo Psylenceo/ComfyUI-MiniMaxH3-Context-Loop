@@ -12,7 +12,7 @@ scene can be reviewed, retried, checkpointed, resumed, and assembled later.
 **[Choose a workflow](example_workflows/README.md)** ·
 **[All documentation](docs/README.md)**
 
-> **0.7.1:** stable on `main`, adding Plan navigation and audio-boundary fixes.
+> **0.7.2:** stable on `main`, fixing Studio branch reload and Windows SelfLift saves.
 > See the [patch notes](CHANGELOG.md), [0.7 release summary](RELEASE_NOTES_0_7.md),
 > [shareable improvements table](docs/0.7-major-improvements.md),
 > [migration notes](docs/MIGRATING_TO_0_7.md), and
