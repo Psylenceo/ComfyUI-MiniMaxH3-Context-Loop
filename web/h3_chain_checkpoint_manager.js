@@ -1,5 +1,5 @@
 import {app} from "/scripts/app.js";
-import {applyContextTake} from "./h3_context_take_core.mjs?v=0.7.1";
+import {applyContextTake} from "./h3_context_take_core.mjs?v=0.7.3";
 import {bindNodeWheel} from "./h3_dom_wheel.mjs?v=0.7.1";
 import {api} from "/scripts/api.js";
 import {mountStorageInspector} from "./h3_storage_inspector.mjs?v=0.7.1";

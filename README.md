@@ -12,7 +12,7 @@ scene can be reviewed, retried, checkpointed, resumed, and assembled later.
 **[Choose a workflow](example_workflows/README.md)** ·
 **[All documentation](docs/README.md)**
 
-> **0.7.2:** stable on `main`, fixing Studio branch reload and Windows SelfLift saves.
+> **0.7.3:** stable on `main`, saving and restoring project prompts when switching Carousel runs.
 > See the [patch notes](CHANGELOG.md), [0.7 release summary](RELEASE_NOTES_0_7.md),
 > [shareable improvements table](docs/0.7-major-improvements.md),
 > [migration notes](docs/MIGRATING_TO_0_7.md), and
