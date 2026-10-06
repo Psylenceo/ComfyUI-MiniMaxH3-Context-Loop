@@ -2,6 +2,13 @@
 
 Newest first. This file keeps release history out of the onboarding README.
 
+## Unreleased
+
+- Fix ownership-denied project/branch saves being treated as uncertain writes.
+  Disabling locking or obtaining ownership lets the next project switch save
+  normally, without a false pending-operation block. Preserve local drafts and
+  genuinely uncertain requests for safe recovery.
+
 ## 0.7.3 — 2026-10-06
 
 - Switching Carousel projects now saves the outgoing prompts/Plan and restores
