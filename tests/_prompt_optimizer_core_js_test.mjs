@@ -49,11 +49,18 @@ assert.match(settingsSource, /telemetry: \{trackChanges: false\}/);
 
 // Execute the real settings registration with a synthetic ComfyUI settings
 // store. Never read user settings, contact a provider or persist any values.
+// This fork's settings file registers two extra local-only controls (server
+// profile presets and a per-user origin allow-list) beyond upstream's five,
+// and loads its combo-box option lists asynchronously via fetch+import.meta,
+// so init() is async and loadJson's fetch is stubbed to force the built-in
+// fallback lists rather than touching the network.
 const saved = new Map([
     ["MiniMaxH3ContexLoop.PromptOptimizer.Backend", "mcp"],
     ["MiniMaxH3ContexLoop.PromptOptimizer.McpProvider", "ollama"],
+    ["MiniMaxH3ContexLoop.PromptOptimizer.ServerProfile", "custom"],
     ["MiniMaxH3ContexLoop.PromptOptimizer.ApiFormat", "responses"],
     ["MiniMaxH3ContexLoop.PromptOptimizer.ApiUrl", "https://example.invalid/v1"],
+    ["MiniMaxH3ContexLoop.PromptOptimizer.ExtraAllowedOrigins", ""],
     ["MiniMaxH3ContexLoop.PromptOptimizer.ApiKey", "synthetic-test-key"],
     ["MiniMaxH3ContexLoop.PromptOptimizer.Model", "test-model"],
     ["MiniMaxH3ContexLoop.PromptOptimizer.AllowMedia", true],
@@ -62,6 +69,7 @@ const before = new Map(saved);
 const definitions = new Map();
 const notifications = [];
 const commands = [];
+let initDone;
 const mockApp = {
     ui:{settings:{
         addSetting(definition) {
@@ -71,19 +79,25 @@ const mockApp = {
         getSettingValue:id => saved.get(id) ?? definitions.get(id)?.defaultValue,
         setSettingValue() { assert.fail("Registration must not overwrite saved settings"); },
     }},
-    registerExtension(extension) { extension.init(); },
+    registerExtension(extension) { initDone = Promise.resolve(extension.init()); },
     extensionManager:{command:{async execute(command) { commands.push(command); }}},
 };
+const stubbedFetch = async () => { throw new Error("network access disallowed in test"); };
 const settings = new Function("app", "normalizePromptOptimizerApiFormat",
-    "normalizePromptOptimizerBackend", "globalThis", "CustomEvent",
+    "normalizePromptOptimizerBackend", "globalThis", "CustomEvent", "fetch", "URL",
     settingsSource.replace(/^import[\s\S]*?from ["'][^"']+["'];\s*/gm, "")
         .replace(/^export /gm, "")
+        .replace(/import\.meta\.url/g, '"file:///test-stub/"')
         + "\nreturn {promptOptimizerBackend, promptOptimizerMcpProvider, promptOptimizerDirectConfig, openPromptOptimizerSettings};")(
     mockApp, normalizePromptOptimizerApiFormat, normalizePromptOptimizerBackend,
     {dispatchEvent:event => notifications.push(event.type)},
     class { constructor(type) { this.type = type; } },
+    stubbedFetch, URL,
 );
-assert.deepEqual([...definitions.keys()], [...saved.keys()], "Keep all existing persisted IDs");
+await initDone;
+// Registration order is deliberately reversed from display order (see the
+// settings file's own comment on this), so compare as sets, not sequences.
+assert.deepEqual(new Set(definitions.keys()), new Set(saved.keys()), "Keep all existing persisted IDs");
 
 // ComfyUI's settings tree keys leaves by category path. Reusing the whole
 // path silently replaces earlier controls with the last registered one.
@@ -94,7 +108,7 @@ for (const definition of definitions.values()) {
     assert.ok(definition.category[2]);
     visible.set(JSON.stringify(definition.category), definition.id);
 }
-assert.equal(visible.size, 7, "All seven optimizer controls must survive settings-tree grouping");
+assert.equal(visible.size, 9, "All nine optimizer controls must survive settings-tree grouping");
 assert.deepEqual(new Set(visible.values()), new Set(saved.keys()));
 assert.equal(settings.promptOptimizerBackend(), "mcp");
 assert.equal(settings.promptOptimizerMcpProvider(), "ollama");
@@ -107,7 +121,7 @@ const apiKeyDefinition = definitions.get("MiniMaxH3ContexLoop.PromptOptimizer.Ap
 assert.equal(apiKeyDefinition.attrs.type, "password");
 assert.equal(apiKeyDefinition.telemetry.trackChanges, false);
 for (const definition of definitions.values()) definition.onChange("test", "previous");
-assert.deepEqual(notifications, Array(7).fill("h3-prompt-optimizer-settings-changed"));
+assert.deepEqual(notifications, Array(9).fill("h3-prompt-optimizer-settings-changed"));
 assert.equal(await settings.openPromptOptimizerSettings(), true);
 assert.deepEqual(commands, ["Comfy.ShowSettingsDialog"]);
 saved.clear();
