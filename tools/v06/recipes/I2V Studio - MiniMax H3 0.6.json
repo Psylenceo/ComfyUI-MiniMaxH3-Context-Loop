@@ -108,7 +108,8 @@
         "blend_schedule": "plan",
         "boundary_tone_match": "off",
         "color_stabilization": "off",
-        "delete_checkpoints_after_assembly": false
+        "delete_checkpoints_after_assembly": false,
+        "generated_audio_join": "av_overlap"
       },
       "inputs": {
         "manifest": [
@@ -315,7 +316,8 @@
       "settings": {
         "trim_frames": 0,
         "fps": 24,
-        "match_tail": true
+        "match_tail": true,
+        "audio_trim_mode": "sync_with_video"
       },
       "inputs": {
         "images": [
@@ -377,7 +379,8 @@
         "blend_schedule": "plan",
         "boundary_tone_match": "off",
         "color_stabilization": "off",
-        "delete_checkpoints_after_assembly": false
+        "delete_checkpoints_after_assembly": false,
+        "generated_audio_join": "av_overlap"
       },
       "inputs": {
         "manifest": [

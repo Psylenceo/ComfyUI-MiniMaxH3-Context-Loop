@@ -302,6 +302,53 @@ The raw per-scene implementation and separate visual/audio context fields are
 under Advanced boundary controls. Plan-wide raw 0.4 defaults belong to the
 Legacy 0.4 Policy Adapter.
 
+### Audio-only refinement without rewriting the carried boundary
+
+Use **MiniMax H3 Chain Audio Refine Sampler** for an audio-only second pass
+inside a chain. The third-party `H3 Audio Refine Sampler` opens every audio
+tick, including a protected carried prefix. In an AV continuation, assembly
+normally gives the later scene ownership of that decoded overlap; reworking
+it can therefore replace otherwise good sound at the end of the prior scene
+([#97](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop/issues/97)).
+
+Replace the third-party sampler with the Chain sampler and wire:
+
+| Chain Audio Refine input | Connect from |
+| --- | --- |
+| `latent` | Finished joint AV output of Sample Video + Audio |
+| `context_latent` | Apply Scene Context's **latent** output, before the first sampler |
+| `positive` | Apply Scene Context's conditioning output |
+| `negative` | The same conditioning at CFG 1; your negative conditioning otherwise |
+| `model` | Separate refinement branch **before Turbo LoRA and the Drift-Control patch** |
+| `seed` | Current Scene's noise seed, or an explicit refinement seed |
+
+Connect its output to both VAE decoders, Save Segment + Checkpoint's
+`sampled_latent`, and Loop End's `sampled_latent`. Keep decoded images/audio
+going through Loop Trim as before. The extra `context_latent` wire must come
+from the same scene and match the sampled latent's resolution and length.
+
+The node freezes all video, preserves hard audio locks, retains fractional
+audio masks (including Soft AV feathers), and skips sampling when audio is
+entirely locked. It uses ComfyUI's native sampler and does not require the
+AudioRefine pack. Dynamic denoise-mask model patches are rejected rather than
+allowed to reopen the frozen picture. An optional Frozen Video Cache may
+fall back to its exact uncached path for mixed protected/generated audio;
+disable that cache for an initial quality comparison. This integration has
+CPU mask/saving/assembly coverage, not a guarantee of perceptual improvement.
+
+For **already-saved clips** refined without boundary protection, load their
+manifest and set Assemble Final Video's `generated_audio_join` to
+**`delivered_only`**. This concatenates the saved trimmed audio and ignores
+the regenerated raw overlap, equivalent to using the individual generated
+WAVs. It neither reruns diffusion nor changes checkpoints or A/V timing.
+It also applies to generated-audio sidecars, but does not alter source-track
+audio. The setting is local to that assembly node, not a global preview or
+PNG-export preference. Hard cuts can still be audible; this recovers assembly,
+not the lost continuity inside an already-refined clip.
+
+The default **`av_overlap`** is unchanged and remains appropriate for ordinary
+AV continuation, including Soft AV's intentional boundary feather.
+
 ### Editorial scene placement, gaps, and subtitles
 
 Plan Studio can place each generated scene at an exact 24 fps timeline frame.
@@ -467,7 +514,35 @@ Use **MiniMax H3 Context Loop Trim** after decoding. In head mode it removes the
 repeated visual prefix. With `match_tail=true`, it time-conforms the small H3
 grid mismatch to the exact delivered-frame duration and carries the
 full AV overlap privately to Segment Save. Connect Trim's AUDIO output directly;
-there is no second overlap-audio socket.
+there is no second overlap-audio socket. The default `audio_trim_mode` is
+`sync_with_video`: both streams lose the same prefix, preserving lip-sync.
+
+### Fresh narration: preserve the opening words
+
+Fresh generated speech can start inside the repeated visual prefix. For
+**off-screen narration only**, choose **Generate fresh audio per scene** on
+Generation Profile, then set **Loop Trim → Audio trim mode** to
+`fresh_narration_keep_start`. Connect **Current Shot → state** to Loop Trim,
+keep `match_tail=true`, and wire Trim's AUDIO output directly to Segment Save.
+The active scene must have generated final audio with no generated carry,
+source guide or source lock; incompatible scene overrides are rejected.
+
+This opt-in mode keeps audio from time zero and removes excess duration from
+the **end**, while video still loses its repeated head. For a 22-frame prefix
+at 24 fps, that preserves the first 0.917 seconds instead of removing them,
+but discards the last 0.917 seconds. Leave enough room after the narration and
+inspect the closing words. This shifts audio relative to picture: **do not use
+it for lip-sync, timed effects, music synchronization or carried audio**.
+It does not stretch speech to squeeze the full recording into the scene.
+
+The choice is saved with newly processed scene checkpoints and retained by
+assembly, deferred processing and PNG/WAV latent re-decode. Narration is not
+overlaid onto the preceding scene's audio at a masked-AV boundary. Changing
+the widget does not rewrite previously saved takes: process and save a new
+revision to use it. Existing workflows and saved scenes retain synchronized
+trimming unless explicitly opted in.
+
+### Visual overlap for assembly
 
 `images_with_overlap` exposes an additional visual stream containing the
 retained repeated context selected by the active scene state. In 0.5 chains,

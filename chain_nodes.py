@@ -131,6 +131,7 @@ from .project_assets import (
     ProjectAssetStore,
 )
 from .av_timing import (
+    AUDIO_TRIM_MODE_KEY,
     AUDIO_TRIM_FRAMES_KEY,
     AUDIO_WITH_OVERLAP_FRAMES_KEY,
     AUDIO_WITH_OVERLAP_WAVEFORM_KEY,
@@ -478,6 +479,19 @@ def _resolved_scene_audio_policy(
         source_audio_target or policy.get("source_audio_target", "off"),
         policy.get("lip_sync_options"),
     )
+
+
+def _require_fresh_narration_policy(value: Any, shot: Any) -> None:
+    policy = _resolved_scene_audio_policy(value, shot)
+    if (policy["final_audio"] != "generated"
+            or policy["generated_continuity"] != "off"
+            or policy["source_reference"] != "off"
+            or policy.get("source_audio_target", "off") == "locked"):
+        raise ValueError(
+            "Keep-start narration requires Generate fresh audio per scene "
+            "for the active scene: generated final audio, no generated "
+            "carry, source guide or source lock. Use sync_with_video for "
+            "synchronized dialogue.")
 
 
 def _resolved_lip_sync_options(
@@ -5311,8 +5325,11 @@ def _resolve_prior_scene_source(
         if value.isdigit():
             source = int(value)
         else:
+            # Scene IDs are normalized by the Plan compiler. Older authored
+            # context links can still contain the original display spelling.
+            value = _safe_name(value, "")
             matches = [int(shot_index) for shot_index, shot in enumerate(
-                shots, 1) if str(shot.get("id") or "") == value]
+                shots, 1) if value and str(shot.get("id") or "") == value]
             if len(matches) == 1:
                 source = matches[0]
     if source is None:
@@ -10837,7 +10854,7 @@ def _public_segment(value: dict[str, Any]) -> dict[str, Any]:
         "prompt_hash", "prompt_template_hash", "prompt_choice_seed", "archives",
         "seed", "steps", "continuation_mode", "context_length",
         "context_take",
-        "audio_context_length", "context_spatial_proxy",
+        "audio_context_length", "audio_trim_mode", "context_spatial_proxy",
         "source_reference", "generated_continuity", "source_audio_target",
         "lip_sync_source", "lip_sync_source_asset",
         "prompt_seed_mode", "prompt_seed", "lora_route", "selflift_sampling",
@@ -19473,17 +19490,28 @@ class MiniMaxH3ChainSegmentSave:
                 "denoised_audio": denoised[1],
             })
         sample_rate = 0
+        audio_trim_mode = "sync_with_video"
         if audio is not None:
             waveform, sample_rate = _validate_audio(
                 audio, "H3 chain clip %d delivered audio" % index,
                 expected_frames=expected_frames)
             tensors["delivered_audio"] = _tensor_cpu_clone(waveform)
+            if AUDIO_TRIM_MODE_KEY in audio:
+                audio_trim_mode = str(audio[AUDIO_TRIM_MODE_KEY])
+                if audio_trim_mode not in ("sync_with_video", "fresh_narration_keep_start"):
+                    raise ValueError("Unknown saved audio trim mode %r." % audio_trim_mode)
+            if audio_trim_mode == "fresh_narration_keep_start":
+                _require_fresh_narration_policy(plan, shot)
             overlap_keys = (
                 AUDIO_WITH_OVERLAP_WAVEFORM_KEY,
                 AUDIO_WITH_OVERLAP_FRAMES_KEY,
                 AUDIO_TRIM_FRAMES_KEY,
             )
             overlap_present = [key in audio for key in overlap_keys]
+            if audio_trim_mode == "fresh_narration_keep_start" and any(overlap_present):
+                raise ValueError(
+                    "Keep-start narration cannot also carry synchronized "
+                    "overlap audio. Connect Loop Trim's AUDIO output directly.")
             if any(overlap_present) and not all(overlap_present):
                 raise ValueError(
                     "H3 chain clip %d received incomplete private Loop Trim "
@@ -19535,6 +19563,7 @@ class MiniMaxH3ChainSegmentSave:
                     overlap_waveform)
             elif (repeated_frames > 0
                   and continuation_mode in MASKED_CONTINUATION_MODES
+                  and audio_trim_mode != "fresh_narration_keep_start"
                   and _audio_policy_final(plan) == "generated"):
                 _LOG.warning(
                     "H3 Chain clip %d uses %s with generated final audio, but "
@@ -19665,6 +19694,8 @@ class MiniMaxH3ChainSegmentSave:
                     "true" if denoised_latent is not None else "false"),
                 "audio_with_overlap": str(
                     "audio_with_overlap" in tensors).lower(),
+                **({"audio_trim_mode": audio_trim_mode}
+                   if audio_trim_mode != "sync_with_video" else {}),
             })
             os.replace(checkpoint_tmp, published_checkpoint)
 
@@ -19696,6 +19727,8 @@ class MiniMaxH3ChainSegmentSave:
                 **({"context_take": dict(shot["context_take"])}
                    if "context_take" in shot else {}),
                 "audio_context_length": effective_audio_context_length,
+                **({"audio_trim_mode": audio_trim_mode}
+                   if audio_trim_mode != "sync_with_video" else {}),
                 "source_reference": str(
                     _resolved_scene_audio_policy(plan, shot)[
                         "source_reference"]),
@@ -22744,7 +22777,8 @@ def _load_checkpoint_audio(path: str) -> dict[str, Any]:
                 if key in available}
 
 
-def _generated_audio(manifest: dict[str, Any]) -> dict[str, Any]:
+def _generated_audio(manifest: dict[str, Any],
+                     audio_join_mode: str = "av_overlap") -> dict[str, Any]:
     started = time.perf_counter()
     segments = list(manifest["segments"])
     if not segments:
@@ -22813,7 +22847,8 @@ def _generated_audio(manifest: dict[str, Any]) -> dict[str, Any]:
             "mode": mode,
         })
 
-    result = _assemble_generated_audio_records(records, int(sample_rate))
+    result = _assemble_generated_audio_records(
+        records, int(sample_rate), audio_join_mode=audio_join_mode)
     _LOG.info(
         "H3 assembly audio: read PCM tensors only and joined %d scenes in %.2fs.",
         len(segments), time.perf_counter() - started)
@@ -22821,13 +22856,16 @@ def _generated_audio(manifest: dict[str, Any]) -> dict[str, Any]:
 
 
 def _assemble_generated_audio_records(
-    records: list[dict[str, Any]], sample_rate: int
+    records: list[dict[str, Any]], sample_rate: int,
+    audio_join_mode: str = "av_overlap",
 ) -> dict[str, Any]:
     """Assemble decoded scene audio with the saved AV-boundary ownership."""
     if torch is None:
         raise RuntimeError("Generated-audio assembly requires torch.")
     if not records:
         raise ValueError("Generated-audio assembly requires at least one scene.")
+    if audio_join_mode not in ("av_overlap", "delivered_only"):
+        raise ValueError("Unknown generated audio join mode %r." % audio_join_mode)
     sample_rate = int(sample_rate)
     if sample_rate <= 0:
         raise ValueError("Generated-audio assembly sample rate must be positive.")
@@ -22851,8 +22889,9 @@ def _assemble_generated_audio_records(
         source = record["delivered"]
         start_frame = cumulative_frames
         use_overlap = (
-            ordinal > 0
+            audio_join_mode == "av_overlap" and ordinal > 0
             and not segment.get("lip_sync_source_asset")
+            and segment.get("audio_trim_mode") != "fresh_narration_keep_start"
             and record["mode"] in MASKED_CONTINUATION_MODES
             and record["repeated_frames"] > 0
             and record["overlap"] is not None)
@@ -22867,7 +22906,9 @@ def _assemble_generated_audio_records(
                 "H3 generated audio: clip %d owns its %d-frame AV overlap at "
                 "the incoming boundary.", int(segment["index"]),
                 int(record["repeated_frames"]))
-        elif (ordinal > 0 and not segment.get("lip_sync_source_asset")
+        elif (audio_join_mode == "av_overlap"
+              and ordinal > 0 and not segment.get("lip_sync_source_asset")
+              and segment.get("audio_trim_mode") != "fresh_narration_keep_start"
               and record["mode"] in MASKED_CONTINUATION_MODES
               and record["repeated_frames"] > 0):
             _LOG.warning(
@@ -22897,8 +22938,10 @@ def _assemble_generated_audio_records(
 
     result = {"waveform": assembled, "sample_rate": sample_rate}
     first_record = records[0]
-    if (first_record["mode"] in MASKED_CONTINUATION_MODES
+    if (audio_join_mode == "av_overlap"
+            and first_record["mode"] in MASKED_CONTINUATION_MODES
             and not first_record["segment"].get("lip_sync_source_asset")
+            and first_record["segment"].get("audio_trim_mode") != "fresh_narration_keep_start"
             and first_record["repeated_frames"] > 0
             and first_record["overlap"] is not None):
         # Preserve scene 1's complete decoded AV window until an optional
@@ -25010,7 +25053,9 @@ def _png_export_audio_record(
         waveform = conform_waveform_length(
             waveform, raw_samples,
             "H3 PNG/WAV export clip %d raw audio" % index)
-    cut = sample_boundary_from_frames(repeated_frames, sample_rate, FPS)
+    narration = segment.get("audio_trim_mode") == "fresh_narration_keep_start"
+    cut = (0 if narration else
+           sample_boundary_from_frames(repeated_frames, sample_rate, FPS))
     delivered_samples = sample_boundary_from_frames(
         delivered_frames, sample_rate, FPS)
     delivered = waveform[..., cut:cut + delivered_samples]
@@ -25025,7 +25070,7 @@ def _png_export_audio_record(
             waveform.detach().to(device="cpu").contiguous()
             if (migrate_continuation_mode(segment.get(
                     "continuation_mode", default_mode)) in
-                MASKED_CONTINUATION_MODES and repeated_frames > 0)
+                MASKED_CONTINUATION_MODES and repeated_frames > 0 and not narration)
             else None),
         "delivered_frames": delivered_frames,
         "raw_frames": raw_frames,
@@ -26444,6 +26489,15 @@ class MiniMaxH3ChainAssemble:
                                "Deleted checkpoints cannot be used for resume, "
                                "latent upscale or checkpoint-based reassembly. "
                                "Leave OFF if further processing is planned."}),
+                "generated_audio_join": (["av_overlap", "delivered_only"], {
+                    "default": "av_overlap",
+                    "tooltip": "av_overlap preserves normal AV boundary "
+                               "ownership (default). delivered_only concatenates "
+                               "each saved scene's trimmed audio, ignoring "
+                               "regenerated overlaps from third-party audio "
+                               "refiners. Recovery only: may leave hard audio "
+                               "cuts. Does not change timing, source audio, "
+                               "checkpoints or sampling."}),
             },
         }
 
@@ -26470,7 +26524,10 @@ class MiniMaxH3ChainAssemble:
                  source_timeline=None, blend_schedule="plan",
                  blend_video_vae=None, boundary_tone_match="off",
                  color_stabilization="off",
-                 delete_checkpoints_after_assembly=False):
+                 delete_checkpoints_after_assembly=False,
+                 generated_audio_join="av_overlap"):
+        if generated_audio_join not in ("av_overlap", "delivered_only"):
+            raise ValueError("Unknown generated audio join mode %r." % generated_audio_join)
         upscale_manifest = None
         upscale_support = None
         manifest_format = str((manifest or {}).get("format") or "")
@@ -26550,7 +26607,8 @@ class MiniMaxH3ChainAssemble:
         generated_warning = ""
         if preserve_generated or selected == "generated":
             try:
-                generated_track = _generated_audio(manifest)
+                generated_track = _generated_audio(
+                    manifest, audio_join_mode=generated_audio_join)
             except Exception as exc:
                 if selected == "generated":
                     raise
@@ -26851,6 +26909,8 @@ class MiniMaxH3ChainAssemble:
                 "h3_chain_upscale_partial_manifest_v1"):
             status += "; partial upscale %d/%d scenes; remaining scenes can be resumed" % (
                 len(segments), int(upscale_manifest["clip_count"]))
+        if generated_audio_join == "delivered_only":
+            status += "; generated audio uses delivered-only joins (no AV overlap)"
         _LOG.info("H3 Chain %s", status)
         published_video = output_copy or final_path
         _publish_final_review_preview(manifest, published_video, status)

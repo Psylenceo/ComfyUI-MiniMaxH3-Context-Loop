@@ -1,4 +1,4 @@
-import {parsePlanJson} from "./h3_chain_plan_core.mjs?v=0.7.11";
+import {parsePlanJson} from "./h3_chain_plan_core.mjs?v=0.7.12";
 
 // Shared request/selection protocol. Branch names are labels, never paths.
 export function workingBranchId(value) {
@@ -103,12 +103,46 @@ export class BranchDrafts {
     }
 }
 
+// Live frontend data can be reactive proxies, which structuredClone rejects.
+// Copy plain data recursively instead of JSON-round-tripping it: rollback must
+// preserve undefined, exact seeds, sparse arrays, aliases and circular values.
+// Callbacks and opaque UI objects retain their identity; they are not authored
+// data and the branch transaction does not mutate their internals.
+function snapshotWidgetValue(value, seen) {
+    if (value === null || typeof value !== "object") return value;
+    if (seen.has(value)) return seen.get(value);
+    const prototype = Object.getPrototypeOf(value);
+    const array = Array.isArray(value);
+    const plain = prototype === null || prototype === Object.prototype
+        || (Object.getPrototypeOf(prototype) === null && prototype.constructor?.name === "Object");
+    if (!array && !plain) {
+        // Retain the existing copy behavior for cloneable built-ins (dates,
+        // typed arrays, etc.), but do not try to duplicate DOM/UI instances.
+        try {
+            const copy = structuredClone(value);
+            seen.set(value, copy);
+            return copy;
+        } catch (error) {
+            if (error?.name !== "DataCloneError") throw error;
+            return value;
+        }
+    }
+    const copy = array ? new Array(value.length) : Object.create(prototype === null ? null : Object.prototype);
+    seen.set(value, copy);
+    for (const key of Object.keys(value)) {
+        Object.defineProperty(copy, key, {value:snapshotWidgetValue(value[key], seen),
+            enumerable:true, configurable:true, writable:true});
+    }
+    return copy;
+}
+
 // Roll back widget values without invoking the callback that just failed.
 export function branchWidgetTransaction(nodes, action) {
     const unique = [...new Set(nodes.filter(Boolean))];
-    const snapshots = unique.map(node => ({node, properties:structuredClone(node.properties ?? {}),
-        widgets:(node.widgets ?? []).filter(w => w.serialize !== false)
-            .map(widget => ({widget, value:structuredClone(widget.value)}))}));
+    const seen = new WeakMap();
+    const snapshots = unique.map(node => ({node, properties:snapshotWidgetValue(node.properties ?? {}, seen),
+        widgets:(node.widgets ?? []).filter(w => w.serialize !== false && w.options?.serialize !== false)
+            .map(widget => ({widget, value:snapshotWidgetValue(widget.value, seen)}))}));
     try { return action(); }
     catch (error) {
         for (const {node, properties, widgets} of snapshots) {
@@ -270,11 +304,14 @@ export class StudioBranches {
     async mutation(body) {
         if (this.pending) throw new Error("An earlier save may have succeeded. Retry pending operation before making another change.");
         this.pending = {...structuredClone(body), operation_id:branchOperationId()};
-        return this.sendPending();
+        return this.sendPending({fresh:true});
     }
 
-    async sendPending() {
+    async sendPending({fresh = false} = {}) {
         const body = this.pending;
+        // Recovered/retried requests may already have reached the server.
+        // A new preflight refusal cannot settle an older uncertain outcome.
+        let uncertain = !fresh;
         try { await this.drafts?.pending(body); }
         catch (error) { this.draftStatus = `Pending request is only in memory: ${error.message}`; }
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -284,12 +321,14 @@ export class StudioBranches {
                 try { await this.drafts?.pending(null); } catch { /* Replaying the same ID is safe. */ }
                 return result;
             } catch (error) {
-                if (error.status >= 400 && error.status < 500) {
+                const rejected = error.status >= 400 && error.status < 500;
+                if ((error.requestNotSent && !uncertain) || (rejected && !error.requestNotSent)) {
                     this.pending = null;
                     try { await this.drafts?.pending(null); } catch { /* Preserve the original error. */ }
                     throw error;
                 }
-                if (attempt) throw new Error(`Request outcome is uncertain. Use Retry pending operation. ${error.message}`);
+                if (attempt || error.requestNotSent) throw new Error(`Request outcome is uncertain. Use Retry pending operation. ${error.message}`);
+                uncertain = true;
             }
         }
     }

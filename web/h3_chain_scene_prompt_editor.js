@@ -1,10 +1,10 @@
 import {app} from "/scripts/app.js";
 import {bindNodeWheel} from "./h3_dom_wheel.mjs?v=0.7.1";
 import {api} from "/scripts/api.js";
-import {workingBranchId} from "./h3_working_branches.mjs?v=0.7.26";
+import {workingBranchId} from "./h3_working_branches.mjs?v=0.7.31";
 import {
     projectMutationOptions, subscribeProjectOwnership, isProjectReadOnlyError,
-} from "./h3_project_ownership.mjs?v=0.7.5";
+} from "./h3_project_ownership.mjs?v=0.7.6";
 import {
     MAX_SHOTS,
     makeShot,
@@ -13,7 +13,7 @@ import {
     promptTextToLines,
     promptValueToText,
     sharedPrompt,
-} from "./h3_chain_plan_core.mjs?v=0.7.11";
+} from "./h3_chain_plan_core.mjs?v=0.7.12";
 import {
     PROMPT_ASSIST_DEFAULT_INSTRUCTIONS,
     PROMPT_ASSIST_MODES,
@@ -22,14 +22,14 @@ import {
     makePromptAssistRequest,
     promptSceneKey,
     promptSourceRevision,
-} from "./h3_prompt_assistant_core.mjs?v=0.7.8";
-import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.7.0";
+} from "./h3_prompt_assistant_core.mjs?v=0.7.9";
+import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.7.3";
 import {
     promptRevisionHelp,
     promptRevisionLabel,
     promptRevisionNavigation,
     promptRevisionTree,
-} from "./h3_prompt_history_core.mjs?v=0.7.0";
+} from "./h3_prompt_history_core.mjs?v=0.7.3";
 import {
     availableReferenceRecords,
     convertTaggedPictureReference,

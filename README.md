@@ -12,8 +12,8 @@ scene can be reviewed, retried, checkpointed, resumed, and assembled later.
 **[Choose a workflow](example_workflows/README.md)** ·
 **[All documentation](docs/README.md)**
 
-> **0.7.0:** the tested nightly/RC is now the stable release on `main`.
-> See the [release summary](RELEASE_NOTES_0_7.md),
+> **0.7.3:** stable on `main`, saving and restoring project prompts when switching Carousel runs.
+> See the [patch notes](CHANGELOG.md), [0.7 release summary](RELEASE_NOTES_0_7.md),
 > [shareable improvements table](docs/0.7-major-improvements.md),
 > [migration notes](docs/MIGRATING_TO_0_7.md), and
 > [validation record](docs/RELEASING_0_7.md). Back up workflows and projects before updating.

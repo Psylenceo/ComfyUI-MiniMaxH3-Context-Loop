@@ -10,8 +10,9 @@ import {
 } from "./h3_studio_chapters.mjs?v=0.7.1";
 import {CONTEXT_MASK_MODES} from "./h3_context_mask_core.mjs?v=0.7.1";
 import {contextMaskEditor} from "./h3_context_mask_editor.mjs?v=0.7.2";
-import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId, visibleWorkingBranches} from "./h3_working_branches.mjs?v=0.7.26";
+import {StudioBranches, BranchDrafts, branchOperationId, branchWidgetTransaction, branchRequestPath, workingBranchId, visibleWorkingBranches} from "./h3_working_branches.mjs?v=0.7.31";
 import {browserBranchRecoveryStorage} from "./h3_branch_recovery_storage.mjs?v=0.7.23";
+import {PLAN_SETTING_WIDGETS} from "./h3_project_plan_switch.mjs?v=0.7.5";
 import {branchPolicyNodes, captureBranchPolicyInputs, restoreBranchPolicyInputs} from "./h3_plan_restore_core.mjs?v=0.7.21";
 import {inputSource as resolvedInputSource} from "./h3_reference_preview_core.mjs?v=0.7.27";
 import {syncManagedPlanRunName} from "./h3_project_asset_sync_core.mjs?v=0.7.3";
@@ -68,12 +69,12 @@ import {
     visualContextDefaultPartition,
     visualContextMaximumBlocks,
     visualContextPartitionFromBoundaries,
-} from "./h3_chain_plan_core.mjs?v=0.7.11";
+} from "./h3_chain_plan_core.mjs?v=0.7.12";
 import {
     promptRevisionHelp,
     promptRevisionLabel,
     promptRevisionNavigation,
-} from "./h3_prompt_history_core.mjs?v=0.7.0";
+} from "./h3_prompt_history_core.mjs?v=0.7.3";
 import {
     availableReferenceRecords,
     convertTaggedPictureReference,
@@ -134,7 +135,7 @@ import {
 import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.7.26";
 import {
     projectMutationOptions, subscribeProjectOwnership, isProjectReadOnlyError,
-} from "./h3_project_ownership.mjs?v=0.7.5";
+} from "./h3_project_ownership.mjs?v=0.7.6";
 
 const {
     connectedPromptEditors,
@@ -186,12 +187,6 @@ function restoreStudioNodeSize(node) {
         node.graph?.setDirtyCanvas?.(true, true);
     }
 }
-const PLAN_SETTING_WIDGETS = Object.freeze([
-    "plan_json", "run_name", "generation_fingerprint", "width", "height",
-    "context_length", "encode_mode", "anchor_mode", "crop", "audio_mode",
-    "audio_context_length", "default_duration_seconds", "default_steps",
-    "base_seed", "segment_crf", "video_blend_frames", "continuation_mode",
-]);
 
 function monitorVolume(value, fallback = 1) {
     const number = Number(value);
@@ -817,7 +812,7 @@ function mount(node) {
         result.policy_inputs = captureBranchPolicyInputs(owner);
         return result;
     }
-    async function applyWorkingBranch(record) {
+    function applyWorkingBranch(record) {
         if (!branchWidget) throw new Error("Restart ComfyUI to load the working-branch input.");
         // Validate before replacing widgets or clearing media.
         parsePlanJson(record.authoring.plan_json);
@@ -4729,7 +4724,8 @@ function mount(node) {
         if (!pin) return null;
         const raw = String(pin.source ?? "").trim();
         const index = /^\d+$/.test(raw) ? Number(raw) - 1 : state.plan.shots.findIndex(
-            (shot, offset) => safeShotId(shot.id, `clip_${String(offset + 1).padStart(4, "0")}`) === raw);
+            (shot, offset) => safeShotId(shot.id, `clip_${String(offset + 1).padStart(4, "0")}`)
+                === safeShotId(raw, ""));
         return {index, revision:pin.revision, run:runName(),
             key:JSON.stringify([runName(), index, pin.revision])};
     }
@@ -7147,6 +7143,7 @@ function mount(node) {
     }
 
     function loadPlan(force = false, throwOnError = false) {
+        if (node._h3ProjectPlanSwitch && !throwOnError) return;
         if (branches?.busy && !force) return;
         const planNode = upstreamPlanNode(node);
         if (planNode) mirrorConnectedPlan(planNode);
@@ -7331,6 +7328,14 @@ function mount(node) {
     };
     document.addEventListener("h3-lora-routes-changed", onLoRARoutesChanged);
     node._h3FlushProjectWrites = flushProjectWrites;
+    node._h3ProjectPlanSession = {
+        owner:() => state.planOwner ?? node, controller:branches,
+        nodes:() => [node, state.planNode, ...state.promptEditors,
+            ...branchPolicyNodes(state.planOwner ?? node)],
+        apply:applyWorkingBranch,
+        lock:value => { node._h3ProjectPlanSwitch = value; },
+        refresh:() => { loadPlan(true); publishActiveScene(); },
+    };
     function onProjectOwnershipChanged(payload) {
         if (state.disposed || !(payload?.owned_by_requester === true || payload?.locking_enabled === false)) return;
         const currentRun = runName();
@@ -7356,6 +7361,7 @@ function mount(node) {
         const finalFlush = flushProjectWrites(runName());
         state.disposed = true;
         refreshStudio.cancel();
+        delete node._h3ProjectPlanSession;
         unsubscribeOwnership();
         state.checkpointToken += 1;
         state.presentationToken += 1;

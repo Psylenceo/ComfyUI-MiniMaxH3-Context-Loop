@@ -369,7 +369,7 @@
       ],
       "size": [
         440,
-        360
+        364
       ],
       "flags": {},
       "order": 7,
@@ -411,7 +411,8 @@
         "plan",
         "off",
         "off",
-        false
+        false,
+        "av_overlap"
       ]
     },
     {
@@ -997,7 +998,8 @@
       "widgets_values": [
         0,
         24,
-        true
+        true,
+        "sync_with_video"
       ]
     },
     {
@@ -1075,7 +1077,7 @@
       ],
       "size": [
         440,
-        360
+        364
       ],
       "flags": {},
       "order": 19,
@@ -1117,7 +1119,8 @@
         "plan",
         "off",
         "off",
-        false
+        false,
+        "av_overlap"
       ]
     },
     {
@@ -2295,7 +2298,7 @@
         7030,
         90,
         520,
-        810
+        814
       ],
       "color": "#394c49",
       "font_size": 24,
@@ -2307,7 +2310,7 @@
         3780,
         2306,
         1090,
-        490
+        494
       ],
       "color": "#665135",
       "font_size": 24,

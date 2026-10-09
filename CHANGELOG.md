@@ -2,6 +2,53 @@
 
 Newest first. This file keeps release history out of the onboarding README.
 
+## Unreleased
+
+- Fix scene names containing spaces or punctuation breaking saved context-take
+  references on rerun (#108). Resolve authored and canonical IDs consistently
+  across visual/audio context, take previews, scene renaming and duplication;
+  preserve selected revisions and existing checkpoint identities.
+- Fix ownership-denied project/branch saves being treated as uncertain writes.
+  Disabling locking or obtaining ownership lets the next project switch save
+  normally, without a false pending-operation block. Preserve local drafts and
+  genuinely uncertain requests for safe recovery.
+
+## 0.7.3 — 2026-10-06
+
+- Switching Carousel projects now saves the outgoing prompts/Plan and restores
+  the destination's saved branch automatically, including linked prompt editors.
+  Remember per-project branch selection, recover older Plan archives, and keep
+  local edits in place on failed loads, conflicting revisions or ownership errors.
+
+## 0.7.2 — 2026-10-03
+
+- Fix Plan Studio branch reload/switch failures on reactive frontend objects
+  (#104), preserving local recovery and rollback without cloning UI callbacks.
+- Fix Windows `Bad file descriptor` errors while saving SelfLift handoff bundles
+  and Tiny VAE previews by using the shared non-truncating, Windows-safe file sync helper.
+- Add discreet top/bottom arrow buttons inside the raw JSON section of both
+  Plan editors. They scroll the JSON text only, preserving unapplied edits and selection.
+
+## 0.7.1 — 2026-09-29
+
+- Add a tablet-friendly **Scroll to bottom** button to the sticky scene toolbar
+  in both Plan editors. It scrolls only the current editor without changing scenes
+  or generation settings.
+- Add Chain Audio Refine Sampler to retain original context audio protection
+  during an audio-only second pass (#97). Freeze video, preserve hard locks
+  and fractional audio masks, and reject conflicting dynamic-mask models.
+  Add opt-in Assemble `generated_audio_join=delivered_only` to recover saved
+  third-party-refined clips without reusing their altered overlaps; default
+  AV-overlap assembly is unchanged. See the
+  [wiring and recovery guide](docs/AUDIO_AND_CONTINUITY.md#audio-only-refinement-without-rewriting-the-carried-boundary).
+- Add an explicit Loop Trim `fresh_narration_keep_start` option for off-screen
+  narration whose opening words fall inside the repeated visual prefix (#99).
+  It preserves the opening by trimming the audio tail to the delivered video
+  duration; closing words can be lost if there is no tail room. Reject carried,
+  source-guided or locked audio, preserve the choice through saving and export,
+  and keep existing synchronized trimming as the default. See
+  [usage and timing trade-offs](docs/AUDIO_AND_CONTINUITY.md#fresh-narration-preserve-the-opening-words).
+
 ## 0.7.0 — 2026-09-24
 
 Release scope: harden the existing workflow, review, recovery and cleanup paths;

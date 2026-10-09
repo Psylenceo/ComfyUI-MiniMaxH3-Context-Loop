@@ -36,7 +36,7 @@ import {
     shotLengthMode,
     sharedPrompt,
     visualContextCompositions,
-} from "./h3_chain_plan_core.mjs?v=0.7.11";
+} from "./h3_chain_plan_core.mjs?v=0.7.12";
 import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.7.27";
 import {syncManagedPlanRunName} from "./h3_project_asset_sync_core.mjs?v=0.7.3";
 import {
@@ -63,7 +63,7 @@ import {
     MODERN_PLAN_NODE as MODERN_NODE_NAME,
     MODERN_PLAN_WIDGET_NAMES as MODERN_BACKING_WIDGETS,
     upgradeLegacyPlanNode,
-} from "./h3_plan_upgrade_core.mjs?v=0.7.0";
+} from "./h3_plan_upgrade_core.mjs?v=0.7.3";
 
 // This scene editor is an original implementation. Its quick @ reference and
 // # dialogue interactions are inspired by nkxx188/ComfyUI-MiniMaxH3-Easy,
@@ -182,6 +182,7 @@ function injectStyles() {
         .h3c-prefix-body[hidden] { display: none; }
         .h3c-toolbar { position: sticky; top: -10px; z-index: 4; padding: 7px 0; background: var(--h3c-bg); flex-wrap: wrap; }
         .h3c-toolbar .h3c-spacer { flex: 1; }
+        .h3c-toolbar .h3c-scroll-bottom { touch-action: manipulation; }
         .h3c-card {
             --h3c-scene-color: var(--h3c-accent);
             margin-bottom: 9px;
@@ -246,7 +247,9 @@ function injectStyles() {
         .h3c-json-panel { display: none; }
         .h3c-json-panel.h3c-open { display: block; }
         .h3c-json { min-height: 260px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace !important; }
-        .h3c-json-actions { margin-top: 6px; }
+        .h3c-json-actions { margin-top: 6px; flex-wrap: wrap; }
+        .h3c-json-navigation { display: inline-flex; gap: 4px; margin-left: auto; }
+        .h3c-json-navigation button { color: var(--h3c-muted); touch-action: manipulation; }
         .h3c-json-status { color: var(--h3c-muted); }
         .h3c-footer { justify-content: space-between; padding-top: 4px; color: var(--h3c-muted); }
         .h3c-footer a { color: var(--h3c-accent); }
@@ -2034,7 +2037,13 @@ function mountEditor(node) {
         });
         const collapseAll = button("Collapse all", "Collapse all scene cards", () => setScenesCollapsed(true));
         const expandAll = button("Expand all", "Expand all scene cards", () => setScenesCollapsed(false));
-        toolbar.append(add, advanced, collapseAll, expandAll, element("span", "h3c-spacer"), json);
+        const scrollBottom = button("↓ Scroll to bottom", "Scroll to the bottom of this Plan editor", () => {
+            // Scroll only this editor, without moving the workflow canvas or rebuilding scene cards.
+            root.scrollTop = root.scrollHeight;
+        });
+        scrollBottom.classList.add("h3c-scroll-bottom");
+        scrollBottom.setAttribute("aria-label", "Scroll to bottom");
+        toolbar.append(add, advanced, collapseAll, expandAll, element("span", "h3c-spacer"), scrollBottom, json);
 
         const errors = element("div", "h3c-errors");
         const cards = element("div", "h3c-cards");
@@ -2083,8 +2092,15 @@ function mountEditor(node) {
             loadInput.value = "";
         });
         const loadJson = button("Load .json", "Load a plan JSON file", () => loadInput.click());
+        const jsonNavigation = element("div", "h3c-json-navigation");
+        jsonNavigation.setAttribute("role", "group");
+        jsonNavigation.setAttribute("aria-label", "Raw JSON navigation");
+        const jsonTop = button("↑", "Scroll raw JSON to top", () => { jsonArea.scrollTop = 0; });
+        const jsonBottom = button("↓", "Scroll raw JSON to bottom", () => { jsonArea.scrollTop = jsonArea.scrollHeight; });
+        for (const control of [jsonTop, jsonBottom]) control.setAttribute("aria-label", control.title);
+        jsonNavigation.append(jsonTop, jsonBottom);
         const jsonActions = element("div", "h3c-json-actions");
-        jsonActions.append(apply, copyJson, saveJson, loadJson, loadInput, jsonStatus);
+        jsonActions.append(apply, copyJson, saveJson, loadJson, loadInput, jsonStatus, jsonNavigation);
         jsonPanel.append(jsonArea, jsonActions);
 
         const footer = element("div", "h3c-footer");
