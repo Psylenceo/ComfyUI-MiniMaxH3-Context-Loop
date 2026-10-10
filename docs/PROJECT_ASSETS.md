@@ -236,10 +236,10 @@ description is not sent, so a poor result never biases the next attempt.
 | Audio | Sent | WAV/MP3 as `input_audio`, if the model accepts it | Not supported |
 
 A local server must be allow-listed first (**Additional allowed Direct API
-origins**, or `H3_PROMPT_OPTIMIZER_ALLOWED_ORIGINS`). Local vision models see
-images at the server's image-token budget; with llama.cpp-based servers, a
-higher `--image-min-tokens`/`--image-max-tokens` gives far more detailed
-descriptions of dark or cluttered images.
+origins**, or `H3_PROMPT_OPTIMIZER_ALLOWED_ORIGINS`). The image is sent at its
+stored resolution; how much detail a local vision model sees is set by the
+server's per-image token budget (for llama.cpp-based servers,
+`--image-min-tokens`/`--image-max-tokens`), not by this node pack.
 
 ## Storage and recovery
 
