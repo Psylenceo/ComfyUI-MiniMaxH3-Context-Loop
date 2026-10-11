@@ -178,6 +178,10 @@ Carousel (see [Describe an asset](PROJECT_ASSETS.md#describe-an-asset)):
   `detailed_description:` (or `integrated_multimodal_description:`). A prompt
   without H3 sections gets the lines at the top. Lines already opening with
   `@tag is …` or `@tag: …` are left alone, so the button is safe to press again.
+  Each line starts with the reference exactly as the prompt already uses it,
+  so it never adds a new kind of use: a semantic anchor used as
+  `#hall[2.50s]` gets `#hall[2.50s] is …`, and a picture used only as `#hero`
+  gets `#hero is …` rather than a native `@hero`.
 
 Inserted text is ordinary prompt text, saved to the Plan as a normal undoable
 edit. The compiler never inserts descriptions itself, so the prompt you see is

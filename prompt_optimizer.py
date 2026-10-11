@@ -634,6 +634,14 @@ async def describe_asset_payload(
     """
     if not isinstance(value, Mapping):
         raise ValueError("Asset description request must be a JSON object.")
+    # Describing an asset always sends its media, so it obeys the same
+    # explicit opt-in as the optimizer's reference media. No override.
+    if value.get("allow_media") is not True:
+        raise ValueError(
+            "Generate description sends this asset's media to the Direct API "
+            "provider, and \"Allow Direct API to read reference media\" is "
+            "off. Enable it in Settings -> MiniMax H3 Context Loop -> Prompt "
+            "optimizer first; nothing was sent.")
     api_format = str(value.get("api_format") or "openai").strip().lower()
     if api_format not in API_FORMATS:
         raise ValueError("Unsupported Direct API format '%s'." % api_format)

@@ -1337,6 +1337,15 @@ class ProjectAssetStore:
                    for item in catalog["assets"]):
                 raise ValueError("Another enabled project asset already uses @%s." % tag)
             entry["tag"] = tag
+        if "expected_description" in changes:
+            # A generated description is saved only over the text it was
+            # generated from; a newer manual edit makes the caller review it.
+            expected = str(changes["expected_description"] or "").replace(
+                "\r\n", "\n").replace("\r", "\n")
+            if expected.strip() != str(entry.get("description") or "").strip():
+                raise ProjectAssetConflictError(
+                    "The description of @%s changed while a new one was being "
+                    "generated." % entry.get("tag"))
         if "description" in changes:
             description = str(changes["description"] or "").replace(
                 "\r\n", "\n").replace("\r", "\n")

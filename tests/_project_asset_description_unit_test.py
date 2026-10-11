@@ -21,7 +21,8 @@ folder_paths.get_temp_directory = lambda: str(ROOT)
 folder_paths.get_input_directory = lambda: str(ROOT)
 sys.modules.setdefault("folder_paths", folder_paths)
 
-from project_assets import ProjectAssetStore, normalize_asset_tag_type  # noqa: E402
+from project_assets import (  # noqa: E402
+    ProjectAssetConflictError, ProjectAssetStore, normalize_asset_tag_type)
 
 spec = importlib.util.spec_from_file_location(
     "h3_prompt_optimizer_description_unit", ROOT / "prompt_optimizer.py")
@@ -85,8 +86,28 @@ def store_checks(root):
     # fingerprint the way options do (tag renames still do).
     store.update("episode_1", asset_id, {"tag": "alice"})
     assert store.load("episode_1")["revision"] == revision
+    # A late generated description is saved only over the text it was
+    # generated from; a newer manual edit raises a conflict and is kept.
+    store.update("episode_1", asset_id, {"description": "Manual newer."})
+    try:
+        store.update("episode_1", asset_id, {
+            "description": "Generated late.",
+            "expected_description": "Red square.\r\nFlat color."})
+    except ProjectAssetConflictError as exc:
+        assert "changed while a new one was being generated" in str(exc)
+    else:
+        raise AssertionError("A stale generated description was saved")
+    assert store.load("episode_1")["assets"][0]["description"] == "Manual newer."
+    assert store.update("episode_1", asset_id, {
+        "description": "Generated.",
+        "expected_description": "Manual newer.\n"})["asset"][
+            "description"] == "Generated."
     entry = store.update("episode_1", asset_id, {"description": "  "})["asset"]
     assert "description" not in entry
+    assert store.update("episode_1", asset_id, {
+        "description": "From empty.", "expected_description": ""})[
+            "asset"]["description"] == "From empty."
+    store.update("episode_1", asset_id, {"description": ""})
     entry = store.update(
         "episode_1", asset_id, {"subject": "  the red\n umbrella "})["asset"]
     assert entry["subject"] == "the red umbrella"
@@ -167,8 +188,23 @@ def describe_checks(root, picture):
     original = optimizer.call_direct_optimizer
     optimizer.call_direct_optimizer = fake_call
     try:
+        # Media access off (absent, false, or a truthy non-boolean): the
+        # request is refused before any provider call or media read.
+        for allow in ({}, {"allow_media": False}, {"allow_media": "true"}):
+            try:
+                asyncio.run(optimizer.describe_asset_payload(
+                    {"api_url": "https://api.openai.com/v1", "model": "m",
+                     **allow},
+                    {"kind": "image", "tag": "alice"}, str(picture),
+                    tag_type="object"))
+            except ValueError as exc:
+                assert "Allow Direct API to read reference media" in str(exc)
+            else:
+                raise AssertionError("Describe ran with media access off")
+        assert calls == [], "no provider request may be made"
         result = asyncio.run(optimizer.describe_asset_payload(
             {"api_url": "https://api.openai.com/v1", "model": "m",
+             "allow_media": True,
              "notes": "Not visible.", "subject": "the red block"},
             {"kind": "image", "tag": "alice"}, str(picture),
             tag_type="object"))
@@ -190,7 +226,8 @@ def main():
         picture = store_checks(root)
         describe_checks(root, picture)
     print("H3 Project Asset descriptions: tag-type, prefix naming, subject, "
-          "and Direct API describe requests pass")
+          "late-result guard, media gate, and Direct API describe requests "
+          "pass")
 
 
 if __name__ == "__main__":
