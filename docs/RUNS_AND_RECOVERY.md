@@ -1,5 +1,27 @@
 # Runs, review, and recovery
 
+## Project switching blocked by local recovery
+
+If the Carousel says **Stayed on … Resolve the local recovery draft**, save a
+copy of your workflow first. Do not delete project folders or clear browser
+storage: the unsaved recovery copy lives in the browser, not in those folders.
+
+1. Click **Open Plan recovery** beside the Carousel error, or open Plan Studio.
+2. If the displayed prompts/settings are the ones you want, choose **Update
+   active branch** and confirm. To recover the older browser copy instead,
+   choose **Restore local draft**, inspect it, then **Update active branch**.
+   **Reload saved branch** is the alternative when you want the server copy.
+3. Retry changing the Carousel's Run name. A cut-save block caused only by the
+   now-resolved branch recovery is rechecked. If you explicitly restored local
+   timeline edits, use **Retry save** in Studio first. **Reload saved cut** is
+   only for deliberately discarding those unsaved timeline edits.
+
+Recovery choices retain browser backups; they do not delete generated clips.
+If you already deleted the project folders, **Update active branch** can save
+the displayed Plan again, but cannot recreate deleted media or checkpoints.
+Those require your filesystem backup or trash. Actual ownership, newer-revision,
+and missing-media errors remain blocked and must be resolved separately.
+
 ## Review Gate
 
 Place **Review Gate** between Segment + Checkpoint and Loop End. Each scene is
@@ -221,6 +243,37 @@ Select a **branch heading** to choose the whole generated branch for output.
 Clicking an individual clip only previews it; it does not shorten the output
 or switch its branch. Use the downstream upscale/export range controls to
 choose which scenes to process.
+
+### Understand output compatibility errors
+
+Checkpoint Manager compares the saved takes within the requested output scope.
+If their output contracts differ, the error identifies both scene numbers and
+full revision IDs, followed by every differing field and both saved values.
+Nested policy fields are named individually; `<missing>` means the field was
+absent, not that it was saved as `null`. Chapter-only output compares only that
+chapter's takes, not earlier chapters' output settings.
+
+Generation-only differences do not block output of already saved takes:
+reference-catalog fingerprints, context encoding/crop/anchor settings, video
+and audio context lengths, context storage length, and segment encoding quality
+(`segment_crf`) may differ. Each scene keeps its saved timing and effective
+context lengths; older takes without those fields use their own saved defaults
+when mixed. Deferred upscale carries the number of frames required by the next
+scene. This does not regenerate, resize, or rewrite the original clips. The
+first selected take still supplies shared output defaults, including CRF for
+any downstream re-encoding.
+
+Resolution, frame rate, audio/continuation/transition policies, blend defaults,
+source-audio/timeline identities, imported-video context identity, and unknown
+compatibility fields remain guarded. These can affect assembly or downstream
+processing, not just how the original take was generated. A preliminary-video
+mismatch is reported as `external_context_hash` or `external_context_frames`,
+including missing values, with an imported-video lineage hint.
+
+Do not bypass this check or edit saved metadata to hide a mismatch. Select
+compatible takes; for different chapter resolutions, use **Selected chapter
+only**. If the reported field should not affect output, share the full error
+and workflow so its downstream use can be checked safely.
 
 ### Use a different take as context
 
