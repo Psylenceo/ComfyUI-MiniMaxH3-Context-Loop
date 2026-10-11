@@ -229,6 +229,12 @@ to two or three sentences and start with "is" so they read naturally after the
 tag (`@cabinet is a tall, narrow wooden linen cabinet…`). The previous
 description is not sent, so a poor result never biases the next attempt.
 
+Generating always sends the asset's media, so it requires **Allow Direct API to
+read reference media** in the same settings. While that is off, the button
+explains why and nothing is sent; there is no per-click override. If you edit
+the description while a result is generating, the result is not saved: it is
+shown under the field with **Replace description** and **Discard**.
+
 | Media | Gemini Native | OpenAI-compatible | OpenAI Responses |
 |---|---|---|---|
 | Image | Sent | Sent | Sent |

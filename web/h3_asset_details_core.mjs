@@ -8,21 +8,24 @@ export const ASSET_DETAILS_CHANGED_EVENT = "h3-project-asset-details-changed";
 
 const SUBJECT_TARGETS = ["subject_definitions", "integrated_multimodal_description"];
 const SETTING_TARGETS = ["detailed_description", "integrated_multimodal_description"];
+// A reference token as written in a prompt: @tag, #tag, or #tag[2.50s].
+const LEADING_TOKEN = /^[ \t]*([@#])([A-Za-z][A-Za-z0-9_-]{0,63})((?:\[[0-9]+(?:\.[0-9]+)?s?\])?)/;
+const DEFINITION_LINE = new RegExp(
+    `${LEADING_TOKEN.source}(?:[ \\t]+(?:is|are|has|have)\\b|[ \\t]*:)`, "gm");
 
 function escapedPattern(value) {
     return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function tokenPattern(token, flags = "") {
-    return new RegExp(
-        `(?<![A-Za-z0-9_])${escapedPattern(token)}(?![A-Za-z0-9_-])`, flags);
 }
 
 function oneLine(value) {
     return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
-/** Reference records that carry a Carousel description, one per token. */
+function normalizedText(value) {
+    return String(value ?? "").replace(/\r\n?/g, "\n");
+}
+
+/** Reference records that carry a Carousel description, one per tag. */
 export function assetDetailEntries(records) {
     const entries = [];
     const seen = new Set();
@@ -30,11 +33,15 @@ export function assetDetailEntries(records) {
         // A video's paired audio shares the video's asset and description.
         if (!record?.asset || record.pairedWith) continue;
         const description = oneLine(record.asset.description);
-        const token = String(record.token ?? "");
-        if (!description || !token || seen.has(token)) continue;
-        seen.add(token);
+        const tag = String(record.tag ?? "");
+        if (!description || !tag || seen.has(tag)) continue;
+        seen.add(tag);
+        const native = !record.semanticOnly;
         entries.push({
-            token,
+            tag,
+            native,
+            semantic: Boolean(record.semanticOnly || record.supportsSemantic),
+            token: native ? `@${tag}` : `#${tag}`,
             assetId: String(record.asset.id ?? record.assetId ?? ""),
             tagType: String(record.asset.tag_type ?? ""),
             description,
@@ -53,20 +60,38 @@ export function assetDetailContext(entries) {
     }));
 }
 
-/** The editable line inserted for one asset, e.g. "@cabinet is a tall …". */
-export function assetDetailLine(entry) {
-    const description = oneLine(entry.description);
-    return /^(?:is|are|has|have)\b/i.test(description)
-        ? `${entry.token} ${description}`
-        : `${entry.token}: ${description}`;
+/**
+ * The exact reference text this prompt already uses for an asset, or null.
+ * Inserted lines reuse it verbatim so they never add a new kind of use: a
+ * timed semantic anchor stays timed and a picture used as #tag stays #tag.
+ * Matching follows the compiler's case-sensitive @tag / #tag[seconds] rules.
+ */
+export function assetDetailUsage(text, entry) {
+    const prompt = String(text ?? "");
+    const tag = escapedPattern(entry.tag);
+    if (entry.native && new RegExp(
+        `(?<![A-Za-z0-9_])@${tag}(?![A-Za-z0-9_-])`).test(prompt)) return `@${entry.tag}`;
+    if (entry.semantic) {
+        const match = new RegExp(
+            `(?<![A-Za-z0-9_])#${tag}(?:\\[[0-9]+(?:\\.[0-9]+)?s?\\]|(?!\\[))(?![A-Za-z0-9_-])`,
+        ).exec(prompt);
+        if (match) return match[0];
+    }
+    return null;
 }
 
-/** Tokens that already open a definition line ("@tag is …" / "@tag: …"). */
-export function describedTokens(text) {
+/** The editable line for one asset, led by the given reference text. */
+export function assetDetailLine(entry, token = entry.token) {
+    const description = oneLine(entry.description);
+    return /^(?:is|are|has|have)\b/i.test(description)
+        ? `${token} ${description}`
+        : `${token}: ${description}`;
+}
+
+/** Tag names that already open a definition line, in any reference form. */
+export function describedTags(text) {
     const result = new Set();
-    for (const match of String(text ?? "").matchAll(
-        /^[ \t]*([@#][A-Za-z][A-Za-z0-9_-]{0,63})(?:[ \t]+(?:is|are|has|have)\b|[ \t]*:)/gim,
-    )) result.add(match[1]);
+    for (const match of String(text ?? "").matchAll(DEFINITION_LINE)) result.add(match[2]);
     return result;
 }
 
@@ -94,61 +119,92 @@ function insertIntoSection(text, record, lines) {
  * Insert a definition line for every described asset this prompt uses and
  * does not already define, and refresh lines whose description changed.
  *
- * ``refresh`` lists ``{oldLine, newLine}`` pairs from staleAssetDetails().
+ * ``refresh`` lists ``{tag, oldLine, newLine}`` from staleAssetDetails().
  * Placement follows the H3 sections when present: char/object (and custom
  * types) go to subject_definitions, scene/style to the detailed or main
- * description. Without H3 sections the lines open the prompt.
+ * description. Without H3 sections the lines open the prompt. Returns the
+ * new text plus the inserted/refreshed tags and the exact line for each.
  */
 export function insertAssetDetails(text, entries, {refresh = []} = {}) {
     let next = String(text ?? "");
     const refreshed = [];
+    const lines = {};
     for (const item of refresh) {
-        const lines = next.split("\n");
-        const index = lines.findIndex((line) => line.trim() === item.oldLine);
+        const rows = next.split("\n");
+        const index = rows.findIndex((line) => line.trim() === item.oldLine);
         if (index < 0) continue;
-        const indent = lines[index].match(/^[ \t]*/)[0];
-        lines[index] = indent + item.newLine;
-        next = lines.join("\n");
-        refreshed.push(item.token);
+        rows[index] = rows[index].match(/^[ \t]*/)[0] + item.newLine;
+        next = rows.join("\n");
+        refreshed.push(item.tag);
+        lines[item.tag] = item.newLine;
     }
-    const described = describedTokens(next);
-    const wanted = (entries ?? []).filter((entry) =>
-        !described.has(entry.token) && tokenPattern(entry.token).test(next));
-    if (!wanted.length) return {text: next, inserted: [], refreshed};
+    const described = describedTags(next);
+    const wanted = [];
+    for (const entry of entries ?? []) {
+        if (described.has(entry.tag)) continue;
+        const usage = assetDetailUsage(next, entry);
+        if (usage) wanted.push({entry, line: assetDetailLine(entry, usage)});
+    }
+    if (!wanted.length) return {text: next, inserted: [], refreshed, lines};
     const sections = parseH3Sections(next);
     const groups = new Map();
-    for (const entry of wanted) {
+    for (const {entry, line} of wanted) {
         const target = assetDetailTarget(entry.tagType, sections.map((item) => item.name));
         if (!groups.has(target)) groups.set(target, []);
-        groups.get(target).push(assetDetailLine(entry));
+        groups.get(target).push(line);
+        lines[entry.tag] = line;
     }
     // Insert from the end of the prompt backwards so earlier offsets hold.
     const placed = [...groups.entries()]
         .filter(([target]) => target)
-        .map(([target, lines]) => [sections.find((item) => item.name === target), lines])
+        .map(([target, rows]) => [sections.find((item) => item.name === target), rows])
         .sort((left, right) => right[0].start - left[0].start);
-    for (const [record, lines] of placed) next = insertIntoSection(next, record, lines);
+    for (const [record, rows] of placed) next = insertIntoSection(next, record, rows);
     const loose = groups.get(null);
     if (loose?.length) {
         next = next.trim() ? `${loose.join("\n")}\n\n${next}` : loose.join("\n");
     }
-    return {text: next, inserted: wanted.map((entry) => entry.token), refreshed};
+    return {text: next, inserted: wanted.map(({entry}) => entry.tag), refreshed, lines};
 }
 
 /**
  * Lines this editor inserted that are still unedited in the prompt but no
- * longer match the asset's current description. ``insertedLines`` maps a
- * token to the exact line inserted earlier; lines the user edited are never
- * reported, so their wording is never overwritten.
+ * longer match the asset's current description. ``insertedLines`` maps a tag
+ * to the exact line inserted earlier; the refreshed line keeps that line's
+ * reference text. Lines the user edited are never reported.
  */
 export function staleAssetDetails(text, entries, insertedLines) {
-    const lines = new Set(String(text ?? "").split("\n").map((line) => line.trim()));
+    const present = new Set(String(text ?? "").split("\n").map((line) => line.trim()));
     const result = [];
     for (const entry of entries ?? []) {
-        const oldLine = insertedLines?.[entry.token];
-        if (!oldLine || !lines.has(oldLine)) continue;
-        const newLine = assetDetailLine(entry);
-        if (newLine !== oldLine) result.push({token: entry.token, oldLine, newLine});
+        const oldLine = insertedLines?.[entry.tag];
+        if (!oldLine || !present.has(oldLine)) continue;
+        const lead = LEADING_TOKEN.exec(oldLine);
+        const token = lead ? `${lead[1]}${lead[2]}${lead[3]}` : entry.token;
+        const newLine = assetDetailLine(entry, token);
+        if (newLine !== oldLine) result.push({tag: entry.tag, oldLine, newLine});
     }
     return result;
+}
+
+/**
+ * Whether a finished generation may be saved directly. ``requested`` is the
+ * description when Generate was pressed; ``saved`` is the catalog's current
+ * value and ``live`` the editor field (null when not shown). Any difference
+ * means the user changed it meanwhile, so the result needs explicit review.
+ */
+export function generatedDescriptionAction({requested, saved, live = null}) {
+    const base = normalizedText(requested).trim();
+    if (normalizedText(saved).trim() !== base) return "review";
+    if (live !== null && normalizedText(live).trim() !== base) return "review";
+    return "apply";
+}
+
+/** Why Generate description may not run, or "" when media may be sent. */
+export function assetDescribeBlocker(config) {
+    return config?.allow_media === true ? "" : (
+        "Generate description sends this asset's media to the Direct API "
+        + "provider, and \"Allow Direct API to read reference media\" is off. "
+        + "Enable it in Settings → MiniMax H3 Context Loop → Prompt optimizer "
+        + "first; nothing was sent.");
 }

@@ -9,9 +9,12 @@ Newest first. This file keeps release history out of the onboarding README.
   prompt tag with it, and keep an editable description that the configured
   Direct API model can generate from the asset's image, video, or audio. These
   are project notes: they do not enter prompts or the reference fingerprint.
+  Generating requires "Allow Direct API to read reference media", and a result
+  that arrives after you edited the description is held for review.
 - Use asset descriptions in the Rich Scene Prompt Editor. Optimize now sends
   the descriptions of the scene's tagged assets to the prompt optimizer, and
-  the new Asset details button inserts them as editable `@tag is …` lines:
+  the new Asset details button inserts them as editable `@tag is …` lines,
+  keeping each reference's existing `@tag` / `#tag[time]` form:
   characters and objects into subject_definitions, scenes and styles into the
   detailed (or main) description, or at the top of an unformatted prompt. The
   button flags inserted lines whose Carousel description later changed and

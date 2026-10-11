@@ -65,10 +65,9 @@ import {
     ASSET_DETAILS_CHANGED_EVENT,
     assetDetailContext,
     assetDetailEntries,
-    assetDetailLine,
     insertAssetDetails,
     staleAssetDetails,
-} from "./h3_asset_details_core.mjs?v=0.7.32";
+} from "./h3_asset_details_core.mjs?v=0.7.33";
 
 const {
     publishCompanionScene,
@@ -1910,7 +1909,7 @@ function mount(node) {
         control.lastChild.textContent = count ? `Asset details (${count} updated)` : "Asset details";
         control.classList.toggle("h3rp-asset-details-stale", count > 0);
         control.title = count
-            ? `${count} inserted description${count === 1 ? "" : "s"} changed in the Asset Carousel (${scene.stale.map((item) => item.token).join(", ")}). Click to refresh them and insert any missing details. Lines you edited are left alone.`
+            ? `${count} inserted description${count === 1 ? "" : "s"} changed in the Asset Carousel (${scene.stale.map((item) => item.tag).join(", ")}). Click to refresh them and insert any missing details. Lines you edited are left alone.`
             : "Insert the Asset Carousel description of every described @tag this scene uses";
     }
 
@@ -1940,14 +1939,12 @@ function mount(node) {
         renderEditorText(result.text);
         scheduleHistoryDraft(shotId, result.text, shot.basic_prompt);
         void flushHistoryDraft();
-        const byToken = new Map(scene.entries.map((entry) => [entry.token, entry]));
-        rememberAssetDetailLines(shotId, Object.fromEntries(
-            [...result.inserted, ...result.refreshed].map((token) => [
-                token, assetDetailLine(byToken.get(token)),
-            ])));
+        // Remember the exact line, including its @tag / #tag[time] form.
+        rememberAssetDetailLines(shotId, result.lines);
+        const leading = (tag) => String(result.lines[tag] ?? tag).split(/[\s:]/)[0];
         const parts = [];
-        if (result.inserted.length) parts.push(`inserted ${result.inserted.join(", ")}`);
-        if (result.refreshed.length) parts.push(`refreshed ${result.refreshed.join(", ")}`);
+        if (result.inserted.length) parts.push(`inserted ${result.inserted.map(leading).join(", ")}`);
+        if (result.refreshed.length) parts.push(`refreshed ${result.refreshed.map(leading).join(", ")}`);
         state.optimizer.error = "";
         state.optimizer.message = `Asset details ${parts.join("; ")}.`;
         refreshOptimizerUi();

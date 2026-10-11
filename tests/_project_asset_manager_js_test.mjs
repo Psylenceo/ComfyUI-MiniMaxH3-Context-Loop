@@ -219,4 +219,21 @@ assert.match(source, /refreshSequence \+= 1;\s*runNameInput\.value = configuredP
 assert.match(source, /node\._h3ProjectAssetRefresh\(\{fromConfiguration: true\}\)/);
 assert.match(source, /_h3ProjectAssetRefresh\?\.\(\{\s*fromConfiguration: true/);
 
+// Generate description: the media gate returns before any describe request,
+// the setting is forwarded for server-side enforcement, and a late result is
+// saved only over the text it was generated from.
+const describeBody = source.slice(
+    source.indexOf("async function describeAsset("),
+    source.indexOf("async function reorderAssets("));
+const gate = describeBody.indexOf("const blocked = assetDescribeBlocker(config);");
+assert.ok(gate > 0, "describeAsset must check the media setting");
+assert.match(describeBody.slice(gate), /^const blocked = assetDescribeBlocker\(config\);\s*if \(blocked\) \{\s*setStatus\(blocked, true\);\s*return;/);
+assert.ok(gate < describeBody.indexOf("project-assets/describe"),
+    "the media gate must run before the describe request");
+assert.match(describeBody, /allow_media: config\.allow_media === true/);
+assert.doesNotMatch(describeBody, /confirm\(/);
+assert.match(describeBody, /generatedDescriptionAction\(\{\s*requested, saved, live: liveDescription\(asset\),/);
+assert.match(describeBody, /expected_description: requested/);
+assert.match(describeBody, /onConflict: \(\) => holdGeneratedDescription\(asset, result\.description\)/);
+
 console.log("H3 Project Asset Carousel: metadata slots, binding, sources, lazy media, editing, and cleanup pass");
