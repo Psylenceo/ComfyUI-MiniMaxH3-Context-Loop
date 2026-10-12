@@ -64,11 +64,21 @@ async function browserChecks() {
     };
     window.addEventListener("error", event => report.failures.push(event.message));
     window.addEventListener("unhandledrejection", event => report.failures.push(String(event.reason?.stack || event.reason)));
-    const catalog = {project:"synthetic", revision:"test", folders:[], assets:[
+    const projectCatalog = (project, description) => ({project, revision:"test", folders:[], assets:[
         {id:"cabinet", tag:"cabinet", kind:"image", role:"picture", enabled:true,
-            tag_type:"object", description:"Original.", input_path:"h3_projects/synthetic/cabinet.png"},
-    ]};
+            tag_type:"object", description, input_path:`h3_projects/${project}/cabinet.png`},
+    ]});
+    // "A" and "B" are duplicated projects: same asset ID, different text.
+    const catalogs = {
+        synthetic: projectCatalog("synthetic", "Original."),
+        A: projectCatalog("A", "A saved."),
+        B: projectCatalog("B", "B saved."),
+    };
+    const catalog = catalogs.synthetic;
     const saves = [];
+    const updates = [];
+    let holdUpdates = false;
+    const heldUpdates = [];
     const describeCalls = [];
     let releaseDescribe;
     const graph = {_nodes:[], links:{}, setDirtyCanvas() {}, getNodeById(id) { return this._nodes.find(n => n.id === id); }};
@@ -92,28 +102,34 @@ async function browserChecks() {
         }
         if (route.endsWith("/project-assets/update")) {
             const body = JSON.parse(options.body);
-            const asset = catalog.assets.find(item => item.id === body.asset_id);
+            updates.push({project:body.project, description:body.changes.description});
+            // The server applies the write now; only its response is held.
+            if (holdUpdates) await new Promise(resolve => heldUpdates.push(resolve));
+            const target = catalogs[body.project];
+            const asset = target.assets.find(item => item.id === body.asset_id);
             if ("expected_description" in body.changes
                     && body.changes.expected_description.trim() !== String(asset.description ?? "").trim()) {
                 return json({error:"changed", code:"h3_project_asset_conflict"}, 409);
             }
             if ("description" in body.changes) asset.description = body.changes.description;
-            saves.push(body.changes.description);
-            return json({catalog, asset});
+            if (body.project === "synthetic") saves.push(body.changes.description);
+            return json({catalog:target, asset});
         }
         if (route.endsWith("/projects")) return json({projects:[]});
-        return json(catalog);
+        const requested = new URLSearchParams(route.split("?")[1] ?? "").get("project");
+        return json(catalogs[requested] ?? catalog);
     }};
     let node;
+    let switchNode;
     try {
         await import("/web/h3_project_asset_manager.js");
         class Node {
-            constructor() {
-                this.type = this.comfyClass = "MiniMaxH3ProjectAssetManager"; this.id = 1;
+            constructor(run = "synthetic") {
+                this.type = this.comfyClass = "MiniMaxH3ProjectAssetManager"; this.id = graph._nodes.length + 1;
                 this.graph = graph; this.inputs = []; this.outputs = []; this.size = [1100, 700];
                 this.properties = {};
-                this.widgets = [{name:"run_name", value:"synthetic"},
-                    {name:"catalog_json", value:JSON.stringify(catalog)}, {name:"operation_json", value:""}];
+                this.widgets = [{name:"run_name", value:run},
+                    {name:"catalog_json", value:JSON.stringify(catalogs[run])}, {name:"operation_json", value:""}];
                 graph._nodes.push(this);
             }
             setSize(size) { this.size = size; }
@@ -178,7 +194,84 @@ async function browserChecks() {
         check(field().value === second, "Discard keeps the typed description");
         await wait(1500);
         check(saves.length === 2, "No further saves after discard");
+        node.onRemoved?.(); node.host?.remove(); node = null;
+
+        // --- Duplicated projects: a delayed save must not leak across a Run
+        // switch (review regression). A and B share the asset ID.
+        switchNode = new Node("A");
+        switchNode.onNodeCreated();
+        const root = () => switchNode.root;
+        const cardClick = async (label) => {
+            await until(() => root()?.querySelector(".h3pa-card"), `${label}: Carousel shows the asset`);
+            root().querySelector(".h3pa-card").click();
+            await until(() => root().querySelector("textarea.h3pa-description"), `${label}: description editor opens`);
+        };
+        const switchTo = async (run) => {
+            const input = root().querySelector("input.h3pa-project");
+            input.value = run;
+            input.dispatchEvent(new Event("change", {bubbles:true}));
+            await until(() => switchNode._h3ProjectAssetCurrentProject() === run
+                && JSON.parse(switchNode.widgets.find(w => w.name === "catalog_json").value).project === run,
+            `Switching to ${run} loads its catalog`, 400);
+        };
+        const text = () => root().querySelector("textarea.h3pa-description").value;
+        const typeInto = (value) => {
+            const area = root().querySelector("textarea.h3pa-description");
+            area.focus(); area.value = value;
+            area.dispatchEvent(new InputEvent("input", {bubbles:true, inputType:"insertText"}));
+            return area;
+        };
+        await cardClick("A");
+        check(text() === "A saved.", "A shows its own saved description");
+
+        // 1. Edit in A and start saving (blur); hold the save response.
+        holdUpdates = true;
+        const editedA = "A saved. A draft.";
+        typeInto(editedA).dispatchEvent(new Event("change", {bubbles:true}));
+        await until(() => heldUpdates.length === 1, "A's save request is in flight");
+        check(updates.at(-1).project === "A" && updates.at(-1).description === editedA, "The held save belongs to A");
+        holdUpdates = false;
+
+        // 2. Switch to B before A's response returns, then release it.
+        await switchTo("B");
+        heldUpdates.shift()();
+        await wait(50);
+
+        // 3. B shows B's own saved description, not A's draft.
+        await cardClick("B");
+        check(text() === "B saved.", "B shows its own description, not A's draft");
+
+        // 4. Editing in B saves only B's text into B.
+        const editedB = "B saved. B edit.";
+        typeInto(editedB);
+        await until(() => updates.some(item => item.project === "B"), "B's edit autosaves", 300);
+        const bSaves = updates.filter(item => item.project === "B");
+        check(bSaves.length === 1 && bSaves[0].description === editedB, "B's autosave contains only B's text");
+        check(catalogs.B.assets[0].description === editedB, "B's stored description is B's edit");
+        check(catalogs.A.assets[0].description === editedA, "A's released save stayed in A");
+
+        // 5. An unsaved draft in B whose timer fires after switching back to
+        // A stays with B: it never writes into A and is restored in B.
+        const unsavedB = "B saved. B edit. Unsaved tail.";
+        typeInto(unsavedB);
+        await switchTo("A");
+        await wait(1500);
+        check(!updates.some(item => item.project === "A" && item.description === unsavedB),
+            "B's pending draft never writes into A");
+        check(updates.filter(item => item.project === "B").length === 1,
+            "B's pending draft does not save while B is closed");
+        await cardClick("A again");
+        check(text() === editedA, "A shows A's saved text after returning");
+        await switchTo("B");
+        await cardClick("B again");
+        check(text() === unsavedB, "Returning to B restores its unsaved draft");
+        await until(() => catalogs.B.assets[0].description === unsavedB,
+            "B's preserved draft saves once B is open again", 300);
+        check(updates.filter(item => item.project === "A").length === 1,
+            "A received only its own single save throughout");
     } catch (error) { report.failures.push(error.stack || String(error)); }
-    finally { node?.onRemoved?.(); node?.host?.remove(); }
+    finally {
+        for (const item of [node, switchNode]) { item?.onRemoved?.(); item?.host?.remove(); }
+    }
     document.body.setAttribute("data-report", btoa(JSON.stringify(report)));
 }
