@@ -232,8 +232,14 @@ assert.ok(gate < describeBody.indexOf("project-assets/describe"),
     "the media gate must run before the describe request");
 assert.match(describeBody, /allow_media: config\.allow_media === true/);
 assert.doesNotMatch(describeBody, /confirm\(/);
-assert.match(describeBody, /generatedDescriptionAction\(\{\s*requested, saved, live: liveDescription\(asset\),/);
+assert.match(describeBody, /generatedDescriptionAction\(\{\s*requested, saved, live: live \? live\.value : null,/);
 assert.match(describeBody, /expected_description: requested/);
-assert.match(describeBody, /onConflict: \(\) => holdGeneratedDescription\(asset, result\.description\)/);
+assert.match(describeBody, /onConflict: \(\) => holdGeneratedDescription\(asset, operation, result\.description\)/);
+// Description state is scoped by Run + asset ID (duplicated projects reuse
+// asset IDs) and old-Run results are held for their own project.
+assert.match(source, /function descriptionKey\(run, assetId\) \{\s*return `\$\{run\}\\u0000\$\{assetId\}`;/);
+assert.match(describeBody, /const key = descriptionKey\(operation\.run, asset\.id\);/);
+assert.match(describeBody, /if \(!isCurrentProjectOperation\(operation\)\) \{\s*holdGeneratedDescription\(asset, operation, result\.description\);/);
+assert.doesNotMatch(source, /(?:describing|pendingDescriptions|descriptionDrafts|descriptionSaveTimers|descriptionSavesInFlight)\.(?:get|set|has|delete|add)\(asset\.id/);
 
 console.log("H3 Project Asset Carousel: metadata slots, binding, sources, lazy media, editing, and cleanup pass");

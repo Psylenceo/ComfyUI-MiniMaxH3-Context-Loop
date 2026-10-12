@@ -1083,22 +1083,30 @@ function mount(node) {
         const descriptionLabel = el("label", "", "Description");
         descriptionLabel.title = "Details about this asset, saved with it in the project catalog. Type your own, or generate them with the configured Direct API model. Changes save shortly after you stop typing and when you leave the field.";
         const description = el("textarea", "h3pa-description");
+        const key = descriptionKey(operation.run, asset.id);
+        description.dataset.project = operation.run;
         description.dataset.assetId = asset.id;
-        description.value = descriptionDrafts.get(asset.id) ?? String(asset.description ?? "");
         description.placeholder = "Describe this asset, or generate a description…";
+        const draft = descriptionDrafts.get(key);
+        description.value = draft ?? String(asset.description ?? "");
+        // A draft kept from an earlier visit (for example across a Run
+        // switch) is saved again now that its project is current.
+        if (draft !== undefined && normalizedDescription(draft) !== normalizedDescription(asset.description)) {
+            scheduleDescriptionSave(asset, operation);
+        }
         description.addEventListener("input", () => {
-            descriptionDrafts.set(asset.id, description.value);
+            descriptionDrafts.set(key, description.value);
             scheduleDescriptionSave(asset, operation);
         });
         description.addEventListener("change", () => void saveDescriptionDraft(asset, operation));
-        const busy = describing.has(asset.id);
+        const busy = describing.has(key);
         const generate = button(busy ? "Generating…" : "Generate description",
             () => describeAsset(asset, tagType.value, subject?.value ?? "", description.value),
             "Send this asset's media and a tag-type specific instruction to the Direct API model configured in Settings → MiniMax H3 Context Loop → Prompt optimizer. Requires \"Allow Direct API to read reference media\".");
         generate.disabled = busy;
         descriptionLabel.append(description); editor.append(descriptionLabel, generate);
-        const pending = pendingDescriptions.get(asset.id);
-        if (pending) {
+        const pending = pendingDescriptions.get(key);
+        if (pending !== undefined) {
             const review = el("div", "h3pa-description-review");
             review.append(
                 el("strong", "", "Generated description waiting for review"),
@@ -1108,17 +1116,17 @@ function mount(node) {
             const reviewActions = el("div", "h3pa-description-review-actions");
             reviewActions.append(
                 button("Replace description", () => {
-                    pendingDescriptions.delete(asset.id);
-                    clearTimeout(descriptionSaveTimers.get(asset.id));
-                    descriptionSaveTimers.delete(asset.id);
-                    descriptionDrafts.delete(asset.id);
+                    pendingDescriptions.delete(key);
+                    clearTimeout(descriptionSaveTimers.get(key));
+                    descriptionSaveTimers.delete(key);
+                    descriptionDrafts.delete(key);
                     void updateAsset(asset, {description: pending}, {
                         operation,
                         success: `Replaced the description for ${promptTag(asset)}.`,
                     });
                 }, "Save the generated text over the current description"),
                 button("Discard", () => {
-                    pendingDescriptions.delete(asset.id);
+                    pendingDescriptions.delete(key);
                     renderPreservingDescription();
                     setStatus(`Discarded the generated description for ${promptTag(asset)}.`);
                 }, "Keep the current description"),
@@ -1127,44 +1135,55 @@ function mount(node) {
             editor.append(review);
         }
     }
-    function liveDescription(asset) {
-        const field = [...editor.querySelectorAll("textarea.h3pa-description")]
-            .find((item) => item.dataset.assetId === asset.id);
-        return field ? field.value : null;
+    // Description drafts, held results, timers and in-flight saves belong to
+    // one project's asset. Duplicated projects reuse asset IDs, so the Run
+    // is part of every key, and a callback from an earlier Run only ever
+    // touches that Run's own entries.
+    function descriptionKey(run, assetId) {
+        return `${run}\u0000${assetId}`;
+    }
+    function descriptionField(run, assetId) {
+        return [...editor.querySelectorAll("textarea.h3pa-description")]
+            .find((item) => item.dataset.project === run && item.dataset.assetId === assetId) ?? null;
     }
     function normalizedDescription(value) {
         return String(value ?? "").replaceAll("\r\n", "\n").replaceAll("\r", "\n");
     }
     function scheduleDescriptionSave(asset, operation, delay = 1200) {
-        clearTimeout(descriptionSaveTimers.get(asset.id));
-        descriptionSaveTimers.set(asset.id, setTimeout(
+        const key = descriptionKey(operation.run, asset.id);
+        clearTimeout(descriptionSaveTimers.get(key));
+        descriptionSaveTimers.set(key, setTimeout(
             () => void saveDescriptionDraft(asset, operation), delay));
     }
     async function saveDescriptionDraft(asset, operation) {
-        clearTimeout(descriptionSaveTimers.get(asset.id));
-        descriptionSaveTimers.delete(asset.id);
-        if (!descriptionDrafts.has(asset.id)) return;
-        const next = normalizedDescription(descriptionDrafts.get(asset.id));
+        const key = descriptionKey(operation.run, asset.id);
+        clearTimeout(descriptionSaveTimers.get(key));
+        descriptionSaveTimers.delete(key);
+        // After a Run switch the draft stays with its own project and is
+        // saved when that project is open again; it is never compared with,
+        // or written into, the destination's catalog.
+        if (!isCurrentProjectOperation(operation) || !descriptionDrafts.has(key)) return;
+        const next = normalizedDescription(descriptionDrafts.get(key));
         const stored = (state.catalog.assets ?? []).find((item) => item.id === asset.id);
         if (next === normalizedDescription(stored?.description)) {
-            descriptionDrafts.delete(asset.id);
+            descriptionDrafts.delete(key);
             return;
         }
         // A blur right after an autosave started must not send it twice.
-        if (descriptionSavesInFlight.get(asset.id) === next) return;
-        descriptionSavesInFlight.set(asset.id, next);
+        if (descriptionSavesInFlight.get(key) === next) return;
+        descriptionSavesInFlight.set(key, next);
         try {
             const result = await updateAsset(asset, {description: next}, {
                 operation, renderAfter: false,
                 success: `Saved description for ${promptTag(asset)}.`,
             });
-            // Keep a rejected draft for the next edit or blur to retry; drop
-            // it once saved unless the user kept typing meanwhile.
-            if (result && normalizedDescription(descriptionDrafts.get(asset.id)) === next) {
-                descriptionDrafts.delete(asset.id);
+            // Keep a rejected or stale-Run draft for a later retry; drop it
+            // once saved unless the user kept typing meanwhile.
+            if (result && normalizedDescription(descriptionDrafts.get(key)) === next) {
+                descriptionDrafts.delete(key);
             }
         } finally {
-            if (descriptionSavesInFlight.get(asset.id) === next) descriptionSavesInFlight.delete(asset.id);
+            if (descriptionSavesInFlight.get(key) === next) descriptionSavesInFlight.delete(key);
         }
     }
     // Re-render without disturbing someone typing a description: the draft
@@ -1172,25 +1191,26 @@ function mount(node) {
     function renderPreservingDescription() {
         const active = document.activeElement;
         const typing = active?.matches?.("textarea.h3pa-description") && editor.contains(active)
-            ? {id: active.dataset.assetId, start: active.selectionStart,
-                end: active.selectionEnd, scrollTop: active.scrollTop}
+            ? {run: active.dataset.project, id: active.dataset.assetId,
+                start: active.selectionStart, end: active.selectionEnd,
+                scrollTop: active.scrollTop}
             : null;
         render();
         if (!typing) return;
-        const field = [...editor.querySelectorAll("textarea.h3pa-description")]
-            .find((item) => item.dataset.assetId === typing.id);
+        const field = descriptionField(typing.run, typing.id);
         if (!field) return;
         field.focus({preventScroll: true});
         field.setSelectionRange(typing.start, typing.end);
         field.scrollTop = typing.scrollTop;
     }
-    function holdGeneratedDescription(asset, text) {
-        pendingDescriptions.set(asset.id, text);
+    function holdGeneratedDescription(asset, operation, text) {
+        pendingDescriptions.set(descriptionKey(operation.run, asset.id), text);
+        // A result for a Run that is no longer open waits there for review.
+        if (projectDisposed || operation.run !== project()) return;
         renderPreservingDescription();
         setStatus(`The description of ${promptTag(asset)} changed while generating; review the generated text before it replaces yours.`, true);
     }
     async function describeAsset(asset, tagType, subject = "", requested = "") {
-        if (describing.has(asset.id)) return;
         const backend = promptOptimizerBackend();
         if (backend !== "direct") {
             setStatus("Asset descriptions use the Direct API. Set Settings → MiniMax H3 Context Loop → Prompt optimizer backend to Direct API.", true);
@@ -1210,8 +1230,10 @@ function mount(node) {
             return;
         }
         const operation = captureProjectOperation();
-        pendingDescriptions.delete(asset.id);
-        describing.add(asset.id); render();
+        const key = descriptionKey(operation.run, asset.id);
+        if (describing.has(key)) return;
+        pendingDescriptions.delete(key);
+        describing.add(key); render();
         try {
             setStatus(`Generating a description for ${promptTag(asset)}…`);
             const result = await jsonRequest(
@@ -1225,14 +1247,21 @@ function mount(node) {
                         allow_media: config.allow_media === true,
                     }),
                 });
-            requireCurrentProjectOperation(operation);
-            describing.delete(asset.id);
+            describing.delete(key);
+            // The Run changed while generating: keep the result with its own
+            // project for review there instead of judging it against, or
+            // saving it into, the project now open.
+            if (!isCurrentProjectOperation(operation)) {
+                holdGeneratedDescription(asset, operation, result.description);
+                return;
+            }
             const saved = (state.catalog.assets ?? []).find((item) => item.id === asset.id)?.description ?? "";
+            const live = descriptionField(operation.run, asset.id);
             const action = generatedDescriptionAction({
-                requested, saved, live: liveDescription(asset),
+                requested, saved, live: live ? live.value : null,
             });
             if (action === "review") {
-                holdGeneratedDescription(asset, result.description);
+                holdGeneratedDescription(asset, operation, result.description);
                 return;
             }
             // The server re-checks the base text, covering edits saved from
@@ -1242,11 +1271,11 @@ function mount(node) {
             }, {
                 operation,
                 success: `Generated a description for ${promptTag(asset)}.`,
-                onConflict: () => holdGeneratedDescription(asset, result.description),
+                onConflict: () => holdGeneratedDescription(asset, operation, result.description),
             });
         } catch (error) {
-            describing.delete(asset.id);
-            if (error.staleProject) return;
+            describing.delete(key);
+            if (error.staleProject || !isCurrentProjectOperation(operation)) return;
             renderPreservingDescription();
             setStatus(`Description failed: ${error.message}`, true);
         }
